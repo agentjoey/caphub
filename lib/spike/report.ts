@@ -2,16 +2,50 @@ import type { Pool } from "pg";
 import type { Pipeline } from "../config";
 import type { StepName } from "../analysis/steps";
 
+export interface PipelineStat {
+  runs: number; done: number; failed: number; avgDurationMs: number;
+  /** Tokens of every step (ok or not) of runs that reached done/failed, divided by done + failed. */
+  avgTokens: number;
+  /** Totals over all steps with token counts, ok or not. */
+  inputTokens: number; outputTokens: number;
+  /** Part of the totals spent on steps that did not succeed (invalid output, budget, retries). */
+  failedAttemptTokens: number;
+  /** USD for all tokens, or null when a provider with tokens has no price configured. */
+  costUsd: number | null;
+  /** USD per finished (done/failed) run, or null as above. */
+  costPerRunUsd: number | null;
+  stepAvg: Record<ReportedStep, { durationMs: number; tokens: number }>;
+}
+
 export interface SpikeReport {
-  byPipeline: Record<Pipeline, {
-    runs: number; done: number; failed: number; avgDurationMs: number; avgTokens: number;
-    stepAvg: Record<StepName, { durationMs: number; tokens: number }>;
-  }>;
+  byPipeline: Record<Pipeline, PipelineStat>;
   cards: Array<{ captureId: string; pipeline: Pipeline; title: string; type: string; suggested_verdict: string; confidence: number; tags: string[] }>;
 }
 
+/** USD per million tokens, keyed by provider name as recorded in analysis_steps.provider. */
+export type SpikePrices = Record<string, { inPerMillion: number; outPerMillion: number }>;
+
+/** Reads SPIKE_PRICE_<PROVIDER>_IN / _OUT (USD per million tokens); a provider needs both to be priced. */
+export function spikePricesFromEnv(env: Readonly<Record<string, string | undefined>>): SpikePrices {
+  const prices: SpikePrices = {};
+  for (const [key, value] of Object.entries(env)) {
+    const m = /^SPIKE_PRICE_([A-Z0-9]+)_IN$/.exec(key);
+    const out = m ? env[`SPIKE_PRICE_${m[1]}_OUT`] : undefined;
+    if (!m || !value || !out) continue;
+    const inPerMillion = Number(value);
+    const outPerMillion = Number(out);
+    if (!Number.isFinite(inPerMillion) || inPerMillion < 0 || !Number.isFinite(outPerMillion) || outPerMillion < 0) {
+      throw new Error(`SPIKE_PRICE_${m[1]}_IN/_OUT must be non-negative numbers`);
+    }
+    prices[m[1].toLowerCase()] = { inPerMillion, outPerMillion };
+  }
+  return prices;
+}
+
+type ReportedStep = Exclude<StepName, "review">;
 const PIPELINES: Pipeline[] = ["minimax", "mixed"];
-const STEPS: StepName[] = ["vision", "search", "reason", "review"];
+// review is a manual, per-capability action outside the A/B runs, so it never has spike data.
+const STEPS: ReportedStep[] = ["vision", "search", "reason"];
 
 /**
  * Enqueues one 'queued' analysis_runs row per (import capture, pipeline) pair, for
@@ -39,10 +73,10 @@ export async function enqueueSpikeRuns(pool: Pick<Pool, "query">, pipelines: Pip
   return n;
 }
 
-function emptyPipelineStat(): SpikeReport["byPipeline"][Pipeline] {
+function emptyPipelineStat(): PipelineStat {
   return {
-    runs: 0, done: 0, failed: 0, avgDurationMs: 0, avgTokens: 0,
-    stepAvg: { vision: { durationMs: 0, tokens: 0 }, search: { durationMs: 0, tokens: 0 }, reason: { durationMs: 0, tokens: 0 }, review: { durationMs: 0, tokens: 0 } }
+    runs: 0, done: 0, failed: 0, avgDurationMs: 0, avgTokens: 0, inputTokens: 0, outputTokens: 0, failedAttemptTokens: 0, costUsd: 0, costPerRunUsd: null,
+    stepAvg: { vision: { durationMs: 0, tokens: 0 }, search: { durationMs: 0, tokens: 0 }, reason: { durationMs: 0, tokens: 0 } }
   };
 }
 
@@ -56,7 +90,7 @@ function emptyPipelineStat(): SpikeReport["byPipeline"][Pipeline] {
  * (the parsed capability card, recorded by runStructured/recordStep) keeps both
  * pipelines' cards distinct, keyed by (capture, pipeline).
  */
-export async function buildSpikeReport(pool: Pick<Pool, "query">): Promise<SpikeReport> {
+export async function buildSpikeReport(pool: Pick<Pool, "query">, prices: SpikePrices = {}): Promise<SpikeReport> {
   const runs = (await pool.query<{ pipeline: Pipeline; runs: string; done: string; failed: string; avg_ms: string | null }>(
     `SELECT r.pipeline, count(*)::text AS runs,
             count(*) FILTER (WHERE r.state = 'done')::text AS done,
@@ -77,19 +111,18 @@ export async function buildSpikeReport(pool: Pick<Pool, "query">): Promise<Spike
      WHERE c.source = 'import' AND s.ok
      GROUP BY r.pipeline, s.step`)).rows;
 
-  // Total tokens of ok steps per pipeline, divided below by that pipeline's done-run
-  // count. This (not a sum of the per-step averages above) is the report's "avg tokens
-  // per run" figure: summing per-step averages double counts, since a run's reason step
-  // can retry (attempt 1 failing INVALID_OUTPUT, attempt 2 ok) and search can be a
-  // no-op with 0 tokens, so per-step averages are not directly additive into a
-  // per-run total.
-  const tokenTotals = (await pool.query<{ pipeline: Pipeline; total_tokens: string }>(
-    `SELECT r.pipeline, sum(coalesce(s.input_tokens, 0) + coalesce(s.output_tokens, 0))::text AS total_tokens
+  // Token usage of every step with token counts (ok or not), split so the report can show
+  // totals, failed-attempt spend, the per-finished-run average and a per-provider cost.
+  // Summing per-step averages instead would double count reason retries and search no-ops.
+  const usage = (await pool.query<{ pipeline: Pipeline; provider: string; finished: boolean; ok: boolean; input_tokens: string; output_tokens: string }>(
+    `SELECT r.pipeline, s.provider, r.state IN ('done', 'failed') AS finished, s.ok,
+            sum(coalesce(s.input_tokens, 0))::text AS input_tokens,
+            sum(coalesce(s.output_tokens, 0))::text AS output_tokens
      FROM caphub_v2.analysis_steps s
      JOIN caphub_v2.analysis_runs r ON r.id = s.run_id
      JOIN caphub_v2.captures c ON c.id = r.capture_id
-     WHERE c.source = 'import' AND s.ok
-     GROUP BY r.pipeline`)).rows;
+     WHERE c.source = 'import' AND (s.input_tokens IS NOT NULL OR s.output_tokens IS NOT NULL)
+     GROUP BY r.pipeline, s.provider, finished, s.ok`)).rows;
 
   const cards = (await pool.query<SpikeReport["cards"][number]>(
     `SELECT DISTINCT ON (r.capture_id, r.pipeline)
@@ -109,22 +142,50 @@ export async function buildSpikeReport(pool: Pick<Pool, "query">): Promise<Spike
   for (const r of runs) {
     byPipeline[r.pipeline] = { ...byPipeline[r.pipeline], runs: +r.runs, done: +r.done, failed: +r.failed, avgDurationMs: Math.round(+(r.avg_ms ?? 0)) };
   }
-  for (const s of steps) byPipeline[s.pipeline].stepAvg[s.step] = { durationMs: Math.round(+s.avg_ms), tokens: Math.round(+s.avg_tokens) };
-  for (const t of tokenTotals) {
-    const done = byPipeline[t.pipeline].done;
-    byPipeline[t.pipeline].avgTokens = done > 0 ? Math.round(+t.total_tokens / done) : 0;
+  for (const s of steps) {
+    if (s.step !== "review") byPipeline[s.pipeline].stepAvg[s.step] = { durationMs: Math.round(+s.avg_ms), tokens: Math.round(+s.avg_tokens) };
+  }
+  for (const p of PIPELINES) {
+    const x = byPipeline[p];
+    const rows = usage.filter((u) => u.pipeline === p).map((u) => ({ ...u, input: +u.input_tokens, output: +u.output_tokens }));
+    const cost = (subset: typeof rows): number | null => {
+      let usd = 0;
+      for (const u of subset) {
+        if (u.input + u.output === 0) continue;
+        const price = prices[u.provider];
+        if (!price) return null;
+        usd += (u.input * price.inPerMillion + u.output * price.outPerMillion) / 1_000_000;
+      }
+      return usd;
+    };
+    const finishedRows = rows.filter((u) => u.finished);
+    const finishedRuns = x.done + x.failed;
+    x.inputTokens = rows.reduce((n, u) => n + u.input, 0);
+    x.outputTokens = rows.reduce((n, u) => n + u.output, 0);
+    x.failedAttemptTokens = rows.filter((u) => !u.ok).reduce((n, u) => n + u.input + u.output, 0);
+    x.avgTokens = finishedRuns > 0 ? Math.round(finishedRows.reduce((n, u) => n + u.input + u.output, 0) / finishedRuns) : 0;
+    x.costUsd = cost(rows);
+    const finishedCost = cost(finishedRows);
+    x.costPerRunUsd = finishedRuns > 0 && finishedCost !== null ? finishedCost / finishedRuns : null;
   }
 
   return { byPipeline, cards };
 }
 
+const usd = (v: number | null) => (v === null ? "n/a" : `$${v.toFixed(4)}`);
+
 export function renderSpikeMarkdown(r: SpikeReport): string {
-  const lines = ["# A/B spike 结果", "", "| pipeline | runs | done | failed | 平均耗时 | 平均 tokens |", "|---|---|---|---|---|---|"];
+  const lines = [
+    "# A/B spike 结果", "",
+    "| pipeline | runs | done | failed | 平均耗时 | 平均 tokens/run | 输入 tokens | 输出 tokens | 失败尝试 tokens | 成本 (USD) | 成本/run (USD) |",
+    "|---|---|---|---|---|---|---|---|---|---|---|"
+  ];
   for (const p of PIPELINES) {
     const x = r.byPipeline[p];
-    lines.push(`| ${p} | ${x.runs} | ${x.done} | ${x.failed} | ${(x.avgDurationMs / 1000).toFixed(1)} s | ${x.avgTokens} |`);
+    lines.push(`| ${p} | ${x.runs} | ${x.done} | ${x.failed} | ${(x.avgDurationMs / 1000).toFixed(1)} s | ${x.avgTokens} | ${x.inputTokens} | ${x.outputTokens} | ${x.failedAttemptTokens} | ${usd(x.costUsd)} | ${usd(x.costPerRunUsd)} |`);
   }
-  lines.push("", "## 分步平均", "", "| pipeline | step | 耗时 | tokens |", "|---|---|---|---|");
+  lines.push("", "平均 tokens/run 与成本/run 按到达 done 或 failed 的 run 计（含失败尝试）；成本按 SPIKE_PRICE_<PROVIDER>_IN/_OUT（USD / 百万 token）计算，未配置则为 n/a。");
+  lines.push("", "## 分步平均（成功步骤）", "", "| pipeline | step | 耗时 | tokens |", "|---|---|---|---|");
   for (const p of PIPELINES) for (const s of STEPS) {
     lines.push(`| ${p} | ${s} | ${(r.byPipeline[p].stepAvg[s].durationMs / 1000).toFixed(1)} s | ${r.byPipeline[p].stepAvg[s].tokens} |`);
   }
