@@ -385,3 +385,22 @@ body {
   .list-row > :last-child { grid-column: 2; }
   .thumb { width: 44px; height: 44px; }
 }
+
+/* Review card + capture preview */
+.review-card { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 16px; }
+.review-card .thumb { width: 72px; height: 72px; }
+.card-title { font-size: 17px; font-weight: 650; letter-spacing: -0.015em; }
+.card-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.card-suggestion { margin-top: 10px; color: var(--ink-muted); font-size: 13.5px; }
+.card-summary { margin-top: 6px; font-size: 14px; }
+.card-signals { margin-top: 8px; padding-left: 18px; list-style: disc; color: var(--ink-muted); font-size: 13px; }
+.card-signals li + li { margin-top: 2px; }
+.review-card .tag-list { margin-top: 10px; }
+@media (max-width: 600px) {
+  .review-card { grid-template-columns: minmax(0, 1fr); }
+  .review-card .thumb { width: 56px; height: 56px; }
+}
+
+.capture-full { max-width: 100%; max-height: 560px; object-fit: contain; border-radius: var(--radius-md); border: 1px solid var(--hairline); }
+.capture-text { padding: 12px 14px; color: var(--ink-muted); background: var(--paper-recessed); border-left: 3px solid var(--hairline-strong); border-radius: var(--radius-sm); font-size: 13.5px; }
+.capture-url { color: var(--ink); text-decoration: underline; word-break: break-all; }

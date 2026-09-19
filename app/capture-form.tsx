@@ -5,9 +5,14 @@ import { useRouter } from "next/navigation";
 
 const ACCEPTED_MIME = new Set(["image/png", "image/jpeg", "image/webp"]);
 
+function formatBytes(bytes: number) {
+  return bytes < 1024 * 1024 ? `${Math.max(1, Math.ceil(bytes / 1024))} KiB` : `${Number((bytes / 1024 / 1024).toFixed(2))} MiB`;
+}
+
 export function CaptureForm() {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
+  const [sourceUrl, setSourceUrl] = useState("");
   const [text, setText] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,15 +50,18 @@ export function CaptureForm() {
     if (pastedText) setText((current) => current || pastedText);
   }
 
+  const bothFilled = sourceUrl.trim().length > 0 && text.trim().length > 0;
+  const hasContent = !!file || sourceUrl.trim().length > 0 || text.trim().length > 0;
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (pending || (!file && !text.trim())) return;
+    if (pending || !hasContent || (!file && bothFilled)) return;
     setPending(true);
     setError(null);
     try {
       const body = new FormData();
       if (file) body.set("file", file);
-      else body.set("text", text.trim());
+      else body.set("text", (sourceUrl || text).trim());
       const response = await fetch("/api/captures", { method: "POST", body });
       const payload = (await response.json()) as { error?: string };
       if (!response.ok) {
@@ -61,6 +69,7 @@ export function CaptureForm() {
         return;
       }
       setFile(null);
+      setSourceUrl("");
       setText("");
       if (inputRef.current) inputRef.current.value = "";
       router.refresh();
@@ -71,73 +80,70 @@ export function CaptureForm() {
     }
   }
 
+  const submitLabel = pending ? "投递中…" : hasContent ? (bothFilled && !file ? "链接和文字请只填一项" : "投递") : "选择图片或填写内容后投递";
+  const submitDisabled = pending || !hasContent || (!file && bothFilled);
+
   return (
-    <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div
-        onDragOver={(event) => event.preventDefault()}
-        onDrop={handleDrop}
-        onPaste={handlePaste}
-        style={{
-          border: `1px dashed var(--hairline-strong)`,
-          borderRadius: "var(--radius-lg)",
-          padding: 16,
-          background: "var(--paper-raised)",
-          cursor: "pointer"
-        }}
-        onClick={() => inputRef.current?.click()}
-      >
-        {file ? (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-            {file.name} · {file.type}
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                clearFile();
-              }}
-              style={{
-                border: `1px solid var(--hairline-strong)`,
-                borderRadius: "var(--radius-sm)",
-                background: "var(--paper)",
-                color: "var(--ink-muted)",
-                padding: "2px 8px",
-                cursor: "pointer"
-              }}
-            >
-              清除图片
-            </button>
-          </span>
-        ) : (
-          <span>拖拽、粘贴或点击选择图片（PNG/JPEG/WebP）</span>
-        )}
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/png,image/jpeg,image/webp"
-          hidden
-          onChange={(event) => chooseFile(event.currentTarget.files?.[0])}
-        />
-      </div>
-      <textarea
-        value={text}
-        onChange={(event) => setText(event.target.value)}
-        onPaste={handlePaste}
-        placeholder="或粘贴/输入文字或 URL"
-        disabled={!!file}
-        rows={3}
-        style={{
-          border: `1px solid var(--hairline)`,
-          borderRadius: "var(--radius-md)",
-          padding: 8,
-          background: "var(--paper-raised)",
-          color: "var(--ink)",
-          fontFamily: "inherit"
-        }}
-      />
-      {error && <p style={{ color: "var(--rust)" }}>{error}</p>}
-      <button type="submit" disabled={pending || (!file && !text.trim())}>
-        {pending ? "投递中…" : "投递"}
-      </button>
-    </form>
+    <>
+      <form className="caphub-workbench" aria-label="投递一个能力" aria-busy={pending} onSubmit={handleSubmit} noValidate>
+        <section className="caphub-evidence-panel" aria-labelledby="capture-evidence-title">
+          <div className="caphub-section-heading"><h2 id="capture-evidence-title">截图</h2><span>一张图片 · 最大 10 MB</span></div>
+          <input ref={inputRef} id="capture-image" aria-label="截图文件" type="file" accept="image/png,image/jpeg,image/webp" hidden
+            disabled={pending} onChange={(event) => chooseFile(event.currentTarget.files?.[0])} />
+          <div className="caphub-drop-zone" role="group" aria-label="截图拖放区"
+            onDragOver={(event) => event.preventDefault()} onDrop={handleDrop} onPaste={handlePaste}>
+            {file ? (
+              <div className="caphub-selected-file">
+                <span className="caphub-file-mark" aria-hidden="true">{file.type.split("/")[1].toUpperCase()}</span>
+                <div><strong>{file.name}</strong><small>{file.type} · {formatBytes(file.size)}</small></div>
+                <button className="caphub-quiet-button" type="button" onClick={clearFile} disabled={pending}>清除图片</button>
+              </div>
+            ) : (
+              <div className="caphub-drop-content">
+                <span className="caphub-upload-mark" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="17 8 12 3 7 8" />
+                    <line x1="12" y1="3" x2="12" y2="15" />
+                  </svg>
+                </span>
+                <span className="caphub-promise">投递 → 分析 → 建档</span>
+                <h3>把截图拖到这里</h3>
+                <p>支持 PNG、JPEG、WebP，也可以直接粘贴。同一张图不会重复分析。</p>
+                <button className="caphub-quiet-button" type="button" onClick={() => inputRef.current?.click()} disabled={pending}>选择图片</button>
+              </div>
+            )}
+            {error && <p className="caphub-inline-error" role="alert">{error}</p>}
+          </div>
+        </section>
+        <section className="caphub-context-panel" aria-labelledby="capture-context-title">
+          <div className="caphub-section-heading">
+            <h2 id="capture-context-title">文字或链接</h2>
+            <span>{file ? "本次投递图片" : "不传图时使用"}</span>
+          </div>
+          <div className="caphub-field">
+            <label htmlFor="capture-source">链接 <span>仅 HTTPS</span></label>
+            <input id="capture-source" type="text" inputMode="url" placeholder="https://github.com/…" value={sourceUrl}
+              disabled={pending || !!file} onChange={(event) => setSourceUrl(event.target.value)} />
+            <p>一个能力的网页、仓库或文章地址。</p>
+          </div>
+          <div className="caphub-field">
+            <label htmlFor="capture-text">文字 <span>{text.length.toLocaleString("en-US")} / 4,000</span></label>
+            <textarea id="capture-text" maxLength={4000} placeholder="粘贴一段 prompt、经验或说明……" value={text}
+              disabled={pending || !!file} onChange={(event) => setText(event.target.value)} onPaste={handlePaste} />
+          </div>
+          <button className="caphub-submit" type="submit" disabled={submitDisabled}>
+            {pending && <span className="caphub-spinner" aria-hidden="true" />}{submitLabel}
+          </button>
+        </section>
+      </form>
+      <section className="caphub-custody" aria-label="投递说明">
+        <div>
+          <strong>投递一次，在这里跟进分析。</strong>
+          <p>原图在 30 天后清除，分析结果与卡片保留。把握大的结论会自动执行。</p>
+        </div>
+        <span className="caphub-custody__state">拿不准的进 Review</span>
+      </section>
+    </>
   );
 }

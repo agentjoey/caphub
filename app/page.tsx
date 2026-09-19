@@ -1,27 +1,37 @@
+import Link from "next/link";
 import { listRecentCaptures } from "../lib/captures/captures";
+import { libraryStats } from "../lib/library/queries";
 import { getRuntime } from "../lib/runtime";
 import { CaptureForm } from "./capture-form";
+import { RecentRow } from "./recent-row";
 
 export const dynamic = "force-dynamic";
 
-const LABEL: Record<string, string> = { queued: "排队中", running: "分析中", done: "已建卡", failed: "失败" };
-
 export default async function Page() {
-  const items = await listRecentCaptures(getRuntime().pool);
+  const { pool } = getRuntime();
+  const [items, stats] = await Promise.all([listRecentCaptures(pool), libraryStats(pool)]);
   return (
-    <div>
-      <h1>投递</h1>
+    <div className="caphub-page">
+      <section className="caphub-intro">
+        <div>
+          <h1>投递一个能力。</h1>
+          <p>上传截图、文字或链接，跟进分析并决定是否建档。</p>
+        </div>
+        <Link className="caphub-quiet-button" href="/review">去 Review（{stats.pending}）</Link>
+      </section>
       <CaptureForm />
-      <h2>最近 20 条</h2>
-      <ul>
-        {items.map((c) => (
-          <li key={c.id}>
-            <code>{c.id}</code> · {c.kind} · {c.runState ? LABEL[c.runState] : "—"}
-            {c.errorCode ? ` (${c.errorCode})` : ""}
-            {c.capabilityId ? ` → ${c.capabilityId}` : ""}
-          </li>
-        ))}
-      </ul>
+      <section className="recent">
+        <div className="caphub-section-heading"><h2>最近投递</h2><span>最近 20 条</span></div>
+        {items.length === 0 ? (
+          <p className="empty">还没有投递。</p>
+        ) : (
+          <ul className="list">
+            {items.map((item) => (
+              <li key={item.id}><RecentRow item={item} /></li>
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }
