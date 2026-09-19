@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { submitCapture } from "./captures";
+import { submitCapture, listRecentCaptures } from "./captures";
 
 function fakePool(existing: { id: string } | null) {
   const queries: Array<{ text: string; values: unknown[] }> = [];
@@ -53,5 +53,23 @@ describe("submitCapture", () => {
     const { pool, queries } = fakePool(null);
     await submitCapture({ pool, objects, pipeline: "minimax" }, { source: "web", kind: "text", text: "hi" });
     expect(queries.some((q) => q.text.includes("caphub_v2.retention"))).toBe(false);
+  });
+});
+
+describe("listRecentCaptures", () => {
+  it("selects capture and capability preview fields", async () => {
+    const row = {
+      id: "cap_1", kind: "text", createdAt: "2026-09-19T00:00:00.000Z", runState: "done",
+      capabilityId: "cab_1", errorCode: null, objectKey: null, text: "hello", url: null,
+      title: "Some capability", verdict: "keep", deleted: false
+    };
+    let queryText = "";
+    const pool = { query: async (text: string) => { queryText = text; return { rows: [row] }; } } as never;
+    const out = await listRecentCaptures(pool, 20);
+    expect(out).toEqual([row]);
+    expect(queryText).toContain('c.object_key AS "objectKey"');
+    expect(queryText).toContain('left(c.text, 140) AS text');
+    expect(queryText).toContain("c.url, cb.title, cb.verdict");
+    expect(queryText).toContain('(cb.deleted_at IS NOT NULL) AS deleted');
   });
 });

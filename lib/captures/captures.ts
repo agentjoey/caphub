@@ -61,11 +61,14 @@ export interface RecentCapture {
   id: string; kind: "image" | "text" | "url"; createdAt: string;
   runState: "queued" | "running" | "done" | "failed" | null;
   capabilityId: string | null; errorCode: string | null;
+  objectKey: string | null; text: string | null; url: string | null;
+  title: string | null; verdict: "keep" | "discard" | "pending" | null; deleted: boolean;
 }
 
 export async function listRecentCaptures(pool: Pool, limit = 20): Promise<RecentCapture[]> {
   const { rows } = await pool.query<RecentCapture>(
-    `SELECT c.id, c.kind, c.created_at AS "createdAt", r.state AS "runState", cb.id AS "capabilityId", r.error_code AS "errorCode"
+    `SELECT c.id, c.kind, c.created_at AS "createdAt", r.state AS "runState", cb.id AS "capabilityId", r.error_code AS "errorCode",
+            c.object_key AS "objectKey", left(c.text, 140) AS text, c.url, cb.title, cb.verdict, (cb.deleted_at IS NOT NULL) AS deleted
      FROM caphub_v2.captures c
      LEFT JOIN LATERAL (SELECT state, error_code FROM caphub_v2.analysis_runs WHERE capture_id = c.id ORDER BY created_at DESC LIMIT 1) r ON true
      LEFT JOIN caphub_v2.capabilities cb ON cb.capture_id = c.id
