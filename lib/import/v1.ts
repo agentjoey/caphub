@@ -6,6 +6,8 @@ import type { ImageMime, ObjectStore } from "../storage/s3";
 
 interface V1Row { record_id: string; payload: { object?: { key?: string }; mime_type?: string } }
 
+const OBJECT_KEY_RE = /^sha256\/[a-f0-9]{2}\/[a-f0-9]{64}$/;
+
 export async function importV1Captures(
   deps: { pool: Pool; objects: ObjectStore; pipeline: Pipeline; submit?: (input: CaptureInput) => Promise<SubmitResult> },
   opts: { dryRun: boolean }
@@ -20,10 +22,15 @@ export async function importV1Captures(
     const key = row.payload.object?.key;
     const mime = row.payload.mime_type as ImageMime | undefined;
     if (!key || !mime || !["image/png", "image/jpeg", "image/webp"].includes(mime)) { out.push({ v1Id: row.record_id, captureId: null, duplicate: false, skipped: "no image object" }); continue; }
+    if (!OBJECT_KEY_RE.test(key)) { out.push({ v1Id: row.record_id, captureId: null, duplicate: false, skipped: "invalid object key" }); continue; }
     if (opts.dryRun) { out.push({ v1Id: row.record_id, captureId: null, duplicate: false, skipped: "dry-run" }); continue; }
     let bytes: Uint8Array;
     try { bytes = await deps.objects.get({ key, digest: key.split("/")[2], bytes: 0 }); }
-    catch { out.push({ v1Id: row.record_id, captureId: null, duplicate: false, skipped: "object unreadable" }); continue; }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      out.push({ v1Id: row.record_id, captureId: null, duplicate: false, skipped: `object unreadable: ${message.slice(0, 200)}` });
+      continue;
+    }
     const r = await submit({ source: "import", kind: "image", bytes, mimeType: mime });
     out.push({ v1Id: row.record_id, captureId: r.captureId, duplicate: r.duplicate });
   }
