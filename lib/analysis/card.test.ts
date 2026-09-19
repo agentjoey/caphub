@@ -21,4 +21,32 @@ describe("cardSchema", () => {
   it("requires 2-3 signals", () => {
     expect(() => cardSchema.parse({ ...valid, signals: ["one"] })).toThrow();
   });
+  it("enforces usage ↔ playbook.kind for non-experience types", () => {
+    expect(() => cardSchema.parse({
+      ...valid,
+      usage: "integrate",
+      playbook: { kind: "reference", points: ["a"] }
+    })).toThrow(/integrate/);
+  });
+  it("allows usage reference with reference playbook (type skill)", () => {
+    expect(cardSchema.parse({
+      ...valid,
+      usage: "reference",
+      playbook: { kind: "reference", points: ["point 1"] }
+    }).usage).toBe("reference");
+  });
+  it("allows experience type with usage reference", () => {
+    expect(cardSchema.parse({
+      ...valid,
+      type: "experience",
+      usage: "reference",
+      playbook: { kind: "experience", content: "test content", when_to_use: "test when" }
+    }).usage).toBe("reference");
+  });
+  it("allows repo as owner/repo format in integrate playbook", () => {
+    expect(cardSchema.parse({
+      ...valid,
+      playbook: { kind: "integrate", install: ["npm i"], repo: "owner/repo", prompt_text: null }
+    }).playbook).toMatchObject({ kind: "integrate", repo: "owner/repo" });
+  });
 });

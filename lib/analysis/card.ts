@@ -25,7 +25,7 @@ export const searchResultSchema = z.object({
 export type SearchResult = z.infer<typeof searchResultSchema>;
 
 export const playbookSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("integrate"), install: z.array(z.string().max(500)).max(10), repo: z.string().url().nullable(), prompt_text: z.string().max(8000).nullable() }),
+  z.object({ kind: z.literal("integrate"), install: z.array(z.string().max(500)).max(10), repo: z.string().min(1).max(300).nullable(), prompt_text: z.string().max(8000).nullable() }),
   z.object({ kind: z.literal("reference"), points: z.array(z.string().max(300)).min(1).max(10) }),
   z.object({ kind: z.literal("experience"), content: z.string().min(1).max(8000), when_to_use: z.string().max(300) })
 ]);
@@ -49,6 +49,14 @@ export const cardSchema = z.object({
   }
   if (card.type !== "experience" && card.playbook.kind === "experience") {
     ctx.addIssue({ code: "custom", path: ["playbook"], message: "experience playbook requires experience type" });
+  }
+  if (card.type !== "experience") {
+    if (card.usage === "integrate" && card.playbook.kind !== "integrate") {
+      ctx.addIssue({ code: "custom", path: ["playbook"], message: "integrate usage requires integrate playbook" });
+    }
+    if (card.usage === "reference" && card.playbook.kind !== "reference") {
+      ctx.addIssue({ code: "custom", path: ["playbook"], message: "reference usage requires reference playbook" });
+    }
   }
 });
 export type Card = z.infer<typeof cardSchema>;
