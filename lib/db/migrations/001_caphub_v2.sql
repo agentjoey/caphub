@@ -52,6 +52,8 @@ CREATE TABLE caphub_v2.analysis_steps (
 );
 CREATE INDEX analysis_steps_run ON caphub_v2.analysis_steps(run_id, id);
 
+CREATE FUNCTION caphub_v2.capability_search_text(title text, summary text, tags text[], playbook jsonb) RETURNS text LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$ SELECT coalesce(title,'') || ' ' || coalesce(summary,'') || ' ' || coalesce(array_to_string(tags,' '),'') || ' ' || coalesce(playbook::text,'') $$;
+
 CREATE TABLE caphub_v2.capabilities (
   id text PRIMARY KEY,
   capture_id text NOT NULL UNIQUE REFERENCES caphub_v2.captures(id) ON DELETE CASCADE,
@@ -77,7 +79,7 @@ CREATE TABLE caphub_v2.capabilities (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   search tsvector GENERATED ALWAYS AS (
-    to_tsvector('simple', coalesce(title,'') || ' ' || coalesce(summary,'') || ' ' || array_to_string(tags,' ') || ' ' || coalesce(playbook::text,''))
+    to_tsvector('simple'::regconfig, caphub_v2.capability_search_text(title, summary, tags, playbook))
   ) STORED
 );
 CREATE INDEX capabilities_verdict ON caphub_v2.capabilities(verdict, created_at DESC) WHERE deleted_at IS NULL;
