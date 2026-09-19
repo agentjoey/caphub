@@ -12,8 +12,8 @@ Service settings live in Railway (Config as Code is deprecated for new services)
 
 | Service | Dockerfile | Port | Region | Replicas | Sleeping |
 |---|---|---|---|---|---|
-| `web` | `Dockerfile.web` (default `railway.json`, `RAILWAY_DOCKERFILE_PATH` not needed) | `$PORT` (Next.js `start` script binds `-H 0.0.0.0 -p ${PORT:-3000}`) | Singapore (Asia Southeast) | 1 | on (if plan supports app sleeping) |
-| `worker` | `Dockerfile.worker` (override `dockerfilePath`/`RAILWAY_DOCKERFILE_PATH` to `Dockerfile.worker` in the service's build settings, since `railway.json` defaults to `Dockerfile.web`) | none (background daemon, `npx tsx scripts/worker.ts --daemon`) | Singapore (Asia Southeast) | 1 | off (must stay running to poll the queue) |
+| `web` | `Dockerfile.web` (service setting) | `$PORT` (Next.js `start` script binds `-H 0.0.0.0 -p ${PORT:-3000}`) | Singapore (Asia Southeast) | 1 | on (if plan supports app sleeping) |
+| `worker` | `Dockerfile.worker` (service setting) | none (background daemon, `npx tsx scripts/worker.ts --daemon`) | Singapore (Asia Southeast) | 1 | off (must stay running to poll the queue) |
 
 Both services build from the same `node:24-slim` base images. Image builds are not verified locally on
 this machine (Docker is not installed here); the Dockerfiles are verified indirectly — `npm ci` and
