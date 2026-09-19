@@ -1,18 +1,51 @@
 import { describe, expect, it } from "vitest";
 import { reviewCapability } from "./review";
 
+function makePool(rows: { run_id?: string; card?: unknown; reason_output?: unknown } | null) {
+  const sql: Array<{ text: string; values: unknown[] }> = [];
+  const pool = { query: async (text: string, values: unknown[] = []) => {
+    sql.push({ text, values });
+    if (text.startsWith("SELECT cb.run_id")) return { rows: rows ? [rows] : [] };
+    return { rows: [] };
+  } } as never;
+  return { pool, sql };
+}
+
 describe("reviewCapability", () => {
   it("stores review note without touching verdict", async () => {
-    const sql: Array<{ text: string; values: unknown[] }> = [];
-    const pool = { query: async (text: string, values: unknown[] = []) => {
-      sql.push({ text, values });
-      if (text.startsWith("SELECT cb.run_id")) return { rows: [{ run_id: "run_1", card: { title: "t" }, reason_output: { title: "t" } }] };
-      return { rows: [] };
-    } } as never;
+    const { pool, sql } = makePool({ run_id: "run_1", card: { title: "t" }, reason_output: { title: "t" } });
     const call = { provider: "deepseek", model: "d", invoke: async () => ({ value: { agrees: false, points: ["p"] }, usage: { inputTokens: 1, outputTokens: 1 } }) };
     const note = await reviewCapability({ pool, call }, "cab_1", new AbortController().signal);
     expect(note).toEqual({ agrees: false, points: ["p"] });
     const update = sql.find((q) => q.text.startsWith("UPDATE caphub_v2.capabilities SET review_note"))!;
     expect(update.text).not.toMatch(/verdict/);
+  });
+
+  it("throws CAPABILITY_NOT_FOUND when the capability row is missing", async () => {
+    const { pool } = makePool(null);
+    const call = { provider: "deepseek", model: "d", invoke: async () => { throw new Error("should not be called"); } };
+    await expect(reviewCapability({ pool, call }, "cab_missing", new AbortController().signal))
+      .rejects.toMatchObject({ code: "CAPABILITY_NOT_FOUND" });
+  });
+
+  it("throws REASON_STEP_NOT_FOUND when there is no ok reason step, without calling the model", async () => {
+    const { pool } = makePool({ run_id: "run_1", card: { title: "t" }, reason_output: null });
+    let called = false;
+    const call = { provider: "deepseek", model: "d", invoke: async () => { called = true; return { value: { agrees: true, points: [] }, usage: { inputTokens: 1, outputTokens: 1 } }; } };
+    await expect(reviewCapability({ pool, call }, "cab_1", new AbortController().signal))
+      .rejects.toMatchObject({ code: "REASON_STEP_NOT_FOUND" });
+    expect(called).toBe(false);
+  });
+
+  it("sends only the whitelisted card fields to the model, never verdict/internal fields", async () => {
+    const { pool } = makePool({ run_id: "run_1", card: { title: "t" }, reason_output: { title: "t" } });
+    let seenPrompt = "";
+    const call = { provider: "deepseek", model: "d", invoke: async (input: { prompt: string }) => {
+      seenPrompt = input.prompt;
+      return { value: { agrees: true, points: [] }, usage: { inputTokens: 1, outputTokens: 1 } };
+    } };
+    await reviewCapability({ pool, call }, "cab_1", new AbortController().signal);
+    expect(seenPrompt).not.toMatch(/verdict_by/);
+    expect(seenPrompt).not.toMatch(/notified_at/);
   });
 });
