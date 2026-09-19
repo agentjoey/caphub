@@ -416,6 +416,7 @@ body {
 .review-item[data-state="done"] { opacity: .55; }
 .review-item__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
 .review-item[data-state="stale"] .review-item__actions { opacity: .5; pointer-events: none; }
+.review-item[data-state="stale"] .suggestion-editor, .review-item[data-state="done"] .suggestion-editor { opacity: .5; pointer-events: none; }
 .review-item__message { margin-top: 10px; }
 .review-item__done { margin-top: 14px; font-weight: 600; }
 

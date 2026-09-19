@@ -80,4 +80,47 @@ describe("ReviewCard", () => {
     await waitFor(() => expect(screen.getByText("已保留")).toBeTruthy());
     expect(editSuggestionAction).toHaveBeenLastCalledWith("cab_1", "2026-09-19T00:00:00.000Z", "skill", "integrate", ["rag", "python"]);
   });
+
+  it("does not send a decide() while an edit save is pending", async () => {
+    let resolveEdit!: (r: ActionResult) => void;
+    editSuggestionAction.mockImplementationOnce(() => new Promise((resolve) => { resolveEdit = resolve; }));
+    render(<ReviewCard row={row as never} detail={detail as never} />);
+    fireEvent.click(screen.getByRole("button", { name: "改建议" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存并保留" }));
+
+    // The save is in flight: 保留/丢弃/改建议 must already be disabled, so this click is a no-op.
+    fireEvent.click(screen.getByRole("button", { name: "保留" }));
+    expect(decideAction).not.toHaveBeenCalled();
+
+    resolveEdit({ ok: true, updatedAt: "2026-09-19T00:03:00.000Z" });
+    await waitFor(() => expect(screen.getByText("已保留")).toBeTruthy());
+  });
+
+  it("greys out and disables the open editor (not only the action row) when its own save conflicts", async () => {
+    let resolveEdit!: (r: ActionResult) => void;
+    editSuggestionAction.mockImplementationOnce(() => new Promise((resolve) => { resolveEdit = resolve; }));
+    const { container } = render(<ReviewCard row={row as never} detail={detail as never} />);
+    fireEvent.click(screen.getByRole("button", { name: "改建议" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存并保留" }));
+
+    resolveEdit({ ok: false, reason: "CONFLICT", message: "已在别处处理" });
+    await waitFor(() => expect(screen.getByText("已在别处处理")).toBeTruthy());
+
+    expect(container.querySelector("[data-state='stale']")).toBeTruthy();
+    const select = screen.getByLabelText("类型") as HTMLSelectElement;
+    const tagsInput = screen.getByLabelText("标签") as HTMLInputElement;
+    const saveButton = screen.getByRole("button", { name: "保存并保留" });
+    expect(select.disabled).toBe(true);
+    expect(tagsInput.disabled).toBe(true);
+    expect((saveButton as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("wires the tag hint to the tags input via aria-describedby", () => {
+    render(<ReviewCard row={row as never} detail={detail as never} />);
+    fireEvent.click(screen.getByRole("button", { name: "改建议" }));
+    const tagsInput = screen.getByLabelText("标签");
+    const describedBy = tagsInput.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy!)?.textContent).toBe("英文小写，可用连字符，1–6 个");
+  });
 });

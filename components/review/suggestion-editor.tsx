@@ -23,19 +23,20 @@ export function SuggestionEditor({
   const [type, setType] = useState<CapabilityType>(initialType);
   const [usage, setUsage] = useState<"integrate" | "reference">(initialUsage);
   const [tagsText, setTagsText] = useState(initialTags.join(", "));
-  const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
+  // No local "saving" flag: ReviewCard sets its shared busy state synchronously before awaiting
+  // the save (see saveEdit in review-card.tsx), so the `disabled` prop already reflects an
+  // in-flight request by the time this component re-renders — a second local flag would just be
+  // a second source of truth that could drift from it.
   async function handleSave() {
-    setSaving(true);
     setMessage(null);
     const tags = tagsText.split(/[\s,]+/).map((t) => t.trim()).filter(Boolean);
     const error = await onSave(type, usage, tags);
-    setSaving(false);
     if (error) setMessage(error);
   }
 
-  const isDisabled = disabled || saving;
+  const isDisabled = disabled;
 
   return (
     <div className="suggestion-editor">
@@ -68,10 +69,11 @@ export function SuggestionEditor({
           type="text"
           value={tagsText}
           disabled={isDisabled}
+          aria-describedby="suggestion-editor-tags-hint"
           onChange={(e) => setTagsText(e.target.value)}
         />
       </label>
-      <p className="suggestion-editor__hint">英文小写，可用连字符，1–6 个</p>
+      <p id="suggestion-editor-tags-hint" className="suggestion-editor__hint">英文小写，可用连字符，1–6 个</p>
       {message && <p className="inline-error">{message}</p>}
       <button type="button" className="btn btn--primary" disabled={isDisabled} onClick={handleSave}>
         保存并保留
