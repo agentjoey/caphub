@@ -1,0 +1,25 @@
+import { describe, expect, it } from "vitest";
+import { createMiniMaxSearch } from "./minimax-search";
+
+describe("createMiniMaxSearch", () => {
+  it("sends web_search tool and collects url_citation annotations, truncated", async () => {
+    let body: Record<string, unknown> = {};
+    const long = "x".repeat(5000);
+    const fetchFn = (async (_u: string, init: RequestInit) => {
+      body = JSON.parse(init.body as string);
+      return new Response(JSON.stringify({
+        status: "completed",
+        output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "summary", annotations: [
+          { type: "url_citation", title: "A", url: "https://a.example/", content: long },
+          { type: "url_citation", title: "B", url: "https://b.example/", content: "short" }
+        ] }] }],
+        usage: { input_tokens: 100, output_tokens: 5 }
+      }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const out = await createMiniMaxSearch({ apiKey: "k", fetch: fetchFn }).search("q", new AbortController().signal);
+    expect(body.tools).toEqual([{ type: "web_search" }]);
+    expect(out.value.sources).toHaveLength(2);
+    expect(out.value.sources[0].content).toHaveLength(2048);
+    expect(out.usage).toEqual({ inputTokens: 100, outputTokens: 5 });
+  });
+});
