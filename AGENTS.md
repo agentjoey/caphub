@@ -39,11 +39,10 @@ Mitigate avoidable risks within scope, protect secrets, and respect enforced per
 
 # Caphub — Project Context
 
-Joey 的个人 agent 能力库（skill / 经验 / plugin / prompt）：投递图片、文字或链接 → 分析（MiniMax 看图 + Tavily 搜索 + DeepSeek 推理，`PIPELINE=mixed`）→ 分级裁决 → 建档；web 端 Review / 能力库 / 详情。
+个人 agent 能力库（skill / 经验 / plugin / prompt）：投递 → 分析（`PIPELINE=mixed`：MiniMax 看图 + Tavily 搜索 + DeepSeek 分析）→ 分级裁决（置信度 ≥ 0.8 自动执行，其余进 Review）→ 建档与检索。
 
-- 规格与计划：`docs/superpowers/specs/2026-09-19-caphub-v2-design.md`、`docs/superpowers/plans/`；部署：`docs/deploy.md`；A/B 结论：`docs/spike-2026-09.md`、`docs/spike-web.md`。
-- 部署：Railway project `Caphub`（Singapore，`web` + `worker`），推送 `main` 即自动部署；`https://caphub.agentjoey.ai` 在 Cloudflare Access 后，应用内再校验 Access JWT（`proxy.ts` → `lib/auth/guard.ts`）。
-- 数据：Neon project `caphub`，schema `caphub_v2`；迁移只在本地用 owner 连接串执行 `npm run migrate`，且**必须先于推送**（部署不跑迁移）。Railway 上不放 owner 串。
-- 密钥只在 Railway 变量里，由 Human 粘贴；需要复制时走 stdin，不打印、不写入仓库。
-- 测试不连真实数据库或模型（fake pool / 注入 fetch）；真实验证用临时 Neon branch，用完删除。
-- 本地用浏览器验证时访问 `http://localhost:<port>`（`next dev` 会拦截 `127.0.0.1` 的开发资源）。
+- 文档：规格 `docs/superpowers/specs/2026-09-19-caphub-v2-design.md`，计划 `docs/superpowers/plans/`，部署 `docs/deploy.md`，管线结论 `docs/spike-2026-09.md`。
+- 部署：Railway `Caphub`（Singapore，`web` + `worker`），推送 `main` 自动部署；`caphub.agentjoey.ai` 在 Cloudflare Access 后，应用内再校验 Access JWT。
+- 迁移：本地用 owner 连接串 `npm run migrate`，**先迁移再推送**（部署不跑迁移）。
+- 密钥只在 Railway 变量，由 Human 粘贴；复制走 stdin，不打印、不入库。
+- 测试不连真实数据库 / 模型；真实验证用临时 Neon branch，用完删除；本地浏览器验证用 `localhost`。
