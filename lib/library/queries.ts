@@ -10,7 +10,7 @@ const CARD_COLUMNS = `
   cb.verdict, cb.verdict_by AS "verdictBy", cb.usage, cb.playbook, cb.tags, cb.source_url AS "sourceUrl",
   cb.review_note AS "reviewNote", cb.review_requested_at AS "reviewRequestedAt", cb.review_error AS "reviewError",
   cb.synced_at AS "syncedAt", cb.deleted_at AS "deletedAt", cb.created_at AS "createdAt", cb.updated_at AS "updatedAt",
-  json_build_object('kind', c.kind, 'objectKey', c.object_key, 'text', c.text, 'url', c.url) AS capture`;
+  json_build_object('kind', c.kind, 'objectKey', c.object_key, 'thumbKey', c.thumb_key, 'text', c.text, 'url', c.url) AS capture`;
 
 export interface CapabilityRow {
   id: string; captureId: string; title: string; type: CapabilityType; summary: string; signals: string[];
@@ -19,7 +19,7 @@ export interface CapabilityRow {
   usage: "integrate" | "reference"; playbook: Playbook; tags: string[]; sourceUrl: string | null;
   reviewNote: ReviewNote | null; reviewRequestedAt: string | null; reviewError: string | null;
   syncedAt: string | null; deletedAt: string | null; createdAt: string; updatedAt: string;
-  capture: { kind: "image" | "text" | "url"; objectKey: string | null; text: string | null; url: string | null };
+  capture: { kind: "image" | "text" | "url"; objectKey: string | null; thumbKey: string | null; text: string | null; url: string | null };
 }
 
 function toIso<T extends object>(row: T): T {
@@ -79,13 +79,20 @@ export async function allTags(pool: Q): Promise<Array<{ name: string; count: num
 }
 
 export interface StepSummary { step: string; provider: string; model: string; attempt: number; ok: boolean; error: string | null; durationMs: number; inputTokens: number | null; outputTokens: number | null }
-export interface CapabilityDetail extends CapabilityRow { steps: StepSummary[]; sources: Array<{ title: string; url: string }>; runPipeline: string; runState: string; runId: string }
+export interface CapabilityDetail extends CapabilityRow {
+  steps: StepSummary[]; sources: Array<{ title: string; url: string }>; runPipeline: string; runState: string; runId: string;
+  /** The original image's retention window, so a purged original's card can point at its thumbnail with an honest date. Null for non-image captures or ones never tracked for retention. */
+  retentionEligibleAt: string | null; retentionPurgedAt: string | null;
+}
 
 export async function getCapabilityDetail(pool: Q, id: string): Promise<CapabilityDetail | null> {
-  const row = (await pool.query<CapabilityRow & { runPipeline: string; runState: string; runId: string }>(
-    `SELECT ${CARD_COLUMNS}, r.pipeline AS "runPipeline", r.state AS "runState", r.id AS "runId"
+  const row = (await pool.query<CapabilityRow & { runPipeline: string; runState: string; runId: string; retentionEligibleAt: string | null; retentionPurgedAt: string | null }>(
+    `SELECT ${CARD_COLUMNS}, r.pipeline AS "runPipeline", r.state AS "runState", r.id AS "runId",
+            ret.eligible_at AS "retentionEligibleAt", ret.purged_at AS "retentionPurgedAt"
      FROM caphub_v2.capabilities cb JOIN caphub_v2.captures c ON c.id = cb.capture_id
-     JOIN caphub_v2.analysis_runs r ON r.id = cb.run_id WHERE cb.id = $1`, [id])).rows[0];
+     JOIN caphub_v2.analysis_runs r ON r.id = cb.run_id
+     LEFT JOIN caphub_v2.retention ret ON ret.object_key = c.object_key
+     WHERE cb.id = $1`, [id])).rows[0];
   if (!row) return null;
   const steps = (await pool.query<StepSummary & { output: unknown }>(
     `SELECT step, provider, model, attempt, ok, error, duration_ms AS "durationMs", input_tokens AS "inputTokens",

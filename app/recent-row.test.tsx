@@ -13,7 +13,7 @@ import type { RecentCapture } from "../lib/captures/captures";
 
 const base: RecentCapture = {
   id: "cap_1", kind: "image", createdAt: "2026-09-19T00:00:00.000Z", runState: "failed",
-  capabilityId: null, errorCode: "TIMEOUT", objectKey: "sha256/ab/" + "a".repeat(64), text: null, url: null,
+  capabilityId: null, errorCode: "TIMEOUT", objectKey: "sha256/ab/" + "a".repeat(64), thumbKey: null, text: null, url: null,
   title: null, verdict: null, deleted: false
 };
 

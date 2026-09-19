@@ -2,6 +2,7 @@ import type { Pool } from "pg";
 import type { Pipeline } from "../config";
 import { newId } from "../ids";
 import type { ObjectStore } from "../storage/s3";
+import { makeThumbnail, thumbKeyFor } from "../storage/thumbs";
 import { dedupeKeyFor, normalizeText, normalizeUrl, type CaptureInput } from "./dedupe";
 
 export interface SubmitResult { captureId: string; runId: string | null; duplicate: boolean }
@@ -12,6 +13,22 @@ export async function submitCapture(
 ): Promise<SubmitResult> {
   const dedupeKey = dedupeKeyFor(input);
   const objectRef = input.kind === "image" ? await deps.objects.putIfAbsent(input.bytes, input.mimeType) : null;
+  let thumbKey: string | null = null;
+  if (input.kind === "image" && objectRef) {
+    // Thumbnails make the preview survive the 30-day purge of originals, but they are a
+    // convenience, not the submission itself — a failure here (bad image, S3 hiccup) must
+    // never block the capture; just leave thumb_key null and log for later backfill.
+    try {
+      const thumbBytes = await makeThumbnail(input.bytes);
+      thumbKey = thumbKeyFor(objectRef.digest);
+      await deps.objects.putThumbnail(thumbKey, thumbBytes);
+    } catch (error) {
+      thumbKey = null;
+      console.error(JSON.stringify({
+        msg: "thumbnail generation failed", dedupeKey, error: error instanceof Error ? error.message : String(error)
+      }));
+    }
+  }
   const client = await deps.pool.connect();
   try {
     await client.query("BEGIN");
@@ -34,13 +51,13 @@ export async function submitCapture(
     }
     const captureId = newId("cap");
     await client.query(
-      `INSERT INTO caphub_v2.captures (id, source, kind, object_key, mime_type, text, url, dedupe_key, telegram_chat_id, telegram_message_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      `INSERT INTO caphub_v2.captures (id, source, kind, object_key, mime_type, text, url, dedupe_key, telegram_chat_id, telegram_message_id, thumb_key)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
       [captureId, input.source, input.kind, objectRef?.key ?? null,
         input.kind === "image" ? input.mimeType : null,
         input.kind === "text" ? normalizeText(input.text) : null,
         input.kind === "url" ? normalizeUrl(input.url) : null,
-        dedupeKey, input.telegram?.chatId ?? null, input.telegram?.messageId ?? null]
+        dedupeKey, input.telegram?.chatId ?? null, input.telegram?.messageId ?? null, thumbKey]
     );
     const runId = newId("run");
     await client.query(
@@ -61,14 +78,14 @@ export interface RecentCapture {
   id: string; kind: "image" | "text" | "url"; createdAt: string;
   runState: "queued" | "running" | "done" | "failed" | null;
   capabilityId: string | null; errorCode: string | null;
-  objectKey: string | null; text: string | null; url: string | null;
+  objectKey: string | null; thumbKey: string | null; text: string | null; url: string | null;
   title: string | null; verdict: "keep" | "discard" | "pending" | null; deleted: boolean;
 }
 
 export async function listRecentCaptures(pool: Pool, limit = 20): Promise<RecentCapture[]> {
   const { rows } = await pool.query<RecentCapture>(
     `SELECT c.id, c.kind, c.created_at AS "createdAt", r.state AS "runState", cb.id AS "capabilityId", r.error_code AS "errorCode",
-            c.object_key AS "objectKey", left(c.text, 140) AS text, c.url, cb.title, cb.verdict, (cb.deleted_at IS NOT NULL) AS deleted
+            c.object_key AS "objectKey", c.thumb_key AS "thumbKey", left(c.text, 140) AS text, c.url, cb.title, cb.verdict, (cb.deleted_at IS NOT NULL) AS deleted
      FROM caphub_v2.captures c
      LEFT JOIN LATERAL (SELECT state, error_code FROM caphub_v2.analysis_runs WHERE capture_id = c.id ORDER BY created_at DESC LIMIT 1) r ON true
      LEFT JOIN caphub_v2.capabilities cb ON cb.capture_id = c.id

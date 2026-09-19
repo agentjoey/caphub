@@ -48,7 +48,10 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           </section>
         </div>
         <div>
-          <CapturePreview capture={detail.capture} size="full" />
+          <CapturePreview
+            capture={{ ...detail.capture, retentionEligibleAt: detail.retentionEligibleAt, retentionPurgedAt: detail.retentionPurgedAt }}
+            size="full"
+          />
           <DetailActions
             id={detail.id}
             captureId={detail.captureId}

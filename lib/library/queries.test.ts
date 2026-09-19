@@ -45,4 +45,22 @@ describe("library queries", () => {
     const { pool } = recorder([[]]);
     expect(await getCapabilityDetail(pool, "cab_x")).toBeNull();
   });
+  it("card columns select the capture's thumb_key alongside object_key", async () => {
+    const { pool, calls } = recorder([[], [{ total: "0" }]]);
+    await listPending(pool, { page: 1 });
+    expect(calls[0].text).toMatch(/'thumbKey', c\.thumb_key/);
+  });
+  it("getCapabilityDetail joins retention by object_key and returns eligible/purged dates", async () => {
+    const { pool, calls } = recorder([
+      [{ id: "cab_1", runId: "run_1", capture: { kind: "image", objectKey: "sha256/ab/x", thumbKey: null, text: null, url: null },
+        retentionEligibleAt: "2026-10-01T00:00:00.000Z", retentionPurgedAt: "2026-10-02T00:00:00.000Z" }],
+      []
+    ]);
+    const detail = await getCapabilityDetail(pool, "cab_1");
+    expect(calls[0].text).toMatch(/LEFT JOIN caphub_v2\.retention ret ON ret\.object_key = c\.object_key/);
+    expect(calls[0].text).toMatch(/ret\.eligible_at AS "retentionEligibleAt"/);
+    expect(calls[0].text).toMatch(/ret\.purged_at AS "retentionPurgedAt"/);
+    expect(detail?.retentionEligibleAt).toBe("2026-10-01T00:00:00.000Z");
+    expect(detail?.retentionPurgedAt).toBe("2026-10-02T00:00:00.000Z");
+  });
 });

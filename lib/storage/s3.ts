@@ -4,6 +4,8 @@ import { objectRefFor, objectRefSchema, sha256Hex, type ObjectRef } from "./obje
 
 export type ImageMime = "image/png" | "image/jpeg" | "image/webp";
 
+const THUMB_KEY_RE = /^thumb\/sha256\/[a-f0-9]{2}\/[a-f0-9]{64}\.webp$/;
+
 export class ObjectMismatchError extends Error {
   constructor() { super("stored object does not match its content address"); this.name = "ObjectMismatchError"; }
 }
@@ -74,6 +76,34 @@ export class ObjectStore {
   async deleteExact(key: string): Promise<void> {
     if (!/^sha256\/[a-f0-9]{2}\/[a-f0-9]{64}$/.test(key)) throw new Error("INVALID_OBJECT_KEY");
     await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+  }
+
+  /**
+   * Stores a thumbnail at an explicit key (thumb keys are derived from the ORIGINAL image's
+   * digest, not the thumbnail bytes, so this can't reuse putIfAbsent's content-addressing).
+   * Idempotent: if a thumbnail already exists at the key, this is a no-op — thumbnails
+   * carry no per-write retention row, so there is nothing to reconcile on a race.
+   */
+  async putThumbnail(key: string, bytes: Uint8Array): Promise<void> {
+    if (!THUMB_KEY_RE.test(key)) throw new Error("INVALID_THUMB_KEY");
+    const existing = await this.head(key);
+    if (existing) return;
+    try {
+      await this.client.send(new PutObjectCommand({
+        Bucket: this.bucket, Key: key, Body: bytes, ContentType: "image/webp",
+        ContentLength: bytes.byteLength, IfNoneMatch: "*"
+      }));
+    } catch (error) {
+      if (!isPreconditionFailed(error)) throw error;
+      // Someone else wrote the same thumbnail key concurrently; nothing further to verify.
+    }
+  }
+
+  /** Fetches a thumbnail's raw bytes. Not content-addressed against its key (see putThumbnail). */
+  async getThumb(key: string): Promise<Uint8Array> {
+    if (!THUMB_KEY_RE.test(key)) throw new Error("INVALID_THUMB_KEY");
+    const out = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+    return out.Body!.transformToByteArray();
   }
 }
 

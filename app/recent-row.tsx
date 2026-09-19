@@ -39,7 +39,7 @@ export function RecentRow({ item, relativeTime }: { item: RecentCapture; relativ
 
   return (
     <div className="list-row">
-      <CapturePreview capture={{ kind: item.kind, objectKey: item.objectKey, text: item.text, url: item.url }} size="thumb" />
+      <CapturePreview capture={{ kind: item.kind, objectKey: item.objectKey, thumbKey: item.thumbKey, text: item.text, url: item.url }} size="thumb" />
       <div>
         <div className="list-row__title">{fallbackTitle(item)}</div>
         <div className="list-row__meta">

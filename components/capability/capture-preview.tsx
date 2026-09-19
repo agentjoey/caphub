@@ -1,22 +1,63 @@
+"use client";
+
+import { useState } from "react";
+import { formatDateTime } from "../../lib/library/format";
+
 const TEXT_PREVIEW_LIMIT = 140;
 const TEXT_TRUNCATE_LIMIT = 280;
 
 export interface CapturePreviewData {
   kind: "image" | "text" | "url";
   objectKey: string | null;
+  /** Permanent 480px webp preview, keyed by the original's digest; survives the original's 30-day purge. */
+  thumbKey?: string | null;
   text: string | null;
   url: string | null;
+  /** When the original's 30-day retention window elapses (informational; not itself proof of purge). */
+  retentionEligibleAt?: string | null;
+  /** Set once the original has actually been deleted by the retention sweep. */
+  retentionPurgedAt?: string | null;
+}
+
+function FullImage({ originalSrc, thumbSrc, purged, eligibleAt }: {
+  originalSrc: string | null; thumbSrc: string | null; purged: boolean; eligibleAt: string | null;
+}) {
+  const [failed, setFailed] = useState(purged || !originalSrc);
+  if (failed && thumbSrc) {
+    return (
+      <div>
+        {/* eslint-disable-next-line @next/next/no-img-element -- images are served by the access-guarded /api/objects proxy */}
+        <img className="capture-full" src={thumbSrc} loading="lazy" alt="投递的截图（缩略图）" />
+        {eligibleAt && <p className="notice">原图已于 {formatDateTime(eligibleAt)} 清除，仅保留缩略图</p>}
+      </div>
+    );
+  }
+  if (!originalSrc) return <span className="capture-full">无图</span>;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- images are served by the access-guarded /api/objects proxy
+    <img className="capture-full" src={originalSrc} loading="lazy" alt="投递的截图" onError={() => setFailed(true)} />
+  );
 }
 
 export function CapturePreview({ capture, size = "thumb" }: { capture: CapturePreviewData; size?: "thumb" | "full" }) {
   if (capture.kind === "image") {
-    if (!capture.objectKey) return <span className={size === "thumb" ? "thumb" : "capture-full"}>无图</span>;
-    const src = `/api/objects/${capture.objectKey}`;
-    return size === "thumb"
+    const thumbSrc = capture.thumbKey ? `/api/objects/${capture.thumbKey}` : null;
+    const originalSrc = capture.objectKey ? `/api/objects/${capture.objectKey}` : null;
+    if (size === "thumb") {
+      const src = thumbSrc ?? originalSrc;
+      if (!src) return <span className="thumb">无图</span>;
       // eslint-disable-next-line @next/next/no-img-element -- images are served by the access-guarded /api/objects proxy
-      ? <img className="thumb" src={src} loading="lazy" alt="投递的截图" />
-      // eslint-disable-next-line @next/next/no-img-element -- images are served by the access-guarded /api/objects proxy
-      : <img className="capture-full" src={src} loading="lazy" alt="投递的截图" />;
+      return <img className="thumb" src={src} loading="lazy" alt="投递的截图" />;
+    }
+    if (!originalSrc && !thumbSrc) return <span className="capture-full">无图</span>;
+    return (
+      <FullImage
+        originalSrc={originalSrc}
+        thumbSrc={thumbSrc}
+        purged={Boolean(capture.retentionPurgedAt)}
+        eligibleAt={capture.retentionEligibleAt ?? null}
+      />
+    );
   }
   if (capture.kind === "url") {
     if (size === "thumb") return <span className="thumb">链接</span>;
