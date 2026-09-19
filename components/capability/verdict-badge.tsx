@@ -1,11 +1,21 @@
-import { VERDICT_LABEL } from "../../lib/library/labels";
+import { verdictLabel } from "../../lib/library/labels";
+import { getDict, type Locale } from "../../lib/i18n";
 
-export function VerdictBadge({ verdict, verdictBy }: { verdict: "keep" | "discard" | "pending"; verdictBy?: "auto" | "human" | null }) {
+export function VerdictBadge({
+  verdict,
+  verdictBy,
+  locale = "zh"
+}: {
+  verdict: "keep" | "discard" | "pending";
+  verdictBy?: "auto" | "human" | null;
+  locale?: Locale;
+}) {
+  const dict = getDict(locale).labels.verdictBy;
   return (
     <>
-      <span className={`badge badge--${verdict}`}>{VERDICT_LABEL[verdict]}</span>
-      {verdictBy === "auto" && <span className="badge badge--auto">自动</span>}
-      {verdictBy === "human" && <span className="badge badge--human">人工</span>}
+      <span className={`badge badge--${verdict}`}>{verdictLabel(verdict, locale)}</span>
+      {verdictBy === "auto" && <span className="badge badge--auto">{dict.auto}</span>}
+      {verdictBy === "human" && <span className="badge badge--human">{dict.human}</span>}
     </>
   );
 }

@@ -3,32 +3,36 @@ import { listRecentCaptures } from "../lib/captures/captures";
 import { relativeTime } from "../lib/library/format";
 import { libraryStats } from "../lib/library/queries";
 import { getRuntime } from "../lib/runtime";
+import { getLocale } from "../lib/i18n/locale";
+import { format, getDict } from "../lib/i18n";
 import { CaptureForm } from "./capture-form";
 import { RecentRow } from "./recent-row";
 
 export const dynamic = "force-dynamic";
 
 export default async function Page() {
+  const locale = await getLocale();
+  const dict = getDict(locale);
   const { pool } = getRuntime();
   const [items, stats] = await Promise.all([listRecentCaptures(pool), libraryStats(pool)]);
   return (
     <div className="caphub-page">
       <section className="caphub-intro">
         <div>
-          <h1>投递一个能力。</h1>
-          <p>上传截图、文字或链接，跟进分析并决定是否建档。</p>
+          <h1>{dict.home.title}</h1>
+          <p>{dict.home.subtitle}</p>
         </div>
-        <Link className="caphub-quiet-button" href="/review">去 Review（{stats.pending}）</Link>
+        <Link className="caphub-quiet-button" href="/review">{format(dict.home.goReview, { count: stats.pending })}</Link>
       </section>
-      <CaptureForm />
+      <CaptureForm locale={locale} />
       <section className="recent">
-        <div className="caphub-section-heading"><h2>最近投递</h2><span>最近 20 条</span></div>
+        <div className="caphub-section-heading"><h2>{dict.home.recentTitle}</h2><span>{dict.home.recentSub}</span></div>
         {items.length === 0 ? (
-          <p className="empty">还没有投递。</p>
+          <p className="empty">{dict.home.empty}</p>
         ) : (
           <ul className="list">
             {items.map((item) => (
-              <li key={item.id}><RecentRow item={item} relativeTime={relativeTime(item.createdAt)} /></li>
+              <li key={item.id}><RecentRow item={item} relativeTime={relativeTime(item.createdAt, locale)} locale={locale} /></li>
             ))}
           </ul>
         )}

@@ -1,19 +1,21 @@
 import type { CapabilityType, Playbook } from "../../lib/analysis/card";
+import { format, getDict, type Locale } from "../../lib/i18n";
 import { CopyButton } from "./copy-button";
 
 function repoUrl(repo: string): string {
   return repo.startsWith("https://") ? repo : `https://github.com/${repo}`;
 }
 
-export function PlaybookView({ playbook, type }: { playbook: Playbook; type: CapabilityType }) {
+export function PlaybookView({ playbook, type, locale = "zh" }: { playbook: Playbook; type: CapabilityType; locale?: Locale }) {
   void type;
+  const dict = getDict(locale).playbookView;
   if (playbook.kind === "integrate") {
     return (
       <div>
         {playbook.install.map((command, index) => (
           <div key={index}>
             <pre>{command}</pre>
-            <CopyButton text={command} />
+            <CopyButton text={command} locale={locale} />
           </div>
         ))}
         {playbook.repo && (
@@ -24,7 +26,7 @@ export function PlaybookView({ playbook, type }: { playbook: Playbook; type: Cap
         {playbook.prompt_text && (
           <div>
             <pre>{playbook.prompt_text}</pre>
-            <CopyButton text={playbook.prompt_text} label="复制全文" />
+            <CopyButton text={playbook.prompt_text} label={dict.copyAll} locale={locale} />
           </div>
         )}
       </div>
@@ -42,7 +44,7 @@ export function PlaybookView({ playbook, type }: { playbook: Playbook; type: Cap
   return (
     <div>
       <pre>{playbook.content}</pre>
-      {playbook.when_to_use && <p>适用场景：{playbook.when_to_use}</p>}
+      {playbook.when_to_use && <p>{format(dict.whenToUse, { value: playbook.when_to_use })}</p>}
     </div>
   );
 }

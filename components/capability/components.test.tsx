@@ -61,4 +61,35 @@ describe("CopyButton", () => {
     fireEvent.click(screen.getByRole("button", { name: "复制" }));
     await waitFor(() => expect(screen.getByText("复制失败")).toBeTruthy());
   });
+
+  it("shows the English label and status text under the en locale", async () => {
+    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockRejectedValue(new Error("denied")) } });
+    render(<CopyButton text="hello" locale="en" />);
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await waitFor(() => expect(screen.getByText("Copy failed")).toBeTruthy());
+  });
+});
+
+describe("locale=en", () => {
+  it("translates chrome (type/usage/verdict labels) but leaves AI-generated card content untouched", () => {
+    render(<CardSummary row={row as never} locale="en" />);
+    // Chrome text is translated.
+    expect(screen.getByText("Skill")).toBeTruthy();
+    expect(screen.getByText("Integrate directly")).toBeTruthy();
+    expect(screen.getByText("Pending")).toBeTruthy();
+    expect(screen.getByText(/Suggests Keep/)).toBeTruthy();
+    // AI-generated content (title, summary, reason, tags) is verbatim regardless of locale.
+    expect(screen.getByText("Scrapling 自适应爬虫框架")).toBeTruthy();
+    expect(screen.getByText("摘要文字")).toBeTruthy();
+    expect(screen.getByText("成熟开源", { exact: false })).toBeTruthy();
+    expect(screen.getByText("web-scraping")).toBeTruthy();
+    expect(screen.queryByText("技能")).toBeNull();
+  });
+
+  it("translates the playbook copy-all label but not experience/reference AI content", () => {
+    render(<PlaybookView type="experience" playbook={{ kind: "experience", content: "核心步骤", when_to_use: "生成图片时" }} locale="en" />);
+    expect(screen.getByText("核心步骤")).toBeTruthy();
+    expect(screen.getByText(/When to use:/)).toBeTruthy();
+    expect(screen.getByText(/生成图片时/)).toBeTruthy();
+  });
 });

@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { getDict, type Locale } from "../../lib/i18n";
 
 type Status = "idle" | "copied" | "failed";
 
-export function CopyButton({ text, label = "复制" }: { text: string; label?: string }) {
+export function CopyButton({ text, label, locale = "zh" }: { text: string; label?: string; locale?: Locale }) {
+  const dict = getDict(locale).copyButton;
+  const resolvedLabel = label ?? dict.copy;
   const [status, setStatus] = useState<Status>("idle");
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -25,7 +28,7 @@ export function CopyButton({ text, label = "复制" }: { text: string; label?: s
 
   return (
     <button type="button" className="btn" onClick={copy}>
-      {status === "copied" ? "已复制" : status === "failed" ? "复制失败" : label}
+      {status === "copied" ? dict.copied : status === "failed" ? dict.failed : resolvedLabel}
     </button>
   );
 }

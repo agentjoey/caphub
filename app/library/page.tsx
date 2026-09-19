@@ -4,13 +4,15 @@ import { loadScenarios } from "../../lib/analysis/scenarios";
 import { CapturePreview } from "../../components/capability/capture-preview";
 import { TagList } from "../../components/capability/tag-list";
 import { relativeTime } from "../../lib/library/format";
-import { TYPE_LABEL, USAGE_LABEL } from "../../lib/library/labels";
+import { typeLabel, usageLabel } from "../../lib/library/labels";
 import { embedSearchQuery } from "../../lib/library/query-embedding";
 import { allTags, libraryStats, listLibrary, scenarioStats, PAGE_SIZE } from "../../lib/library/queries";
 import { matchScenarios } from "../../lib/library/scenario-match";
 import { formatSerial, parseSerialQuery } from "../../lib/library/serial";
 import { libraryHref, parseLibraryParams } from "../../lib/library/search-params";
 import { getRuntime } from "../../lib/runtime";
+import { getLocale } from "../../lib/i18n/locale";
+import { format, getDict } from "../../lib/i18n";
 import { LibraryFilters } from "./library-filters";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +28,8 @@ export default async function Page({
   const params = await searchParams;
   const filter = parseLibraryParams(params);
   const { pool, config } = getRuntime();
+  const locale = await getLocale();
+  const dict = getDict(locale);
 
   const q = filter.q;
   const isSerialQuery = Boolean(q && parseSerialQuery(q) !== null);
@@ -63,8 +67,8 @@ export default async function Page({
     <div>
       <div className="page-head">
         <div>
-          <h1 className="page-title">能力库</h1>
-          <p className="page-subtitle">共 {stats.total} 个能力</p>
+          <h1 className="page-title">{dict.library.title}</h1>
+          <p className="page-subtitle">{format(dict.library.subtitle, { count: stats.total })}</p>
         </div>
       </div>
       <div className="stat-bar">
@@ -80,28 +84,28 @@ export default async function Page({
               aria-current={active ? "true" : undefined}
               href={libraryHref(filter, { types: nextTypes.length > 0 ? nextTypes : undefined })}
             >
-              <div className="stat__label">{TYPE_LABEL[type]}</div>
+              <div className="stat__label">{typeLabel(type, locale)}</div>
               <div className="stat__value">{stats.byType[type]}</div>
             </Link>
           );
         })}
         <div className="stat">
-          <div className="stat__label">标签</div>
+          <div className="stat__label">{dict.library.tagsStat}</div>
           <div className="stat__value">{stats.tagCount}</div>
         </div>
         <Link className="stat stat--accent" href="/review">
-          <div className="stat__label">待 Review</div>
+          <div className="stat__label">{dict.library.pendingStat}</div>
           <div className="stat__value">{stats.pending}</div>
         </Link>
       </div>
       <form className="search-form" action="/library" method="get">
-        <input type="search" name="q" defaultValue={filter.q ?? ""} placeholder="搜索能力…" aria-label="搜索能力" />
+        <input type="search" name="q" defaultValue={filter.q ?? ""} placeholder={dict.library.searchPlaceholder} aria-label={dict.library.searchAria} />
         {hiddenFields.map((field, index) => (
           <input key={`${field.name}-${field.value}-${index}`} type="hidden" name={field.name} value={field.value} />
         ))}
-        <button type="submit" className="btn">搜索</button>
+        <button type="submit" className="btn">{dict.library.searchButton}</button>
       </form>
-      <LibraryFilters filter={filter} />
+      <LibraryFilters filter={filter} locale={locale} />
       {visibleScenarios.length > 0 && (
         <div className="filter-row">
           {visibleScenarios.map((s) => {
@@ -116,7 +120,7 @@ export default async function Page({
                 aria-current={active ? "true" : undefined}
                 href={libraryHref(filter, { scenarios: nextScenarios.length > 0 ? nextScenarios : undefined })}
               >
-                {s.labelZh} ({scenarioCountBySlug.get(s.slug) ?? 0})
+                {locale === "en" ? s.labelEn : s.labelZh} ({scenarioCountBySlug.get(s.slug) ?? 0})
               </Link>
             );
           })}
@@ -145,9 +149,9 @@ export default async function Page({
       {items.length === 0 ? (
         <p className="empty">
           {hasFilters ? (
-            <>没有符合条件的能力。<Link href="/library">清除筛选</Link></>
+            <>{dict.library.emptyWithFilters}<Link href="/library">{dict.library.clearFilters}</Link></>
           ) : (
-            "库里还没有保留的能力。"
+            dict.library.emptyNoFilters
           )}
         </p>
       ) : (
@@ -156,7 +160,7 @@ export default async function Page({
             {items.map((row) => (
               <li key={row.id}>
                 <Link className="list-row" href={`/library/${row.id}`}>
-                  <CapturePreview capture={row.capture} size="thumb" />
+                  <CapturePreview capture={row.capture} size="thumb" locale={locale} />
                   <div>
                     <div className="list-row__title">
                       {row.title}
@@ -165,9 +169,9 @@ export default async function Page({
                       )}
                     </div>
                     <div className="list-row__meta">
-                      <span className="badge badge--type">{TYPE_LABEL[row.type]}</span>
-                      <span className="badge badge--usage">{USAGE_LABEL[row.usage]}</span>
-                      <span>{relativeTime(row.createdAt)}</span>
+                      <span className="badge badge--type">{typeLabel(row.type, locale)}</span>
+                      <span className="badge badge--usage">{usageLabel(row.usage, locale)}</span>
+                      <span>{relativeTime(row.createdAt, locale)}</span>
                     </div>
                     <TagList tags={row.tags} />
                   </div>
@@ -177,8 +181,8 @@ export default async function Page({
           </ul>
           {(hasPrev || hasNext) && (
             <nav className="pagination">
-              {hasPrev && <Link href={libraryHref(filter, { page: filter.page - 1 })}>上一页</Link>}
-              {hasNext && <Link href={libraryHref(filter, { page: filter.page + 1 })}>下一页</Link>}
+              {hasPrev && <Link href={libraryHref(filter, { page: filter.page - 1 })}>{dict.library.prevPage}</Link>}
+              {hasNext && <Link href={libraryHref(filter, { page: filter.page + 1 })}>{dict.library.nextPage}</Link>}
             </nav>
           )}
         </>

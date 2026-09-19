@@ -118,6 +118,31 @@ describe("softDelete / requestReview / requestRerun", () => {
   });
 });
 
+describe("locale-aware messages", () => {
+  it("returns English messages when locale is 'en'", async () => {
+    const conflict = fakePool((t) => t.startsWith("SELECT 1") ? { rows: [{ "?column?": 1 }] } : { rows: [] });
+    expect(await decide(conflict.pool, { id: "cab_1", expectedUpdatedAt: T, verdict: "keep" }, "en"))
+      .toMatchObject({ ok: false, reason: "CONFLICT", message: "Already handled elsewhere" });
+
+    const missing = fakePool(() => ({ rows: [] }));
+    expect(await requestReview(missing.pool, { id: "cab_1" }, "en")).toMatchObject({ ok: false, reason: "NOT_FOUND" });
+
+    const busy = fakePool((t) => t.startsWith("SELECT 1") ? { rows: [{ "?column?": 1 }] } : { rows: [] });
+    expect(await requestReview(busy.pool, { id: "cab_1" }, "en"))
+      .toMatchObject({ ok: false, reason: "CONFLICT", message: "Review already in progress" });
+
+    const { pool } = fakePool(() => ({ rows: [] }));
+    const r = await editSuggestion(pool, { id: "cab_1", expectedUpdatedAt: T, type: "skill", usage: "integrate", tags: ["Web Scraping", "爬虫"] }, "en");
+    expect(r).toMatchObject({ ok: false, reason: "INVALID", message: "Invalid tags: web scraping, 爬虫 (must be lowercase English, hyphens allowed)" });
+  });
+
+  it("still defaults to Chinese messages when no locale is passed", async () => {
+    const conflict = fakePool((t) => t.startsWith("SELECT 1") ? { rows: [{ "?column?": 1 }] } : { rows: [] });
+    expect(await decide(conflict.pool, { id: "cab_1", expectedUpdatedAt: T, verdict: "keep" }))
+      .toMatchObject({ ok: false, reason: "CONFLICT", message: "已在别处处理" });
+  });
+});
+
 describe("tx() rollback failure", () => {
   it("releases the client with the rollback error instead of returning it to the pool clean", async () => {
     const { pool, releases } = fakePool((t) => {

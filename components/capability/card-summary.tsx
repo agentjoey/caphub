@@ -1,22 +1,24 @@
 import type { CapabilityRow } from "../../lib/library/queries";
-import { TYPE_LABEL, USAGE_LABEL, VERDICT_LABEL } from "../../lib/library/labels";
+import { typeLabel, usageLabel, verdictLabel } from "../../lib/library/labels";
+import { format, getDict, type Locale } from "../../lib/i18n";
 import { CapturePreview, captureTextExcerpt } from "./capture-preview";
 import { TagList } from "./tag-list";
 import { VerdictBadge } from "./verdict-badge";
 
-export function CardSummary({ row }: { row: CapabilityRow }) {
+export function CardSummary({ row, locale = "zh" }: { row: CapabilityRow; locale?: Locale }) {
+  const dict = getDict(locale).cardSummary;
   return (
     <article className="panel review-card">
-      <CapturePreview capture={row.capture} size="thumb" />
+      <CapturePreview capture={row.capture} size="thumb" locale={locale} />
       <div>
         <h2 className="card-title">{row.title}</h2>
         <p className="card-badges">
-          <span className="badge badge--type">{TYPE_LABEL[row.type]}</span>
-          <span className="badge badge--usage">{USAGE_LABEL[row.usage]}</span>
-          <VerdictBadge verdict={row.verdict} verdictBy={row.verdictBy} />
+          <span className="badge badge--type">{typeLabel(row.type, locale)}</span>
+          <span className="badge badge--usage">{usageLabel(row.usage, locale)}</span>
+          <VerdictBadge verdict={row.verdict} verdictBy={row.verdictBy} locale={locale} />
         </p>
         <p className="card-suggestion">
-          建议{VERDICT_LABEL[row.suggestedVerdict]} · 置信度 {row.confidence} — {row.suggestedReason}
+          {format(dict.suggestion, { verdict: verdictLabel(row.suggestedVerdict, locale), confidence: row.confidence, reason: row.suggestedReason })}
         </p>
         {row.capture.kind === "text" && row.capture.text && (
           <p className="capture-text">{captureTextExcerpt(row.capture.text)}</p>

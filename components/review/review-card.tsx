@@ -4,13 +4,15 @@ import { useState } from "react";
 import { decideAction, editSuggestionAction } from "../../app/actions";
 import type { CapabilityType } from "../../lib/analysis/card";
 import type { CapabilityDetail, CapabilityRow } from "../../lib/library/queries";
+import { getDict, type Locale } from "../../lib/i18n";
 import { AnalysisDetails } from "../capability/analysis-details";
 import { CardSummary } from "../capability/card-summary";
 import { SuggestionEditor } from "./suggestion-editor";
 
 type State = "idle" | "saving" | "done" | "stale";
 
-export function ReviewCard({ row, detail }: { row: CapabilityRow; detail: CapabilityDetail }) {
+export function ReviewCard({ row, detail, locale = "zh" }: { row: CapabilityRow; detail: CapabilityDetail; locale?: Locale }) {
+  const dict = getDict(locale);
   const [state, setState] = useState<State>("idle");
   const [expectedUpdatedAt, setExpectedUpdatedAt] = useState(row.updatedAt);
   const [message, setMessage] = useState<string | null>(null);
@@ -33,7 +35,7 @@ export function ReviewCard({ row, detail }: { row: CapabilityRow; detail: Capabi
       const result = await decideAction(row.id, expectedUpdatedAt, verdict);
       if (result.ok) {
         setExpectedUpdatedAt(result.updatedAt);
-        setDoneLabel(verdict === "keep" ? "已保留" : "已丢弃");
+        setDoneLabel(verdict === "keep" ? dict.review.doneKeep : dict.review.doneDiscard);
         setEditing(false);
         setState("done");
         return;
@@ -41,7 +43,7 @@ export function ReviewCard({ row, detail }: { row: CapabilityRow; detail: Capabi
       setMessage(result.message);
       setState(result.reason === "CONFLICT" ? "stale" : "idle");
     } catch {
-      setMessage("操作失败，请重试");
+      setMessage(dict.detailActions.genericError);
       setState("idle");
     }
   }
@@ -53,7 +55,7 @@ export function ReviewCard({ row, detail }: { row: CapabilityRow; detail: Capabi
       const result = await editSuggestionAction(row.id, expectedUpdatedAt, type, usage, tags);
       if (result.ok) {
         setExpectedUpdatedAt(result.updatedAt);
-        setDoneLabel("已保留");
+        setDoneLabel(dict.review.doneKeep);
         setEditing(false);
         setState("done");
         return null;
@@ -67,7 +69,7 @@ export function ReviewCard({ row, detail }: { row: CapabilityRow; detail: Capabi
       return result.message;
     } catch {
       setState("idle");
-      return "操作失败，请重试";
+      return dict.detailActions.genericError;
     }
   }
 
@@ -78,17 +80,17 @@ export function ReviewCard({ row, detail }: { row: CapabilityRow; detail: Capabi
 
   return (
     <div className="review-item" data-state={state}>
-      <CardSummary row={row} />
-      <AnalysisDetails detail={detail} />
+      <CardSummary row={row} locale={locale} />
+      <AnalysisDetails detail={detail} locale={locale} />
       {message && <p className="inline-error review-item__message">{message}</p>}
       {finished ? (
         <p className="review-item__done">{doneLabel}</p>
       ) : (
         <>
           <div className="review-item__actions">
-            <button type="button" className="btn btn--primary" disabled={busy} onClick={() => decide("keep")}>保留</button>
-            <button type="button" className="btn btn--danger" disabled={busy} onClick={() => decide("discard")}>丢弃</button>
-            <button type="button" className="btn" disabled={busy} onClick={toggleEditing}>改建议</button>
+            <button type="button" className="btn btn--primary" disabled={busy} onClick={() => decide("keep")}>{dict.detailActions.keep}</button>
+            <button type="button" className="btn btn--danger" disabled={busy} onClick={() => decide("discard")}>{dict.detailActions.discard}</button>
+            <button type="button" className="btn" disabled={busy} onClick={toggleEditing}>{dict.detailActions.editSuggestion}</button>
           </div>
           {editing && (
             <SuggestionEditor
@@ -97,6 +99,7 @@ export function ReviewCard({ row, detail }: { row: CapabilityRow; detail: Capabi
               initialTags={row.tags}
               disabled={busy || stale}
               onSave={saveEdit}
+              locale={locale}
             />
           )}
         </>

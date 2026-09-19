@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { decideAction, editSuggestionAction, rerunAction, reviewAction, softDeleteAction } from "../../actions";
 import type { CapabilityType } from "../../../lib/analysis/card";
+import { getDict, type Locale } from "../../../lib/i18n";
 import { SuggestionEditor } from "../../../components/review/suggestion-editor";
 
 type State = "idle" | "busy" | "stale";
@@ -16,7 +17,8 @@ export function DetailActions({
   type,
   usage,
   tags,
-  reviewPending: initialReviewPending
+  reviewPending: initialReviewPending,
+  locale = "zh"
 }: {
   id: string;
   captureId: string;
@@ -26,7 +28,9 @@ export function DetailActions({
   usage: "integrate" | "reference";
   tags: string[];
   reviewPending: boolean;
+  locale?: Locale;
 }) {
+  const dict = getDict(locale).detailActions;
   const router = useRouter();
   const [state, setState] = useState<State>("idle");
   const [updatedAt, setUpdatedAt] = useState(initialUpdatedAt);
@@ -54,7 +58,7 @@ export function DetailActions({
       setMessage(result.message);
       setState(result.reason === "CONFLICT" ? "stale" : "idle");
     } catch {
-      setMessage("操作失败，请重试");
+      setMessage(dict.genericError);
       setState("idle");
     }
   }
@@ -80,7 +84,7 @@ export function DetailActions({
       return result.message;
     } catch {
       setState("idle");
-      return "操作失败，请重试";
+      return dict.genericError;
     }
   }
 
@@ -106,7 +110,7 @@ export function DetailActions({
       setMessage(result.message);
       setState("idle");
     } catch {
-      setMessage("操作失败，请重试");
+      setMessage(dict.genericError);
       setState("idle");
     }
   }
@@ -121,7 +125,7 @@ export function DetailActions({
       // captureId, it never touches this capability's updated_at, so its ActionResult.updatedAt
       // (the server's current time) must not overwrite our optimistic-lock token either.
       if (result.ok) {
-        setMessage("已加入分析队列，完成后刷新查看");
+        setMessage(dict.rerunQueued);
         setState("idle");
         router.refresh();
         return;
@@ -131,7 +135,7 @@ export function DetailActions({
       setMessage(result.message);
       setState("idle");
     } catch {
-      setMessage("操作失败，请重试");
+      setMessage(dict.genericError);
       setState("idle");
     }
   }
@@ -150,7 +154,7 @@ export function DetailActions({
       setState(result.reason === "CONFLICT" ? "stale" : "idle");
       setConfirmingDelete(false);
     } catch {
-      setMessage("操作失败，请重试");
+      setMessage(dict.genericError);
       setState("idle");
       setConfirmingDelete(false);
     }
@@ -166,22 +170,22 @@ export function DetailActions({
       <div className="detail-actions__buttons">
         {verdict === "pending" && (
           <>
-            <button type="button" className="btn btn--primary" disabled={disabled} onClick={() => decide("keep")}>保留</button>
-            <button type="button" className="btn btn--danger" disabled={disabled} onClick={() => decide("discard")}>丢弃</button>
+            <button type="button" className="btn btn--primary" disabled={disabled} onClick={() => decide("keep")}>{dict.keep}</button>
+            <button type="button" className="btn btn--danger" disabled={disabled} onClick={() => decide("discard")}>{dict.discard}</button>
           </>
         )}
-        <button type="button" className="btn" disabled={disabled} onClick={toggleEditing}>改建议</button>
+        <button type="button" className="btn" disabled={disabled} onClick={toggleEditing}>{dict.editSuggestion}</button>
         <button type="button" className="btn" disabled={disabled || reviewPending} onClick={review}>
-          {reviewPending ? "复核中" : "复核"}
+          {reviewPending ? dict.reviewing : dict.review}
         </button>
-        <button type="button" className="btn" disabled={disabled} onClick={rerun}>重跑分析</button>
+        <button type="button" className="btn" disabled={disabled} onClick={rerun}>{dict.rerun}</button>
         {confirmingDelete ? (
           <>
-            <button type="button" className="btn btn--danger" disabled={disabled} onClick={confirmDelete}>确认删除</button>
-            <button type="button" className="btn" disabled={disabled} onClick={() => setConfirmingDelete(false)}>取消</button>
+            <button type="button" className="btn btn--danger" disabled={disabled} onClick={confirmDelete}>{dict.confirmDelete}</button>
+            <button type="button" className="btn" disabled={disabled} onClick={() => setConfirmingDelete(false)}>{dict.cancel}</button>
           </>
         ) : (
-          <button type="button" className="btn btn--danger" disabled={disabled} onClick={() => setConfirmingDelete(true)}>删除</button>
+          <button type="button" className="btn btn--danger" disabled={disabled} onClick={() => setConfirmingDelete(true)}>{dict.delete}</button>
         )}
       </div>
       {editing && (
@@ -191,6 +195,7 @@ export function DetailActions({
           initialTags={tags}
           disabled={disabled}
           onSave={saveEdit}
+          locale={locale}
         />
       )}
       {message && <p className="inline-error">{message}</p>}

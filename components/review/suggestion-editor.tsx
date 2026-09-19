@@ -2,7 +2,8 @@
 
 import { useId, useState } from "react";
 import { capabilityTypeSchema, type CapabilityType } from "../../lib/analysis/card";
-import { TYPE_LABEL, USAGE_LABEL } from "../../lib/library/labels";
+import { typeLabel, usageLabel } from "../../lib/library/labels";
+import { getDict, type Locale } from "../../lib/i18n";
 
 const TYPES = capabilityTypeSchema.options;
 const USAGES = ["integrate", "reference"] as const;
@@ -12,14 +13,17 @@ export function SuggestionEditor({
   initialUsage,
   initialTags,
   disabled = false,
-  onSave
+  onSave,
+  locale = "zh"
 }: {
   initialType: CapabilityType;
   initialUsage: "integrate" | "reference";
   initialTags: string[];
   disabled?: boolean;
   onSave: (type: CapabilityType, usage: "integrate" | "reference", tags: string[]) => Promise<string | null>;
+  locale?: Locale;
 }) {
+  const dict = getDict(locale).suggestionEditor;
   const [type, setType] = useState<CapabilityType>(initialType);
   const [usage, setUsage] = useState<"integrate" | "reference">(initialUsage);
   const [tagsText, setTagsText] = useState(initialTags.join(", "));
@@ -46,7 +50,7 @@ export function SuggestionEditor({
   return (
     <div className="suggestion-editor">
       <label htmlFor={typeId}>
-        类型
+        {dict.typeLabel}
         <select
           id={typeId}
           value={type}
@@ -54,21 +58,21 @@ export function SuggestionEditor({
           onChange={(e) => setType(e.target.value as CapabilityType)}
         >
           {TYPES.map((t) => (
-            <option key={t} value={t}>{TYPE_LABEL[t]}</option>
+            <option key={t} value={t}>{typeLabel(t, locale)}</option>
           ))}
         </select>
       </label>
       <fieldset disabled={isDisabled}>
-        <legend>用法</legend>
+        <legend>{dict.usageLegend}</legend>
         {USAGES.map((u) => (
           <label key={u}>
             <input type="radio" name={usageGroupName} value={u} checked={usage === u} onChange={() => setUsage(u)} />
-            {USAGE_LABEL[u]}
+            {usageLabel(u, locale)}
           </label>
         ))}
       </fieldset>
       <label htmlFor={tagsId}>
-        标签
+        {dict.tagsLabel}
         <input
           id={tagsId}
           type="text"
@@ -78,10 +82,10 @@ export function SuggestionEditor({
           onChange={(e) => setTagsText(e.target.value)}
         />
       </label>
-      <p id={tagsHintId} className="suggestion-editor__hint">英文小写，可用连字符，1–6 个</p>
+      <p id={tagsHintId} className="suggestion-editor__hint">{dict.tagsHint}</p>
       {message && <p className="inline-error">{message}</p>}
       <button type="button" className="btn btn--primary" disabled={isDisabled} onClick={handleSave}>
-        保存并保留
+        {dict.save}
       </button>
     </div>
   );

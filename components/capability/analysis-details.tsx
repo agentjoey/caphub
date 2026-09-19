@@ -1,15 +1,6 @@
 import type { CapabilityDetail } from "../../lib/library/queries";
-import { RUN_STATE_LABEL, errorLabel } from "../../lib/library/labels";
-
-const STEP_LABEL: Record<string, string> = { vision: "看图", search: "搜索", reason: "分析", review: "复核" };
-
-function stepLabel(step: string): string {
-  return STEP_LABEL[step] ?? step;
-}
-
-function runStateLabel(state: string): string {
-  return (RUN_STATE_LABEL as Record<string, string>)[state] ?? state;
-}
+import { runStateLabel, errorLabel } from "../../lib/library/labels";
+import { getDict, type Locale } from "../../lib/i18n";
 
 function seconds(durationMs: number): string {
   return (durationMs / 1000).toFixed(1);
@@ -20,14 +11,18 @@ function tokens(inputTokens: number | null, outputTokens: number | null): string
   return `${inputTokens ?? 0} + ${outputTokens ?? 0}`;
 }
 
-export function AnalysisDetails({ detail }: { detail: CapabilityDetail }) {
+export function AnalysisDetails({ detail, locale = "zh" }: { detail: CapabilityDetail; locale?: Locale }) {
+  const dict = getDict(locale).analysisDetails;
+  const stepLabels: Record<string, string> = { vision: dict.stepVision, search: dict.stepSearch, reason: dict.stepReason, review: dict.stepReview };
+  const stepLabel = (step: string) => stepLabels[step] ?? step;
+
   return (
     <details>
-      <summary>详情</summary>
+      <summary>{dict.summary}</summary>
       {detail.steps.length > 0 && (
         <table>
           <thead>
-            <tr><th>步骤</th><th>服务</th><th>耗时 s</th><th>token</th><th>结果</th></tr>
+            <tr><th>{dict.stepHeader}</th><th>{dict.serviceHeader}</th><th>{dict.durationHeader}</th><th>{dict.tokenHeader}</th><th>{dict.resultHeader}</th></tr>
           </thead>
           <tbody>
             {detail.steps.map((step, index) => (
@@ -36,7 +31,7 @@ export function AnalysisDetails({ detail }: { detail: CapabilityDetail }) {
                 <td>{step.provider} / {step.model}</td>
                 <td>{seconds(step.durationMs)}</td>
                 <td>{tokens(step.inputTokens, step.outputTokens)}</td>
-                <td>{step.ok ? "成功" : (errorLabel(step.error) || "失败")}</td>
+                <td>{step.ok ? dict.success : (errorLabel(step.error, locale) || dict.failed)}</td>
               </tr>
             ))}
           </tbody>
@@ -50,9 +45,9 @@ export function AnalysisDetails({ detail }: { detail: CapabilityDetail }) {
         </ul>
       )}
       <dl>
-        <dt>投递</dt><dd>{detail.captureId}</dd>
-        <dt>能力卡</dt><dd>{detail.id}</dd>
-        <dt>分析运行</dt><dd>{detail.runId} · {detail.runPipeline} · {runStateLabel(detail.runState)}</dd>
+        <dt>{dict.captureLabel}</dt><dd>{detail.captureId}</dd>
+        <dt>{dict.capabilityLabel}</dt><dd>{detail.id}</dd>
+        <dt>{dict.runLabel}</dt><dd>{detail.runId} · {detail.runPipeline} · {runStateLabel(detail.runState, locale)}</dd>
       </dl>
     </details>
   );

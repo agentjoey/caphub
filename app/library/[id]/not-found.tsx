@@ -1,16 +1,20 @@
 import Link from "next/link";
+import { getLocale } from "../../../lib/i18n/locale";
+import { getDict } from "../../../lib/i18n";
 
-export default function NotFound() {
+export default async function NotFound() {
+  const locale = await getLocale();
+  const dict = getDict(locale).notFound;
   return (
     <div>
       <div className="page-head">
         <div>
-          <h1 className="page-title">能力不存在</h1>
-          <p className="page-subtitle">这个能力可能已被删除，或链接有误。</p>
+          <h1 className="page-title">{dict.title}</h1>
+          <p className="page-subtitle">{dict.subtitle}</p>
         </div>
       </div>
       <p className="empty">
-        <Link href="/library">← 返回能力库</Link>
+        <Link href="/library">{dict.back}</Link>
       </p>
     </div>
   );

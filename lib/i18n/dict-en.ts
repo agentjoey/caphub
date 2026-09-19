@@ -1,0 +1,198 @@
+import type { Dict } from "./index";
+
+/** English mirror of `dict-zh.ts`. Typed against `Dict` so a missing/extra key is a compile error. */
+export const dictEn: Dict = {
+  shell: {
+    skipLink: "Skip to content",
+    homeAria: "Caphub home",
+    brandSub: "Library",
+    navAria: "Primary navigation",
+    navCapture: "Capture",
+    navReview: "Review",
+    navLibrary: "Library",
+    langSwitchAria: "Switch interface language"
+  },
+  labels: {
+    type: { skill: "Skill", experience: "Experience", plugin: "Plugin", prompt: "Prompt", other: "Other" },
+    usage: { integrate: "Integrate directly", reference: "Reference only" },
+    verdict: { keep: "Keep", discard: "Discard", pending: "Pending" },
+    verdictBy: { auto: "Auto", human: "Human" },
+    runState: { queued: "Queued", running: "Analyzing", done: "Filed", failed: "Failed" },
+    errors: {
+      OBJECT_UNAVAILABLE: "Original image expired, cannot rerun",
+      BUDGET: "Exceeded per-run analysis budget",
+      TIMEOUT: "Model response timed out",
+      INVALID_OUTPUT: "Model output was invalid (retried)",
+      AUTHENTICATION: "Model API key is invalid",
+      BILLING: "Model quota exhausted or rate-limited",
+      UNAVAILABLE: "Model service unavailable",
+      LEASE_EXPIRED: "Analysis run interrupted too many times",
+      PIPELINE_UNAVAILABLE: "Analysis pipeline not configured",
+      CAPTURE_NOT_FOUND: "Capture record not found",
+      INVALID_IMAGE: "Image could not be parsed",
+      INTERNAL: "Internal error",
+      fallback: "Analysis failed ({code})"
+    }
+  },
+  home: {
+    title: "Capture a capability.",
+    subtitle: "Upload a screenshot, text, or a link, then follow up on the analysis and decide whether to file it.",
+    goReview: "Go to Review ({count})",
+    recentTitle: "Recent captures",
+    recentSub: "Last 20",
+    empty: "No captures yet."
+  },
+  captureForm: {
+    formAria: "Capture a capability",
+    fileTypeError: "Only PNG, JPEG, or WebP images are supported.",
+    evidenceTitle: "Screenshot",
+    evidenceHint: "One image · up to 10 MB",
+    fileInputAria: "Screenshot file",
+    dropZoneAria: "Screenshot drop zone",
+    clearFile: "Clear image",
+    promise: "Capture → Analyze → File",
+    dropHeading: "Drop a screenshot here",
+    dropHint: "PNG, JPEG, or WebP — pasting works too. The same image is never analyzed twice.",
+    chooseFile: "Choose image",
+    contextTitle: "Text or link",
+    contextHintWithFile: "Submitting an image this time",
+    contextHintNoFile: "Used when no image is attached",
+    linkLabel: "Link",
+    linkHint: "HTTPS only",
+    linkPlaceholder: "https://github.com/…",
+    linkInvalid: "Link must start with https://",
+    linkDescription: "A capability's page, repository, or article URL.",
+    textLabel: "Text",
+    textLimit: "/ 4,000",
+    textPlaceholder: "Paste a prompt, an experience, or a note…",
+    submitting: "Submitting…",
+    bothFilledWarning: "Fill in only one of link or text",
+    submit: "Submit",
+    submitPlaceholder: "Choose an image or fill in content to submit",
+    submitFailed: "Submission failed.",
+    duplicateNotice: "This content was already submitted before; pointing to the existing record",
+    duplicateLink: "View existing card",
+    custodyAria: "Submission notice",
+    custodyTitle: "Submit once, then follow up here.",
+    custodyBody: "The original image is purged after 30 days; the analysis and card are kept. High-confidence verdicts run automatically.",
+    custodyState: "Uncertain ones go to Review"
+  },
+  recentRow: {
+    fallbackTitle: "Screenshot",
+    rerun: "Rerun",
+    rerunning: "Rerunning…",
+    rerunFailed: "Rerun failed, please try again later.",
+    deletedBadge: "Deleted",
+    view: "View"
+  },
+  review: {
+    title: "Review",
+    subtitle: "{count} cards pending",
+    empty: "No cards pending review. Once new submissions finish analysis, uncertain ones will show up here.",
+    doneKeep: "Kept",
+    doneDiscard: "Discarded"
+  },
+  library: {
+    title: "Library",
+    subtitle: "{count} capabilities total",
+    tagsStat: "Tags",
+    pendingStat: "Pending review",
+    searchPlaceholder: "Search capabilities…",
+    searchAria: "Search capabilities",
+    searchButton: "Search",
+    discarded: "Discarded",
+    emptyWithFilters: "No capabilities match these filters.",
+    clearFilters: "Clear filters",
+    emptyNoFilters: "No kept capabilities in the library yet.",
+    prevPage: "Previous",
+    nextPage: "Next"
+  },
+  detail: {
+    back: "← Library",
+    createdAt: "Created {date}",
+    howToUse: "How to use",
+    reviewingNotice: "DeepSeek is reviewing, refresh shortly to see the result",
+    reviewFailedPrefix: "Review failed: ",
+    reviewNoteAgree: "Review note: agrees",
+    reviewNoteDisagree: "Review note: disagrees",
+    syncedAt: "Last synced to Obsidian: {date}",
+    notSynced: "Not synced yet"
+  },
+  detailActions: {
+    keep: "Keep",
+    discard: "Discard",
+    editSuggestion: "Edit suggestion",
+    review: "Review",
+    reviewing: "Reviewing",
+    rerun: "Rerun analysis",
+    confirmDelete: "Confirm delete",
+    cancel: "Cancel",
+    delete: "Delete",
+    rerunQueued: "Queued for analysis, refresh once it's done",
+    genericError: "Action failed, please try again"
+  },
+  suggestionEditor: {
+    typeLabel: "Type",
+    usageLegend: "Usage",
+    tagsLabel: "Tags",
+    tagsHint: "Lowercase English, hyphens allowed, 1–6 tags",
+    save: "Save and keep"
+  },
+  analysisDetails: {
+    summary: "Details",
+    stepHeader: "Step",
+    serviceHeader: "Service",
+    durationHeader: "Duration s",
+    tokenHeader: "Tokens",
+    resultHeader: "Result",
+    success: "Succeeded",
+    failed: "Failed",
+    stepVision: "Vision",
+    stepSearch: "Search",
+    stepReason: "Reason",
+    stepReview: "Review",
+    captureLabel: "Capture",
+    capabilityLabel: "Capability",
+    runLabel: "Analysis run"
+  },
+  capturePreview: {
+    thumbAlt: "Submitted screenshot (thumbnail)",
+    purgeNote: "Original purged on {date}; only the thumbnail remains",
+    noImage: "No image",
+    fullAlt: "Submitted screenshot",
+    linkThumb: "Link",
+    noLink: "No link",
+    textThumb: "Text"
+  },
+  cardSummary: {
+    suggestion: "Suggests {verdict} · confidence {confidence} — {reason}"
+  },
+  playbookView: {
+    copyAll: "Copy all",
+    whenToUse: "When to use: {value}"
+  },
+  copyButton: {
+    copy: "Copy",
+    copied: "Copied",
+    failed: "Copy failed"
+  },
+  notFound: {
+    title: "Capability not found",
+    subtitle: "This capability may have been deleted, or the link is wrong.",
+    back: "← Back to library"
+  },
+  actions: {
+    conflict: "Already handled elsewhere",
+    invalid: "Invalid request parameters",
+    cardNotFound: "Card not found or deleted",
+    typeOrUsageInvalid: "Invalid type or usage",
+    tagsInvalidPrefix: "Invalid tags: ",
+    tagsInvalidSuffix: " (must be lowercase English, hyphens allowed)",
+    tagsJoinSeparator: ", ",
+    tagsCountInvalid: "Tags must be 1–6",
+    captureNotFound: "Capture record not found",
+    objectExpired: "Original image expired, cannot rerun",
+    alreadyQueued: "Already queued or being analyzed",
+    reviewInProgress: "Review already in progress"
+  }
+};
