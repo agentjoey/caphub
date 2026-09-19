@@ -8,6 +8,8 @@ const MULTIPART_OVERHEAD_BYTES = 64 * 1024;
 export interface HandleCreateCaptureDeps {
   submit(input: CaptureInput): Promise<SubmitResult>;
   maxUploadBytes: number;
+  /** Looks up the id of a (non-deleted) capability card already built for a capture, if any. */
+  findCapabilityIdByCapture(captureId: string): Promise<string | null>;
 }
 
 function sniffImageMime(bytes: Uint8Array): ImageMime | null {
@@ -71,7 +73,8 @@ export async function handleCreateCapture(request: Request, deps: HandleCreateCa
 
   try {
     const result = await deps.submit(input);
-    return Response.json({ ...result, kind: input.kind });
+    const capabilityId = result.duplicate ? await deps.findCapabilityIdByCapture(result.captureId) : null;
+    return Response.json({ ...result, kind: input.kind, capabilityId });
   } catch (error) {
     const message = error instanceof Error ? error.message : "submit failed";
     if (error instanceof Error && isValidationError(message)) {

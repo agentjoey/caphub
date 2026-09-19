@@ -96,4 +96,29 @@ describe("DetailActions", () => {
     fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
     await waitFor(() => expect(softDeleteAction).toHaveBeenCalledWith("cab_1", originalUpdatedAt));
   });
+
+  it("does not go stale on a rerun CONFLICT (already queued), so delete still works", async () => {
+    // A CONFLICT from rerunAction() means "已在排队或分析中" — not a lock conflict on this
+    // capability row — so the rest of the card's actions (delete, in particular) must stay
+    // enabled and functional afterwards.
+    rerunAction.mockResolvedValueOnce({ ok: false, reason: "CONFLICT", message: "已在排队或分析中" });
+    render(
+      <DetailActions
+        id="cab_1"
+        captureId="cap_1"
+        updatedAt="2026-09-19T00:00:00.000Z"
+        verdict="keep"
+        type="skill"
+        usage="integrate"
+        tags={["python"]}
+        reviewPending={false}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "重跑分析" }));
+    await waitFor(() => expect(screen.getByText("已在排队或分析中")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+    await waitFor(() => expect(softDeleteAction).toHaveBeenCalledOnce());
+  });
 });

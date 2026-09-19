@@ -43,86 +43,117 @@ export function DetailActions({
     if (disabled) return;
     setState("busy");
     setMessage(null);
-    const result = await decideAction(id, updatedAt, nextVerdict);
-    if (result.ok) {
-      setUpdatedAt(result.updatedAt);
+    try {
+      const result = await decideAction(id, updatedAt, nextVerdict);
+      if (result.ok) {
+        setUpdatedAt(result.updatedAt);
+        setState("idle");
+        router.refresh();
+        return;
+      }
+      setMessage(result.message);
+      setState(result.reason === "CONFLICT" ? "stale" : "idle");
+    } catch {
+      setMessage("操作失败，请重试");
       setState("idle");
-      router.refresh();
-      return;
     }
-    setMessage(result.message);
-    setState(result.reason === "CONFLICT" ? "stale" : "idle");
   }
 
   async function saveEdit(nextType: CapabilityType, nextUsage: "integrate" | "reference", nextTags: string[]): Promise<string | null> {
     setState("busy");
     setMessage(null);
-    const result = await editSuggestionAction(id, updatedAt, nextType, nextUsage, nextTags);
-    if (result.ok) {
-      setUpdatedAt(result.updatedAt);
-      setEditing(false);
+    try {
+      const result = await editSuggestionAction(id, updatedAt, nextType, nextUsage, nextTags);
+      if (result.ok) {
+        setUpdatedAt(result.updatedAt);
+        setEditing(false);
+        setState("idle");
+        router.refresh();
+        return null;
+      }
+      if (result.reason === "CONFLICT") {
+        setMessage(result.message);
+        setState("stale");
+        return null;
+      }
       setState("idle");
-      router.refresh();
-      return null;
+      return result.message;
+    } catch {
+      setState("idle");
+      return "操作失败，请重试";
     }
-    if (result.reason === "CONFLICT") {
-      setMessage(result.message);
-      setState("stale");
-      return null;
-    }
-    setState("idle");
-    return result.message;
   }
 
   async function review() {
     if (disabled || reviewPending) return;
     setState("busy");
     setMessage(null);
-    const result = await reviewAction(id);
-    // Intentionally NOT setUpdatedAt(result.updatedAt) on success: requestReview() only sets
-    // review_requested_at/review_error, it never touches capabilities.updated_at, and its
-    // ActionResult.updatedAt is just the server's current time, not a new lock token. Adopting
-    // it as `updatedAt` would desync the optimistic-lock value from the row's real
-    // updated_at, so the very next decide()/saveEdit()/confirmDelete() would always CONFLICT.
-    if (result.ok) {
-      setReviewPending(true);
+    try {
+      const result = await reviewAction(id);
+      // Intentionally NOT setUpdatedAt(result.updatedAt) on success: requestReview() only sets
+      // review_requested_at/review_error, it never touches capabilities.updated_at, and its
+      // ActionResult.updatedAt is just the server's current time, not a new lock token. Adopting
+      // it as `updatedAt` would desync the optimistic-lock value from the row's real
+      // updated_at, so the very next decide()/saveEdit()/confirmDelete() would always CONFLICT.
+      if (result.ok) {
+        setReviewPending(true);
+        setState("idle");
+        router.refresh();
+        return;
+      }
+      // A CONFLICT here means "复核已在进行中" (already queued/running) — not a lock conflict
+      // on this capability row — so it must not disable the rest of the card's actions.
+      setMessage(result.message);
       setState("idle");
-      router.refresh();
-      return;
+    } catch {
+      setMessage("操作失败，请重试");
+      setState("idle");
     }
-    setMessage(result.message);
-    setState(result.reason === "CONFLICT" ? "stale" : "idle");
   }
 
   async function rerun() {
     if (disabled) return;
     setState("busy");
     setMessage(null);
-    const result = await rerunAction(captureId);
-    // Same reasoning as review(): requestRerun() only inserts an analysis_runs row keyed by
-    // captureId, it never touches this capability's updated_at, so its ActionResult.updatedAt
-    // (the server's current time) must not overwrite our optimistic-lock token either.
-    if (result.ok) {
+    try {
+      const result = await rerunAction(captureId);
+      // Same reasoning as review(): requestRerun() only inserts an analysis_runs row keyed by
+      // captureId, it never touches this capability's updated_at, so its ActionResult.updatedAt
+      // (the server's current time) must not overwrite our optimistic-lock token either.
+      if (result.ok) {
+        setMessage("已加入分析队列，完成后刷新查看");
+        setState("idle");
+        router.refresh();
+        return;
+      }
+      // A CONFLICT here means "已在排队或分析中" — not a lock conflict on this capability row —
+      // so it must not disable the rest of the card's actions.
+      setMessage(result.message);
       setState("idle");
-      router.refresh();
-      return;
+    } catch {
+      setMessage("操作失败，请重试");
+      setState("idle");
     }
-    setMessage(result.message);
-    setState(result.reason === "CONFLICT" ? "stale" : "idle");
   }
 
   async function confirmDelete() {
     if (disabled) return;
     setState("busy");
     setMessage(null);
-    const result = await softDeleteAction(id, updatedAt);
-    if (result.ok) {
-      router.push("/library");
-      return;
+    try {
+      const result = await softDeleteAction(id, updatedAt);
+      if (result.ok) {
+        router.push("/library");
+        return;
+      }
+      setMessage(result.message);
+      setState(result.reason === "CONFLICT" ? "stale" : "idle");
+      setConfirmingDelete(false);
+    } catch {
+      setMessage("操作失败，请重试");
+      setState("idle");
+      setConfirmingDelete(false);
     }
-    setMessage(result.message);
-    setState(result.reason === "CONFLICT" ? "stale" : "idle");
-    setConfirmingDelete(false);
   }
 
   function toggleEditing() {

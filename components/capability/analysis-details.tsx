@@ -1,4 +1,15 @@
 import type { CapabilityDetail } from "../../lib/library/queries";
+import { RUN_STATE_LABEL, errorLabel } from "../../lib/library/labels";
+
+const STEP_LABEL: Record<string, string> = { vision: "看图", search: "搜索", reason: "分析", review: "复核" };
+
+function stepLabel(step: string): string {
+  return STEP_LABEL[step] ?? step;
+}
+
+function runStateLabel(state: string): string {
+  return (RUN_STATE_LABEL as Record<string, string>)[state] ?? state;
+}
 
 function seconds(durationMs: number): string {
   return (durationMs / 1000).toFixed(1);
@@ -21,11 +32,11 @@ export function AnalysisDetails({ detail }: { detail: CapabilityDetail }) {
           <tbody>
             {detail.steps.map((step, index) => (
               <tr key={index}>
-                <td>{step.step}</td>
+                <td>{stepLabel(step.step)}</td>
                 <td>{step.provider} / {step.model}</td>
                 <td>{seconds(step.durationMs)}</td>
                 <td>{tokens(step.inputTokens, step.outputTokens)}</td>
-                <td>{step.ok ? "成功" : (step.error ?? "失败")}</td>
+                <td>{step.ok ? "成功" : (errorLabel(step.error) || "失败")}</td>
               </tr>
             ))}
           </tbody>
@@ -41,7 +52,7 @@ export function AnalysisDetails({ detail }: { detail: CapabilityDetail }) {
       <dl>
         <dt>投递</dt><dd>{detail.captureId}</dd>
         <dt>能力卡</dt><dd>{detail.id}</dd>
-        <dt>分析运行</dt><dd>{detail.runId} · {detail.runPipeline} · {detail.runState}</dd>
+        <dt>分析运行</dt><dd>{detail.runId} · {detail.runPipeline} · {runStateLabel(detail.runState)}</dd>
       </dl>
     </details>
   );

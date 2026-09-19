@@ -7,12 +7,14 @@ const WEBP_BYTES = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x4
 
 describe("handleCreateCapture", () => {
   const submit = async (input: { kind: string }) => ({ captureId: "cap_1", runId: "run_1", duplicate: false, kind: input.kind });
+  const noCapability = async () => null;
 
   it("treats a bare https url as url kind", async () => {
     const form = new FormData();
     form.set("text", "https://example.com/x");
     const res = await handleCreateCapture(new Request("http://l/api/captures", { method: "POST", body: form }), {
       submit: submit as never,
+      findCapabilityIdByCapture: noCapability,
       maxUploadBytes: 10
     });
     expect(res.status).toBe(200);
@@ -24,6 +26,7 @@ describe("handleCreateCapture", () => {
     form.set("text", "just some notes");
     const res = await handleCreateCapture(new Request("http://l/api/captures", { method: "POST", body: form }), {
       submit: submit as never,
+      findCapabilityIdByCapture: noCapability,
       maxUploadBytes: 10
     });
     expect(res.status).toBe(200);
@@ -35,6 +38,7 @@ describe("handleCreateCapture", () => {
     form.set("file", new File([PNG_BYTES], "a.png", { type: "image/png" }));
     const res = await handleCreateCapture(new Request("http://l/api/captures", { method: "POST", body: form }), {
       submit: submit as never,
+      findCapabilityIdByCapture: noCapability,
       maxUploadBytes: PNG_BYTES.length
     });
     expect(res.status).toBe(200);
@@ -46,6 +50,7 @@ describe("handleCreateCapture", () => {
     form.set("file", new File([JPEG_BYTES], "a.jpg", { type: "image/jpeg" }));
     const res = await handleCreateCapture(new Request("http://l/api/captures", { method: "POST", body: form }), {
       submit: submit as never,
+      findCapabilityIdByCapture: noCapability,
       maxUploadBytes: JPEG_BYTES.length
     });
     expect(res.status).toBe(200);
@@ -56,6 +61,7 @@ describe("handleCreateCapture", () => {
     form.set("file", new File([WEBP_BYTES], "a.webp", { type: "image/webp" }));
     const res = await handleCreateCapture(new Request("http://l/api/captures", { method: "POST", body: form }), {
       submit: submit as never,
+      findCapabilityIdByCapture: noCapability,
       maxUploadBytes: WEBP_BYTES.length
     });
     expect(res.status).toBe(200);
@@ -67,6 +73,7 @@ describe("handleCreateCapture", () => {
     form.set("file", new File([JPEG_BYTES], "a.png", { type: "image/png" }));
     const res = await handleCreateCapture(new Request("http://l/api/captures", { method: "POST", body: form }), {
       submit: submit as never,
+      findCapabilityIdByCapture: noCapability,
       maxUploadBytes: 100
     });
     expect(res.status).toBe(400);
@@ -78,6 +85,7 @@ describe("handleCreateCapture", () => {
     form.set("file", new File([PNG_BYTES], "a.png", { type: "image/png" }));
     const res = await handleCreateCapture(new Request("http://l/api/captures", { method: "POST", body: form }), {
       submit: submit as never,
+      findCapabilityIdByCapture: noCapability,
       maxUploadBytes: 1
     });
     expect(res.status).toBe(400);
@@ -88,6 +96,7 @@ describe("handleCreateCapture", () => {
     form.set("file", new File([new Uint8Array(1)], "a.gif", { type: "image/gif" }));
     const res = await handleCreateCapture(new Request("http://l/api/captures", { method: "POST", body: form }), {
       submit: submit as never,
+      findCapabilityIdByCapture: noCapability,
       maxUploadBytes: 10
     });
     expect(res.status).toBe(400);
@@ -97,6 +106,7 @@ describe("handleCreateCapture", () => {
     const form = new FormData();
     const res = await handleCreateCapture(new Request("http://l/api/captures", { method: "POST", body: form }), {
       submit: submit as never,
+      findCapabilityIdByCapture: noCapability,
       maxUploadBytes: 10
     });
     expect(res.status).toBe(400);
@@ -111,7 +121,7 @@ describe("handleCreateCapture", () => {
     Object.defineProperty(request, "headers", {
       value: new Headers([...request.headers.entries(), ["content-length", String(10 * 1024 * 1024)]])
     });
-    const res = await handleCreateCapture(request, { submit: submit as never, maxUploadBytes: 10 });
+    const res = await handleCreateCapture(request, { submit: submit as never, findCapabilityIdByCapture: noCapability, maxUploadBytes: 10 });
     expect(res.status).toBe(413);
     expect(formDataSpy).not.toHaveBeenCalled();
   });
@@ -124,10 +134,53 @@ describe("handleCreateCapture", () => {
     };
     const res = await handleCreateCapture(new Request("http://l/api/captures", { method: "POST", body: form }), {
       submit: failingSubmit as never,
+      findCapabilityIdByCapture: noCapability,
       maxUploadBytes: 10
     });
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: "url must use https" });
+  });
+
+  it("looks up and returns capabilityId when submit() reports a duplicate", async () => {
+    const form = new FormData();
+    form.set("text", "hello");
+    const duplicateSubmit = async () => ({ captureId: "cap_existing", runId: null, duplicate: true });
+    const findCapabilityIdByCapture = vi.fn(async (captureId: string) => (captureId === "cap_existing" ? "cab_1" : null));
+    const res = await handleCreateCapture(new Request("http://l/api/captures", { method: "POST", body: form }), {
+      submit: duplicateSubmit as never,
+      findCapabilityIdByCapture,
+      maxUploadBytes: 10
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ duplicate: true, capabilityId: "cab_1" });
+    expect(findCapabilityIdByCapture).toHaveBeenCalledWith("cap_existing");
+  });
+
+  it("returns capabilityId null for a duplicate with no (or a deleted) capability card", async () => {
+    const form = new FormData();
+    form.set("text", "hello");
+    const duplicateSubmit = async () => ({ captureId: "cap_existing", runId: null, duplicate: true });
+    const res = await handleCreateCapture(new Request("http://l/api/captures", { method: "POST", body: form }), {
+      submit: duplicateSubmit as never,
+      findCapabilityIdByCapture: noCapability,
+      maxUploadBytes: 10
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ duplicate: true, capabilityId: null });
+  });
+
+  it("does not look up capabilityId (returns null) for a non-duplicate submission", async () => {
+    const form = new FormData();
+    form.set("text", "hello");
+    const findCapabilityIdByCapture = vi.fn(async () => "cab_should_not_be_used");
+    const res = await handleCreateCapture(new Request("http://l/api/captures", { method: "POST", body: form }), {
+      submit: submit as never,
+      findCapabilityIdByCapture,
+      maxUploadBytes: 10
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ duplicate: false, capabilityId: null });
+    expect(findCapabilityIdByCapture).not.toHaveBeenCalled();
   });
 
   it("maps an unrecognized submit() error to a generic 500", async () => {
@@ -139,6 +192,7 @@ describe("handleCreateCapture", () => {
     };
     const res = await handleCreateCapture(new Request("http://l/api/captures", { method: "POST", body: form }), {
       submit: failingSubmit as never,
+      findCapabilityIdByCapture: noCapability,
       maxUploadBytes: 10
     });
     expect(res.status).toBe(500);

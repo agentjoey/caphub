@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi, afterEach } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn() })
@@ -8,7 +8,13 @@ vi.mock("next/navigation", () => ({
 
 import { CaptureForm } from "./capture-form";
 
-afterEach(cleanup);
+beforeEach(() => {
+  vi.stubGlobal("fetch", vi.fn());
+});
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 function pngFile(name = "shot.png") {
   return new File(["fake"], name, { type: "image/png" });
@@ -35,5 +41,29 @@ describe("CaptureForm", () => {
     fireEvent.change(screen.getByLabelText(/^链接\s/), { target: { value: "http://example.com" } });
     expect(screen.getByRole("alert")).toHaveProperty("textContent", "链接需以 https:// 开头");
     expect(screen.getByRole("button", { name: "链接需以 https:// 开头" })).toHaveProperty("disabled", true);
+  });
+
+  it("shows the duplicate notice with a link to the existing card when the API reports a duplicate", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ captureId: "cap_1", kind: "text", duplicate: true, capabilityId: "cab_1" })
+    });
+    render(<CaptureForm />);
+    fireEvent.change(screen.getByLabelText(/^文字\s/), { target: { value: "some text" } });
+    fireEvent.click(screen.getByRole("button", { name: "投递" }));
+    await waitFor(() => expect(screen.getByText(/这条内容之前投递过，已指向原记录/)).toBeTruthy());
+    expect(screen.getByRole("link", { name: "查看已有卡片" }).getAttribute("href")).toBe("/library/cab_1");
+  });
+
+  it("shows the duplicate notice without a link when the duplicate has no capability card", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ captureId: "cap_1", kind: "text", duplicate: true, capabilityId: null })
+    });
+    render(<CaptureForm />);
+    fireEvent.change(screen.getByLabelText(/^文字\s/), { target: { value: "some text" } });
+    fireEvent.click(screen.getByRole("button", { name: "投递" }));
+    await waitFor(() => expect(screen.getByText(/这条内容之前投递过，已指向原记录/)).toBeTruthy());
+    expect(screen.queryByRole("link", { name: "查看已有卡片" })).toBeNull();
   });
 });

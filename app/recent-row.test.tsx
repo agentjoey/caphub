@@ -39,4 +39,11 @@ describe("RecentRow", () => {
     render(<RecentRow item={item} relativeTime="1 分钟前" />);
     expect(screen.getByRole("link", { name: "查看" }).getAttribute("href")).toBe("/library/cab_1");
   });
+
+  it("shows a 已删除 badge instead of the verdict badge when soft-deleted", () => {
+    const item: RecentCapture = { ...base, runState: "done", errorCode: null, capabilityId: "cab_1", verdict: "keep", deleted: true };
+    render(<RecentRow item={item} relativeTime="1 分钟前" />);
+    expect(screen.getByText("已删除")).toBeTruthy();
+    expect(screen.queryByText("保留")).toBeNull();
+  });
 });

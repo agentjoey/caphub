@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 const ACCEPTED_MIME = new Set(["image/png", "image/jpeg", "image/webp"]);
@@ -16,6 +17,8 @@ export function CaptureForm() {
   const [text, setText] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [duplicateCapabilityId, setDuplicateCapabilityId] = useState<string | null>(null);
+  const [duplicateNotice, setDuplicateNotice] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   function chooseFile(candidate: File | undefined | null) {
@@ -59,12 +62,14 @@ export function CaptureForm() {
     if (pending || !hasContent || (!file && bothFilled) || linkInvalid) return;
     setPending(true);
     setError(null);
+    setDuplicateNotice(false);
+    setDuplicateCapabilityId(null);
     try {
       const body = new FormData();
       if (file) body.set("file", file);
       else body.set("text", sourceUrl.trim() || text.trim());
       const response = await fetch("/api/captures", { method: "POST", body });
-      const payload = (await response.json()) as { error?: string };
+      const payload = (await response.json()) as { error?: string; duplicate?: boolean; capabilityId?: string | null };
       if (!response.ok) {
         setError(payload.error ?? "投递失败。");
         return;
@@ -73,6 +78,10 @@ export function CaptureForm() {
       setSourceUrl("");
       setText("");
       if (inputRef.current) inputRef.current.value = "";
+      if (payload.duplicate) {
+        setDuplicateNotice(true);
+        setDuplicateCapabilityId(payload.capabilityId ?? null);
+      }
       router.refresh();
     } catch {
       setError("投递失败。");
@@ -145,6 +154,17 @@ export function CaptureForm() {
           </button>
         </section>
       </form>
+      {duplicateNotice && (
+        <p className="notice caphub-duplicate-notice" role="status">
+          这条内容之前投递过，已指向原记录
+          {duplicateCapabilityId && (
+            <>
+              {" "}
+              <Link href={`/library/${duplicateCapabilityId}`}>查看已有卡片</Link>
+            </>
+          )}
+        </p>
+      )}
       <section className="caphub-custody" aria-label="投递说明">
         <div>
           <strong>投递一次，在这里跟进分析。</strong>

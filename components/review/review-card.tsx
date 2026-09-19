@@ -29,36 +29,46 @@ export function ReviewCard({ row, detail }: { row: CapabilityRow; detail: Capabi
     if (busy) return;
     setState("saving");
     setMessage(null);
-    const result = await decideAction(row.id, expectedUpdatedAt, verdict);
-    if (result.ok) {
-      setExpectedUpdatedAt(result.updatedAt);
-      setDoneLabel(verdict === "keep" ? "已保留" : "已丢弃");
-      setEditing(false);
-      setState("done");
-      return;
+    try {
+      const result = await decideAction(row.id, expectedUpdatedAt, verdict);
+      if (result.ok) {
+        setExpectedUpdatedAt(result.updatedAt);
+        setDoneLabel(verdict === "keep" ? "已保留" : "已丢弃");
+        setEditing(false);
+        setState("done");
+        return;
+      }
+      setMessage(result.message);
+      setState(result.reason === "CONFLICT" ? "stale" : "idle");
+    } catch {
+      setMessage("操作失败，请重试");
+      setState("idle");
     }
-    setMessage(result.message);
-    setState(result.reason === "CONFLICT" ? "stale" : "idle");
   }
 
   async function saveEdit(type: CapabilityType, usage: "integrate" | "reference", tags: string[]): Promise<string | null> {
     setState("saving");
     setMessage(null);
-    const result = await editSuggestionAction(row.id, expectedUpdatedAt, type, usage, tags);
-    if (result.ok) {
-      setExpectedUpdatedAt(result.updatedAt);
-      setDoneLabel("已保留");
-      setEditing(false);
-      setState("done");
-      return null;
+    try {
+      const result = await editSuggestionAction(row.id, expectedUpdatedAt, type, usage, tags);
+      if (result.ok) {
+        setExpectedUpdatedAt(result.updatedAt);
+        setDoneLabel("已保留");
+        setEditing(false);
+        setState("done");
+        return null;
+      }
+      if (result.reason === "CONFLICT") {
+        setMessage(result.message);
+        setState("stale");
+        return null;
+      }
+      setState("idle");
+      return result.message;
+    } catch {
+      setState("idle");
+      return "操作失败，请重试";
     }
-    if (result.reason === "CONFLICT") {
-      setMessage(result.message);
-      setState("stale");
-      return null;
-    }
-    setState("idle");
-    return result.message;
   }
 
   function toggleEditing() {

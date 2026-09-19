@@ -44,7 +44,11 @@ export function RecentRow({ item, relativeTime }: { item: RecentCapture; relativ
         <div className="list-row__title">{fallbackTitle(item)}</div>
         <div className="list-row__meta">
           {item.runState && <span className="badge">{RUN_STATE_LABEL[item.runState]}</span>}
-          {item.verdict && <span className={`badge badge--${item.verdict}`}>{VERDICT_LABEL[item.verdict]}</span>}
+          {item.deleted ? (
+            <span className="badge badge--discard">已删除</span>
+          ) : (
+            item.verdict && <span className={`badge badge--${item.verdict}`}>{VERDICT_LABEL[item.verdict]}</span>
+          )}
           <span>{relativeTime}</span>
         </div>
         {item.runState === "failed" && (

@@ -19,6 +19,8 @@ describe("upsertCapability", () => {
     const out = await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card, verdict: "keep", verdictBy: "auto" });
     expect(sql).toContain("WITH prev AS");
     expect(sql).toContain("INSERT INTO caphub_v2.capabilities");
+    expect(sql).toContain("review_error = NULL");
+    expect(sql).toContain("review_requested_at = NULL");
     expect(out).toEqual({ id: "cab_1", verdict: "keep", previousVerdict: null, deleted: false });
   });
 

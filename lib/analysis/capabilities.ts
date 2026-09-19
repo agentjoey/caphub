@@ -29,7 +29,8 @@ export async function upsertCapability(
          run_id = excluded.run_id, title = excluded.title, type = excluded.type, summary = excluded.summary,
          signals = excluded.signals, suggested_verdict = excluded.suggested_verdict, suggested_reason = excluded.suggested_reason,
          confidence = excluded.confidence, usage = excluded.usage, playbook = excluded.playbook, tags = excluded.tags,
-         source_url = excluded.source_url, review_note = NULL, notified_at = NULL, updated_at = now(),
+         source_url = excluded.source_url, review_note = NULL, review_error = NULL, review_requested_at = NULL,
+         notified_at = NULL, updated_at = now(),
          verdict = CASE WHEN caphub_v2.capabilities.verdict_by = 'human' THEN caphub_v2.capabilities.verdict ELSE excluded.verdict END,
          verdict_by = CASE WHEN caphub_v2.capabilities.verdict_by = 'human' THEN 'human' ELSE excluded.verdict_by END,
          verdict_at = CASE WHEN caphub_v2.capabilities.verdict_by = 'human' THEN caphub_v2.capabilities.verdict_at ELSE excluded.verdict_at END
