@@ -22,6 +22,10 @@ describe("prepareImage", () => {
     });
     expect(m.ocrText).toBe("");
   });
+
+  it("rejects undecodable bytes with code INVALID_IMAGE", async () => {
+    await expect(prepareImage(new Uint8Array([1, 2, 3, 4]), { ocr: async () => "" })).rejects.toMatchObject({ code: "INVALID_IMAGE", message: "INVALID_IMAGE" });
+  });
 });
 
 describe("packagedLangPath", () => {

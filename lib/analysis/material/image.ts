@@ -142,9 +142,10 @@ export async function prepareImage(
   deps: { ocr?: (png: Uint8Array) => Promise<string> } = {},
   signal?: AbortSignal
 ): Promise<ImageMaterial> {
+  const invalid = (cause?: unknown) => Object.assign(new Error("INVALID_IMAGE", { cause }), { code: "INVALID_IMAGE" });
   const image = sharp(Buffer.from(bytes), { failOn: "error" }).rotate();
-  const meta = await image.metadata();
-  if (!meta.width || !meta.height) throw new Error("INVALID_IMAGE");
+  const meta = await image.metadata().catch((error: unknown) => { throw invalid(error); });
+  if (!meta.width || !meta.height) throw invalid();
   const resized = meta.width > MAX_EDGE_PX || meta.height > MAX_EDGE_PX
     ? image.resize({ width: MAX_EDGE_PX, height: MAX_EDGE_PX, fit: "inside" })
     : image;

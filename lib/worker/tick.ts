@@ -1,10 +1,24 @@
 import type { Lease, RunQueue } from "../queue/runs";
 
+/** Error codes a failed run may record; any other thrown code (or none) is recorded as INTERNAL. */
+export const RUN_ERROR_CODES = [
+  "TIMEOUT", "AUTHENTICATION", "BILLING", "UNAVAILABLE", "INVALID_OUTPUT", "ABORTED", "BUDGET",
+  "OBJECT_UNAVAILABLE", "PIPELINE_UNAVAILABLE", "CAPTURE_NOT_FOUND", "INVALID_IMAGE", "REASON_STEP_NOT_FOUND", "CAPABILITY_NOT_FOUND"
+] as const;
+export type RunErrorCode = (typeof RUN_ERROR_CODES)[number] | "INTERNAL";
+
+export function runErrorCode(error: unknown): RunErrorCode {
+  const code = error && typeof error === "object" && "code" in error ? (error as { code: unknown }).code : undefined;
+  return (RUN_ERROR_CODES as readonly unknown[]).includes(code) ? code as RunErrorCode : "INTERNAL";
+}
+
 export interface TickDeps {
   queue: Pick<RunQueue, "claim" | "heartbeat" | "finish">;
   run(lease: Lease, signal: AbortSignal): Promise<unknown>;
   clock(): Date;
   ownerToken(): string;
+  /** Receives runs that failed with an unrecognised error (recorded as INTERNAL). */
+  log?(entry: Record<string, unknown>): void;
 }
 
 export async function runTick(deps: TickDeps, signal: AbortSignal): Promise<"idle" | "processed"> {
@@ -28,10 +42,10 @@ export async function runTick(deps: TickDeps, signal: AbortSignal): Promise<"idl
     if (!controller.signal.aborted) await deps.queue.finish(lease, { state: "done" }, deps.clock());
   } catch (error) {
     if (!controller.signal.aborted) {
-      const rawCode = error && typeof error === "object" && "code" in error ? (error as { code: unknown }).code : undefined;
-      const code = typeof rawCode === "string" && rawCode.length > 0 ? rawCode : "UNAVAILABLE";
-      const message = error instanceof Error ? error.message : String(error);
-      await deps.queue.finish(lease, { state: "failed", errorCode: code, errorMessage: message.slice(0, 500) }, deps.clock());
+      const errorCode = runErrorCode(error);
+      const errorMessage = (error instanceof Error ? error.message : String(error)).slice(0, 500);
+      if (errorCode === "INTERNAL") deps.log?.({ runId: lease.runId, internalError: errorMessage });
+      await deps.queue.finish(lease, { state: "failed", errorCode, errorMessage }, deps.clock());
     }
   } finally {
     clearInterval(heartbeat);

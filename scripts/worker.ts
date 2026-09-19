@@ -19,7 +19,7 @@ function parseArgs(args: string[]): Mode {
 
 async function main() {
   const mode = parseArgs(process.argv.slice(2));
-  const config = loadConfig();
+  const config = loadConfig(process.env, "worker");
   const pool = createPool(config.databaseUrl);
   const objects = createObjectStore(config.s3);
   const queue = new RunQueue(pool);
@@ -32,6 +32,7 @@ async function main() {
   try {
     if (mode === "dry-run") { log({ pipeline: config.pipeline, queue: await queue.summary() }); return; }
     const pipelines = buildWorkerPipelines(config, pool, objects);
+    if (!config.analysisEnabled) log({ analysis: "disabled" });
     let nextRetention = 0;
     do {
       if (config.retentionEnabled && !retentionSweep && Date.now() >= nextRetention) {
@@ -41,23 +42,24 @@ async function main() {
           .catch((e) => { log({ retentionError: e instanceof Error ? e.message : String(e) }); })
           .finally(() => { retentionSweep = undefined; });
       }
-      try {
-        const state = config.analysisEnabled
-          ? await runTick({
-              queue,
-              run: (lease, signal) => {
-                const deps = selectPipelineDeps(pipelines, lease.pipeline);
-                if (!deps) throw Object.assign(new Error(`no pipeline deps available for '${lease.pipeline}'`), { code: "PIPELINE_UNAVAILABLE" });
-                return runPipeline(deps, lease, signal);
-              },
-              clock: () => new Date(),
-              ownerToken: randomUUID
-            }, controller.signal)
-          : "disabled";
-        if (state !== "idle") log({ tick: state });
-      } catch (e) {
-        log({ tickError: e instanceof Error ? e.message : String(e) });
-        if (mode === "once") process.exitCode = 1;
+      if (config.analysisEnabled) {
+        try {
+          const state = await runTick({
+            queue,
+            run: (lease, signal) => {
+              const deps = selectPipelineDeps(pipelines, lease.pipeline);
+              if (!deps) throw Object.assign(new Error(`no pipeline deps available for '${lease.pipeline}'`), { code: "PIPELINE_UNAVAILABLE" });
+              return runPipeline(deps, lease, signal);
+            },
+            clock: () => new Date(),
+            ownerToken: randomUUID,
+            log
+          }, controller.signal);
+          if (state !== "idle") log({ tick: state });
+        } catch (e) {
+          log({ tickError: e instanceof Error ? e.message : String(e) });
+          if (mode === "once") process.exitCode = 1;
+        }
       }
       if (mode !== "daemon") break;
       await delay(2_000, undefined, { signal: controller.signal }).catch(() => {});
