@@ -342,6 +342,7 @@ body {
   .caphub-field input, .caphub-field textarea { font-size: 16px; }
   .caphub-custody { grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 14px; }
   .caphub-custody__state { justify-self: start; }
+  .caphub-quiet-button { width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) {
   .caphub-custody__identity, .caphub-spinner { animation: none; transform: none; }
