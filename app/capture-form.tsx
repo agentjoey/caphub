@@ -16,11 +16,17 @@ export function CaptureForm() {
   function chooseFile(candidate: File | undefined | null) {
     if (!candidate) return;
     if (!ACCEPTED_MIME.has(candidate.type)) {
-      setError("Only PNG, JPEG, or WebP images are supported.");
+      setError("仅支持 PNG、JPEG 或 WebP 图片。");
       return;
     }
     setError(null);
     setFile(candidate);
+  }
+
+  function clearFile() {
+    setFile(null);
+    setError(null);
+    if (inputRef.current) inputRef.current.value = "";
   }
 
   function handleDrop(event: DragEvent<HTMLDivElement>) {
@@ -51,7 +57,7 @@ export function CaptureForm() {
       const response = await fetch("/api/captures", { method: "POST", body });
       const payload = (await response.json()) as { error?: string };
       if (!response.ok) {
-        setError(payload.error ?? "Submit failed.");
+        setError(payload.error ?? "投递失败。");
         return;
       }
       setFile(null);
@@ -59,7 +65,7 @@ export function CaptureForm() {
       if (inputRef.current) inputRef.current.value = "";
       router.refresh();
     } catch {
-      setError("Submit failed.");
+      setError("投递失败。");
     } finally {
       setPending(false);
     }
@@ -81,11 +87,28 @@ export function CaptureForm() {
         onClick={() => inputRef.current?.click()}
       >
         {file ? (
-          <span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
             {file.name} · {file.type}
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                clearFile();
+              }}
+              style={{
+                border: `1px solid var(--hairline-strong)`,
+                borderRadius: "var(--radius-sm)",
+                background: "var(--paper)",
+                color: "var(--ink-muted)",
+                padding: "2px 8px",
+                cursor: "pointer"
+              }}
+            >
+              清除图片
+            </button>
           </span>
         ) : (
-          <span>Drop, paste, or click to choose an image (PNG/JPEG/WebP)</span>
+          <span>拖拽、粘贴或点击选择图片（PNG/JPEG/WebP）</span>
         )}
         <input
           ref={inputRef}
@@ -99,7 +122,7 @@ export function CaptureForm() {
         value={text}
         onChange={(event) => setText(event.target.value)}
         onPaste={handlePaste}
-        placeholder="Or paste/type text or a URL"
+        placeholder="或粘贴/输入文字或 URL"
         disabled={!!file}
         rows={3}
         style={{
@@ -113,7 +136,7 @@ export function CaptureForm() {
       />
       {error && <p style={{ color: "var(--rust)" }}>{error}</p>}
       <button type="submit" disabled={pending || (!file && !text.trim())}>
-        {pending ? "Submitting…" : "Submit"}
+        {pending ? "投递中…" : "投递"}
       </button>
     </form>
   );

@@ -48,6 +48,45 @@ describe("verifyAccessJwt", () => {
     ).rejects.toThrow("ACCESS_EMAIL_MISSING");
   });
 
+  it("rejects an expired token", async () => {
+    const { privateKey, publicKey } = await generateKeyPair("RS256");
+    const jwk = { ...(await exportJWK(publicKey)), kid: "k1", alg: "RS256", use: "sig" };
+    const fetchFn = vi.fn(async () => new Response(JSON.stringify({ keys: [jwk] }), { status: 200, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
+    const teamDomain = `team-${++counter}.cloudflareaccess.com`;
+    const token = await new SignJWT({ aud: "aud1", iss: `https://${teamDomain}`, email: "a@b.c" })
+      .setProtectedHeader({ alg: "RS256", kid: "k1" })
+      .setIssuedAt(Math.floor(Date.now() / 1000) - 7200)
+      .setExpirationTime(Math.floor(Date.now() / 1000) - 3600)
+      .sign(privateKey);
+    await expect(verifyAccessJwt(token, { aud: "aud1", teamDomain, fetch: fetchFn })).rejects.toThrow();
+  });
+
+  it("rejects a token signed with the wrong key (bad signature, known kid)", async () => {
+    const { publicKey } = await generateKeyPair("RS256");
+    const { privateKey: impostorPrivate } = await generateKeyPair("RS256");
+    const jwk = { ...(await exportJWK(publicKey)), kid: "k1", alg: "RS256", use: "sig" };
+    const fetchFn = vi.fn(async () => new Response(JSON.stringify({ keys: [jwk] }), { status: 200, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
+    const teamDomain = `team-${++counter}.cloudflareaccess.com`;
+    // Signed with a key whose public half was never published under this kid.
+    const token = await new SignJWT({ aud: "aud1", iss: `https://${teamDomain}`, email: "a@b.c" })
+      .setProtectedHeader({ alg: "RS256", kid: "k1" }).setIssuedAt().setExpirationTime("1h").sign(impostorPrivate);
+    await expect(verifyAccessJwt(token, { aud: "aud1", teamDomain, fetch: fetchFn })).rejects.toThrow();
+  });
+
+  it("throws when aud is empty", async () => {
+    const { fetchFn, sign, teamDomain } = await setup();
+    const token = await sign({ aud: "aud1", iss: `https://${teamDomain}`, email: "a@b.c" });
+    await expect(verifyAccessJwt(token, { aud: "", teamDomain, fetch: fetchFn })).rejects.toThrow("ACCESS_AUD_REQUIRED");
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("throws when teamDomain is not a valid hostname", async () => {
+    const { fetchFn, sign } = await setup();
+    const token = await sign({ aud: "aud1", iss: "https://not-a-hostname", email: "a@b.c" });
+    await expect(verifyAccessJwt(token, { aud: "aud1", teamDomain: "not-a-hostname", fetch: fetchFn })).rejects.toThrow("ACCESS_TEAM_DOMAIN_INVALID");
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
   it("refetches the JWKS once when the kid is unknown (key rotation)", async () => {
     const { privateKey: oldPrivate, publicKey: oldPublic } = await generateKeyPair("RS256");
     const { privateKey: newPrivate, publicKey: newPublic } = await generateKeyPair("RS256");
