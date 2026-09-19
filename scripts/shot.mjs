@@ -31,7 +31,10 @@ async function checkPage(page) {
   return page.evaluate((pattern) => {
     const overflow = document.documentElement.scrollWidth > window.innerWidth;
     const clone = document.body.cloneNode(true);
-    clone.querySelectorAll("details").forEach((d) => d.remove());
+    // textContent includes text nodes that are never rendered to the user — <script> (Next
+    // embeds its RSC payload there), <style>, <noscript>, and <template> — plus collapsed
+    // <details>. Strip all of those before checking so the id check reflects visible text only.
+    clone.querySelectorAll("script, style, noscript, template, details").forEach((el) => el.remove());
     const text = clone.textContent || "";
     const internalIdVisible = new RegExp(pattern).test(text);
     return { overflow, internalIdVisible };

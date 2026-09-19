@@ -42,10 +42,12 @@ export default async function Page({
               return detail ? <ReviewCard key={row.id} row={row} detail={detail} /> : null;
             })}
           </div>
-          <nav className="pagination">
-            {hasPrev ? <Link href={`/review?page=${page - 1}`}>上一页</Link> : <span aria-disabled="true">上一页</span>}
-            {hasNext ? <Link href={`/review?page=${page + 1}`}>下一页</Link> : <span aria-disabled="true">下一页</span>}
-          </nav>
+          {(hasPrev || hasNext) && (
+            <nav className="pagination">
+              {hasPrev && <Link href={`/review?page=${page - 1}`}>上一页</Link>}
+              {hasNext && <Link href={`/review?page=${page + 1}`}>下一页</Link>}
+            </nav>
+          )}
         </>
       )}
     </div>

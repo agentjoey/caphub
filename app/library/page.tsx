@@ -131,14 +131,12 @@ export default async function Page({
               </li>
             ))}
           </ul>
-          <nav className="pagination">
-            {hasPrev
-              ? <Link href={libraryHref(filter, { page: filter.page - 1 })}>上一页</Link>
-              : <span aria-disabled="true">上一页</span>}
-            {hasNext
-              ? <Link href={libraryHref(filter, { page: filter.page + 1 })}>下一页</Link>
-              : <span aria-disabled="true">下一页</span>}
-          </nav>
+          {(hasPrev || hasNext) && (
+            <nav className="pagination">
+              {hasPrev && <Link href={libraryHref(filter, { page: filter.page - 1 })}>上一页</Link>}
+              {hasNext && <Link href={libraryHref(filter, { page: filter.page + 1 })}>下一页</Link>}
+            </nav>
+          )}
         </>
       )}
     </div>

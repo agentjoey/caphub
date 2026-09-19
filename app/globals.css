@@ -455,3 +455,15 @@ body {
 @media (max-width: 900px) {
   .detail-grid { grid-template-columns: 1fr; }
 }
+
+/* Long single-line <pre> blocks (install commands, prompt text, experience content) must
+   wrap instead of forcing their panel/grid ancestors to a huge width. Grid/flex children
+   that hold them also need min-width: 0, since grid/flex items default to min-width: auto
+   and won't shrink below their content's intrinsic (unwrapped) width otherwise. */
+.panel pre, .capture-text, .analysis-details pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-width: 100%;
+}
+.detail-grid > *, .review-card > *, .panel { min-width: 0; }
