@@ -1,0 +1,68 @@
+import type { Pool } from "pg";
+import type { Pipeline } from "../config";
+
+export interface Lease { runId: string; captureId: string; pipeline: Pipeline; ownerToken: string }
+export interface RunOutcome { state: "done" | "failed"; errorCode?: string; errorMessage?: string }
+
+const LEASE = "interval '120 seconds'";
+
+export class RunQueue {
+  constructor(private readonly pool: Pool) {}
+
+  async claim(ownerToken: string, now: Date): Promise<Lease | null> {
+    const db = await this.pool.connect();
+    try {
+      await db.query("BEGIN");
+      await db.query("SELECT pg_advisory_xact_lock(hashtext('caphub_v2.worker'), 0)");
+      const row = await db.query<{ id: string; capture_id: string; pipeline: Pipeline }>(
+        `WITH next AS (
+           SELECT id FROM caphub_v2.analysis_runs
+           WHERE (state = 'queued' OR (state = 'running' AND lease_until <= $1))
+             AND NOT EXISTS (SELECT 1 FROM caphub_v2.analysis_runs WHERE state = 'running' AND lease_until > $1)
+           ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT 1
+         )
+         UPDATE caphub_v2.analysis_runs r SET state = 'running', owner_token = $2,
+           lease_until = $1::timestamptz + ${LEASE}, attempts = r.attempts + 1,
+           started_at = coalesce(r.started_at, $1)
+         FROM next WHERE r.id = next.id RETURNING r.id, r.capture_id, r.pipeline`,
+        [now.toISOString(), ownerToken]
+      );
+      await db.query("COMMIT");
+      const r = row.rows[0];
+      return r ? { runId: r.id, captureId: r.capture_id, pipeline: r.pipeline, ownerToken } : null;
+    } catch (error) {
+      await db.query("ROLLBACK");
+      throw error;
+    } finally {
+      db.release();
+    }
+  }
+
+  async heartbeat(lease: Lease, now: Date): Promise<boolean> {
+    const r = await this.pool.query(
+      `UPDATE caphub_v2.analysis_runs SET lease_until = $2::timestamptz + ${LEASE}
+       WHERE id = $1 AND owner_token = $3 AND state = 'running' AND lease_until > $2`,
+      [lease.runId, now.toISOString(), lease.ownerToken]);
+    return r.rowCount === 1;
+  }
+
+  async finish(lease: Lease, outcome: RunOutcome, now: Date): Promise<boolean> {
+    const r = await this.pool.query(
+      `UPDATE caphub_v2.analysis_runs SET state = $4, owner_token = NULL, lease_until = NULL,
+         error_code = $5, error_message = $6, finished_at = $2
+       WHERE id = $1 AND owner_token = $3 AND state = 'running' AND lease_until > $2`,
+      [lease.runId, now.toISOString(), lease.ownerToken, outcome.state, outcome.errorCode ?? null, outcome.errorMessage ?? null]);
+    return r.rowCount === 1;
+  }
+
+  async requeue(runId: string): Promise<void> {
+    await this.pool.query(
+      "UPDATE caphub_v2.analysis_runs SET state = 'queued', owner_token = NULL, lease_until = NULL, error_code = NULL, error_message = NULL, finished_at = NULL WHERE id = $1 AND state = 'failed'",
+      [runId]);
+  }
+
+  async summary(): Promise<Array<{ state: string; count: number }>> {
+    const r = await this.pool.query<{ state: string; count: string }>("SELECT state, count(*)::text AS count FROM caphub_v2.analysis_runs GROUP BY state ORDER BY state");
+    return r.rows.map((x) => ({ state: x.state, count: Number(x.count) }));
+  }
+}
