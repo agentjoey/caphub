@@ -5,6 +5,8 @@ export interface Lease { runId: string; captureId: string; pipeline: Pipeline; o
 export interface RunOutcome { state: "done" | "failed"; errorCode?: string; errorMessage?: string }
 
 const LEASE = "interval '120 seconds'";
+/** A run whose lease expired this many times (worker crash mid-run) is failed instead of reclaimed. */
+export const MAX_ATTEMPTS = 2;
 
 export class RunQueue {
   constructor(private readonly pool: Pool) {}
@@ -14,10 +16,16 @@ export class RunQueue {
     try {
       await db.query("BEGIN");
       await db.query("SELECT pg_advisory_xact_lock(hashtext('caphub_v2.worker'), 0)");
+      await db.query(
+        `UPDATE caphub_v2.analysis_runs SET state = 'failed', owner_token = NULL, lease_until = NULL,
+           error_code = 'LEASE_EXPIRED', error_message = 'lease expired after ' || attempts || ' attempts', finished_at = $1
+         WHERE state = 'running' AND lease_until <= $1 AND attempts >= $2`,
+        [now.toISOString(), MAX_ATTEMPTS]
+      );
       const row = await db.query<{ id: string; capture_id: string; pipeline: Pipeline }>(
         `WITH next AS (
            SELECT id FROM caphub_v2.analysis_runs
-           WHERE (state = 'queued' OR (state = 'running' AND lease_until <= $1))
+           WHERE (state = 'queued' OR (state = 'running' AND lease_until <= $1 AND attempts < $3))
              AND NOT EXISTS (SELECT 1 FROM caphub_v2.analysis_runs WHERE state = 'running' AND lease_until > $1)
            ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT 1
          )
@@ -25,7 +33,7 @@ export class RunQueue {
            lease_until = $1::timestamptz + ${LEASE}, attempts = r.attempts + 1,
            started_at = coalesce(r.started_at, $1)
          FROM next WHERE r.id = next.id RETURNING r.id, r.capture_id, r.pipeline`,
-        [now.toISOString(), ownerToken]
+        [now.toISOString(), ownerToken, MAX_ATTEMPTS]
       );
       await db.query("COMMIT");
       const r = row.rows[0];
@@ -53,12 +61,6 @@ export class RunQueue {
        WHERE id = $1 AND owner_token = $3 AND state = 'running' AND lease_until > $2`,
       [lease.runId, now.toISOString(), lease.ownerToken, outcome.state, outcome.errorCode ?? null, outcome.errorMessage ?? null]);
     return r.rowCount === 1;
-  }
-
-  async requeue(runId: string): Promise<void> {
-    await this.pool.query(
-      "UPDATE caphub_v2.analysis_runs SET state = 'queued', owner_token = NULL, lease_until = NULL, error_code = NULL, error_message = NULL, finished_at = NULL WHERE id = $1 AND state = 'failed'",
-      [runId]);
   }
 
   async summary(): Promise<Array<{ state: string; count: number }>> {
