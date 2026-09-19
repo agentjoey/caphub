@@ -49,4 +49,11 @@ describe("runStructured", () => {
     const call = { provider: "x", model: "m", invoke: async () => ({ value: { n: 1 }, usage: { inputTokens: 1, outputTokens: 1 } }) };
     await expect(runStructured({ ...base(call, pool), budget })).rejects.toMatchObject({ code: "BUDGET" });
   });
+  it("records the attempt row when a response exceeds the token budget", async () => {
+    const { rows, pool } = recorder();
+    const budget = new RunBudget({ maxCalls: 4, maxTokens: 1 });
+    const call = { provider: "x", model: "m", invoke: async () => ({ value: { n: 1 }, usage: { inputTokens: 1, outputTokens: 1 } }) };
+    await expect(runStructured({ ...base(call, pool), budget })).rejects.toMatchObject({ code: "BUDGET" });
+    expect(rows).toEqual([{ step: "reason", attempt: 1, ok: false }]);
+  });
 });

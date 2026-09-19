@@ -53,7 +53,12 @@ export async function runStructured<T>(req: RunStructuredRequest<T>): Promise<T>
       t.clear();
     }
     const durationMs = Date.now() - started;
-    req.budget.charge(raw.usage.inputTokens + raw.usage.outputTokens);
+    try {
+      req.budget.charge(raw.usage.inputTokens + raw.usage.outputTokens);
+    } catch (error) {
+      await recordStep(req.pool, { ...base, inputTokens: raw.usage.inputTokens, outputTokens: raw.usage.outputTokens, durationMs, ok: false, error: "BUDGET", output: raw.value });
+      throw error;
+    }
     const parsed = req.schema.safeParse(raw.value);
     if (parsed.success) {
       await recordStep(req.pool, { ...base, inputTokens: raw.usage.inputTokens, outputTokens: raw.usage.outputTokens, durationMs, ok: true, output: parsed.data });
