@@ -49,6 +49,10 @@ describe("loadConfig worker", () => {
     expect(() => loadConfig({ ...worker, PIPELINE: "mixed" }, "worker")).toThrow(/TAVILY_API_KEY/);
     expect(loadConfig({ ...worker, PIPELINE: "mixed", TAVILY_API_KEY: "t" }, "worker").providers.tavilyApiKey).toBe("t");
   });
+  it("requires tavily key when pipeline is minimax_tavily", () => {
+    expect(() => loadConfig({ ...worker, PIPELINE: "minimax_tavily" }, "worker")).toThrow(/TAVILY_API_KEY/);
+    expect(loadConfig({ ...worker, PIPELINE: "minimax_tavily", TAVILY_API_KEY: "t" }, "worker").pipeline).toBe("minimax_tavily");
+  });
   it("requires telegram fields when enabled", () => {
     expect(() => loadConfig({ ...worker, TELEGRAM_ENABLED: "true" }, "worker")).toThrow(/TELEGRAM_BOT_TOKEN, TELEGRAM_OWNER_CHAT_ID/);
   });

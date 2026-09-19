@@ -21,7 +21,7 @@ const envSchema = z.object({
   TELEGRAM_OWNER_CHAT_ID: optional,
   CF_ACCESS_AUD: optional,
   CF_ACCESS_TEAM_DOMAIN: optional,
-  PIPELINE: z.enum(["minimax", "mixed"]).default("minimax"),
+  PIPELINE: z.enum(["minimax", "mixed", "minimax_tavily"]).default("minimax"),
   VERDICT_AUTO_THRESHOLD: z.coerce.number().min(0).max(1).default(0.8),
   ANALYSIS_ENABLED: boolTrue,
   RETENTION_ENABLED: boolTrue,
@@ -29,7 +29,7 @@ const envSchema = z.object({
 });
 type Env = z.infer<typeof envSchema>;
 
-export type Pipeline = "minimax" | "mixed";
+export type Pipeline = "minimax" | "mixed" | "minimax_tavily";
 /** Which process is loading config: each Railway service / local script only requires what it uses. */
 export type ConfigRole = "web" | "worker" | "script";
 
@@ -58,7 +58,7 @@ function requiredFor(role: ConfigRole, e: Env): Array<keyof Env> {
     case "web": return ["DATABASE_URL", ...S3_VARS, "CF_ACCESS_AUD", "CF_ACCESS_TEAM_DOMAIN"];
     case "worker": return [
       "DATABASE_URL", ...S3_VARS, "MINIMAX_API_KEY", "DEEPSEEK_API_KEY",
-      ...(e.PIPELINE === "mixed" ? ["TAVILY_API_KEY" as const] : []),
+      ...(e.PIPELINE === "mixed" || e.PIPELINE === "minimax_tavily" ? ["TAVILY_API_KEY" as const] : []),
       ...(e.TELEGRAM_ENABLED ? ["TELEGRAM_BOT_TOKEN" as const, "TELEGRAM_OWNER_CHAT_ID" as const] : [])
     ];
     case "script": return ["DATABASE_URL"];

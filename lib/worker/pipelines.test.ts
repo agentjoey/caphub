@@ -24,15 +24,17 @@ const pool = {} as Pool;
 const objects = {} as ObjectStore;
 
 describe("buildWorkerPipelines", () => {
-  it("always builds minimax deps and leaves mixed unavailable without a Tavily key", () => {
+  it("always builds minimax deps and leaves mixed/minimax_tavily unavailable without a Tavily key", () => {
     const pipelines = buildWorkerPipelines(config(undefined), pool, objects);
     expect(pipelines.minimax).toBeDefined();
     expect(pipelines.mixed).toBeUndefined();
+    expect(pipelines.minimax_tavily).toBeUndefined();
   });
 
-  it("builds mixed deps when a Tavily key is configured", () => {
+  it("builds mixed and minimax_tavily deps when a Tavily key is configured", () => {
     const pipelines = buildWorkerPipelines(config("tavily-key"), pool, objects);
     expect(pipelines.mixed).toBeDefined();
+    expect(pipelines.minimax_tavily).toBeDefined();
   });
 });
 
@@ -41,6 +43,12 @@ describe("selectPipelineDeps", () => {
     const pipelines = buildWorkerPipelines(config(undefined), pool, objects);
     expect(selectPipelineDeps(pipelines, "minimax")).toBe(pipelines.minimax);
     expect(selectPipelineDeps(pipelines, "mixed")).toBeUndefined();
+    expect(selectPipelineDeps(pipelines, "minimax_tavily")).toBeUndefined();
+  });
+
+  it("selects minimax_tavily deps when available", () => {
+    const pipelines = buildWorkerPipelines(config("tavily-key"), pool, objects);
+    expect(selectPipelineDeps(pipelines, "minimax_tavily")).toBe(pipelines.minimax_tavily);
   });
 });
 

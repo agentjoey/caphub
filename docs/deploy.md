@@ -41,7 +41,7 @@ Not on `web`: provider keys, Telegram variables.
 - `DATABASE_URL`
 - `S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_BUCKET`
 - `MINIMAX_API_KEY`, `DEEPSEEK_API_KEY`
-- `TAVILY_API_KEY` — required when `PIPELINE=mixed`; if set, the worker can also run `mixed` runs under `PIPELINE=minimax`
+- `TAVILY_API_KEY` — required when `PIPELINE` is `mixed` or `minimax_tavily`; if set, the worker can also run `mixed`/`minimax_tavily` runs under `PIPELINE=minimax`
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_OWNER_CHAT_ID` — required when `TELEGRAM_ENABLED=true`
 - `PIPELINE`, `VERDICT_AUTO_THRESHOLD`, `ANALYSIS_ENABLED`, `RETENTION_ENABLED`, `TELEGRAM_ENABLED`
 

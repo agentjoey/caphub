@@ -43,7 +43,7 @@ export function spikePricesFromEnv(env: Readonly<Record<string, string | undefin
 }
 
 type ReportedStep = Exclude<StepName, "review">;
-const PIPELINES: Pipeline[] = ["minimax", "mixed"];
+const PIPELINES: Pipeline[] = ["minimax", "mixed", "minimax_tavily"];
 // review is a manual, per-capability action outside the A/B runs, so it never has spike data.
 const STEPS: ReportedStep[] = ["vision", "search", "reason"];
 
@@ -55,6 +55,19 @@ const STEPS: ReportedStep[] = ["vision", "search", "reason"];
  * capture id + pipeline, so re-enqueuing after a prior spike run (or a concurrent spike
  * against another pipeline set) can never collide with an existing run id.
  */
+/**
+ * Parses the pipelines to enqueue from CLI args after `enqueue` (e.g. `["minimax_tavily"]`
+ * for `spike.ts enqueue minimax_tavily`). No args (or only "all") enqueues all pipelines.
+ */
+export function parseEnqueuePipelines(args: readonly string[]): Pipeline[] {
+  const requested = args.filter((a) => a !== "all");
+  if (requested.length === 0) return [...PIPELINES];
+  for (const a of requested) {
+    if (!PIPELINES.includes(a as Pipeline)) throw new Error(`unknown pipeline: ${a} (expected one of ${PIPELINES.join(", ")})`);
+  }
+  return requested as Pipeline[];
+}
+
 export async function enqueueSpikeRuns(pool: Pick<Pool, "query">, pipelines: Pipeline[]): Promise<number> {
   let n = 0;
   for (const pipeline of pipelines) {

@@ -24,6 +24,19 @@ describe("cardSchema", () => {
   it("stays representable as JSON Schema for providers", () => {
     expect(z.toJSONSchema(cardSchema).properties?.tags).toMatchObject({ type: "array", minItems: 1, maxItems: 6 });
   });
+  it("rejects a Chinese tag", () => {
+    expect(() => cardSchema.parse({ ...valid, tags: ["网页抓取"] })).toThrow();
+  });
+  it("rejects a tag with a space", () => {
+    expect(() => cardSchema.parse({ ...valid, tags: ["Web Scraping"] })).toThrow();
+  });
+  it("accepts a hyphenated lowercase tag", () => {
+    expect(cardSchema.parse({ ...valid, tags: ["web-scraping"] }).tags).toEqual(["web-scraping"]);
+  });
+  it("rejects a reserved type/usage word as a tag", () => {
+    expect(() => cardSchema.parse({ ...valid, tags: ["skill"] })).toThrow();
+    expect(() => cardSchema.parse({ ...valid, tags: ["integrate"] })).toThrow();
+  });
   it("requires experience playbook for experience type", () => {
     expect(() => cardSchema.parse({ ...valid, type: "experience" })).toThrow(/experience/);
   });

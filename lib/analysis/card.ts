@@ -32,13 +32,29 @@ export const playbookSchema = z.discriminatedUnion("kind", [
 export type Playbook = z.infer<typeof playbookSchema>;
 
 /**
+ * Words a tag must never equal: the capability type/usage vocabulary itself, not a
+ * descriptive tag. Kept in sync with capabilityTypeSchema's members plus the two
+ * "usage" values and "integrate"/"reference" as playbook kinds.
+ */
+export const RESERVED_TAGS = ["skill", "experience", "plugin", "prompt", "other", "integrate", "reference"] as const;
+
+const TAG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/**
  * Tags are normalised (trim → lowercase → drop empty → dedupe) before the 1–6 count is
  * enforced, so ["RAG", "rag ", " "] becomes ["rag"]. Expressed as transform → pipe so the
  * JSON Schema sent to providers (output side of the pipe) is still representable.
+ * Each normalised tag must then be an English lowercase word or hyphenated phrase
+ * (`web-scraping`, not "Web Scraping" or a Chinese term) and must not be one of the
+ * reserved type/usage words — a violation fails validation, triggering the existing
+ * Zod-failure correction retry rather than silently accepting a bad tag.
  */
 export const tagsSchema = z.array(z.string().max(40))
   .transform((tags) => [...new Set(tags.map((t) => t.trim().toLowerCase()).filter((t) => t.length > 0))])
-  .pipe(z.array(z.string().min(1).max(40)).min(1).max(6));
+  .pipe(z.array(z.string().min(1).max(40)
+    .regex(TAG_PATTERN, "tag must be lowercase English words joined by hyphens (e.g. web-scraping)")
+    .refine((t) => !(RESERVED_TAGS as readonly string[]).includes(t), "tag must not be a reserved type/usage word"))
+    .min(1).max(6));
 
 export const cardSchema = z.object({
   title: z.string().min(1).max(60),

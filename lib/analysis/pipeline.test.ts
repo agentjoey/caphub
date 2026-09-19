@@ -182,4 +182,16 @@ describe("createPipelineDeps", () => {
     expect(out.search.provider).toBe("tavily");
     expect(out.reason.provider).toBe("deepseek");
   });
+
+  it("throws a clear error when pipeline is minimax_tavily but no Tavily key is configured", () => {
+    expect(() => createPipelineDeps(baseConfig as never, {} as never, {} as never, "minimax_tavily")).toThrow(/TAVILY_API_KEY/);
+  });
+
+  it("builds minimax_tavily deps with search = tavily and vision/reason = minimax when a Tavily key is present", () => {
+    const config = { ...baseConfig, providers: { minimaxApiKey: "mm", tavilyApiKey: "tv" } };
+    const out = createPipelineDeps(config as never, {} as never, {} as never, "minimax_tavily");
+    expect(out.search.provider).toBe("tavily");
+    expect(out.vision.provider).toBe("minimax");
+    expect(out.reason.provider).toBe("minimax");
+  });
 });

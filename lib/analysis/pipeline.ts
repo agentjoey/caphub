@@ -39,6 +39,15 @@ export function createPipelineDeps(config: Config, pool: Pool, objects: ObjectSt
       material: {}, threshold: config.verdictAutoThreshold
     };
   }
+  if (pipeline === "minimax_tavily") {
+    if (!tavilyApiKey) throw new Error("TAVILY_API_KEY is required when pipeline is 'minimax_tavily'");
+    return {
+      pool, objects, vision: minimax,
+      search: createTavilySearch({ apiKey: tavilyApiKey }),
+      reason: minimax,
+      material: {}, threshold: config.verdictAutoThreshold
+    };
+  }
   return { pool, objects, vision: minimax, search: createMiniMaxSearch({ apiKey: minimaxApiKey }), reason: minimax, material: {}, threshold: config.verdictAutoThreshold };
 }
 

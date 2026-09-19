@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { buildSpikeReport, enqueueSpikeRuns, renderSpikeMarkdown, spikePricesFromEnv } from "./report";
+import { buildSpikeReport, enqueueSpikeRuns, parseEnqueuePipelines, renderSpikeMarkdown, spikePricesFromEnv } from "./report";
 
 describe("renderSpikeMarkdown", () => {
   const stepAvg = { vision: { durationMs: 4000, tokens: 3000 }, search: { durationMs: 5000, tokens: 5000 }, reason: { durationMs: 3000, tokens: 1000 } };
   const report = {
     byPipeline: {
       minimax: { runs: 2, done: 2, failed: 0, avgDurationMs: 12000, avgTokens: 9000, inputTokens: 15000, outputTokens: 3000, failedAttemptTokens: 500, costUsd: 0.0123, costPerRunUsd: 0.00615, stepAvg },
-      mixed: { runs: 2, done: 1, failed: 1, avgDurationMs: 8000, avgTokens: 4000, inputTokens: 7000, outputTokens: 1000, failedAttemptTokens: 0, costUsd: null, costPerRunUsd: null, stepAvg }
+      mixed: { runs: 2, done: 1, failed: 1, avgDurationMs: 8000, avgTokens: 4000, inputTokens: 7000, outputTokens: 1000, failedAttemptTokens: 0, costUsd: null, costPerRunUsd: null, stepAvg },
+      minimax_tavily: { runs: 1, done: 1, failed: 0, avgDurationMs: 6000, avgTokens: 2000, inputTokens: 1800, outputTokens: 200, failedAttemptTokens: 0, costUsd: 0.005, costPerRunUsd: 0.005, stepAvg }
     },
     cards: [{ captureId: "cap_1", pipeline: "minimax" as const, title: "t", type: "skill", suggested_verdict: "keep", confidence: 0.9, tags: ["a"] }]
   };
@@ -15,6 +16,7 @@ describe("renderSpikeMarkdown", () => {
     const md = renderSpikeMarkdown(report);
     expect(md).toContain("| minimax | 2 | 2 | 0 | 12.0 s | 9000 | 15000 | 3000 | 500 | $0.0123 | $0.0062 |");
     expect(md).toContain("| mixed | 2 | 1 | 1 | 8.0 s | 4000 | 7000 | 1000 | 0 | n/a | n/a |");
+    expect(md).toContain("| minimax_tavily | 1 | 1 | 0 | 6.0 s | 2000 | 1800 | 200 | 0 | $0.0050 | $0.0050 |");
     expect(md).toContain("cap_1");
   });
 
@@ -68,6 +70,29 @@ describe("enqueueSpikeRuns", () => {
     await enqueueSpikeRuns(pool, ["minimax"]);
     // R15: the id expression must include `random()`, not just capture id + pipeline.
     expect(calls[0].text).toMatch(/md5\(random\(\)::text \|\| c\.id \|\| \$1\)/);
+  });
+
+  it("enqueues minimax_tavily like any other pipeline", async () => {
+    const { pool, calls } = fakePool([{ match: "INSERT INTO caphub_v2.analysis_runs", rows: [], rowCount: 2 }]);
+    const n = await enqueueSpikeRuns(pool, ["minimax_tavily"]);
+    expect(n).toBe(2);
+    expect(calls[0].values).toEqual(["minimax_tavily"]);
+  });
+});
+
+describe("parseEnqueuePipelines", () => {
+  it("defaults to all three pipelines when no args are given", () => {
+    expect(parseEnqueuePipelines([])).toEqual(["minimax", "mixed", "minimax_tavily"]);
+  });
+  it("defaults to all three pipelines when 'all' is given", () => {
+    expect(parseEnqueuePipelines(["all"])).toEqual(["minimax", "mixed", "minimax_tavily"]);
+  });
+  it("enqueues only the named pipeline(s)", () => {
+    expect(parseEnqueuePipelines(["minimax_tavily"])).toEqual(["minimax_tavily"]);
+    expect(parseEnqueuePipelines(["minimax", "mixed"])).toEqual(["minimax", "mixed"]);
+  });
+  it("rejects an unknown pipeline name", () => {
+    expect(() => parseEnqueuePipelines(["bogus"])).toThrow(/bogus/);
   });
 });
 
@@ -142,5 +167,24 @@ describe("buildSpikeReport", () => {
     expect(report.byPipeline.minimax).toMatchObject({ runs: 0, done: 0, failed: 0, avgDurationMs: 0, avgTokens: 0, inputTokens: 0, costUsd: 0, costPerRunUsd: null });
     // mixed has tokens but no finished runs: avgTokens stays 0 and per-run cost is n/a, not Infinity.
     expect(report.byPipeline.mixed).toMatchObject({ avgTokens: 0, inputTokens: 500, costPerRunUsd: null });
+  });
+
+  it("includes minimax_tavily as its own pipeline row, defaulting to zeroed stats when it has no data", async () => {
+    const { pool } = fakePool(handlers());
+    const report = await buildSpikeReport(pool);
+    expect(report.byPipeline.minimax_tavily).toMatchObject({ runs: 0, done: 0, failed: 0, avgDurationMs: 0, avgTokens: 0, inputTokens: 0, costUsd: 0, costPerRunUsd: null });
+  });
+
+  it("reports minimax_tavily runs/steps/usage/cards distinctly from minimax and mixed", async () => {
+    const { pool } = fakePool([
+      { match: "FROM caphub_v2.analysis_runs r", rows: [{ pipeline: "minimax_tavily", runs: "1", done: "1", failed: "0", avg_ms: "6000" }] },
+      { match: "avg(s.duration_ms)::text AS avg_ms", rows: [{ pipeline: "minimax_tavily", step: "search", avg_ms: "2000", avg_tokens: "0" }] },
+      { match: "sum(coalesce(s.input_tokens, 0))::text AS input_tokens", rows: [{ pipeline: "minimax_tavily", provider: "minimax", finished: true, ok: true, input_tokens: "1000", output_tokens: "200" }] },
+      { match: "DISTINCT ON (r.capture_id, r.pipeline)", rows: [{ captureId: "cap_mt", pipeline: "minimax_tavily", title: "mt", type: "skill", suggested_verdict: "keep", confidence: 0.5, tags: ["a"] }] }
+    ]);
+    const report = await buildSpikeReport(pool);
+    expect(report.byPipeline.minimax_tavily).toMatchObject({ runs: 1, done: 1, failed: 0, avgDurationMs: 6000, inputTokens: 1000, outputTokens: 200 });
+    expect(report.byPipeline.minimax).toMatchObject({ runs: 0, done: 0 });
+    expect(report.cards).toEqual([{ captureId: "cap_mt", pipeline: "minimax_tavily", title: "mt", type: "skill", suggested_verdict: "keep", confidence: 0.5, tags: ["a"] }]);
   });
 });
