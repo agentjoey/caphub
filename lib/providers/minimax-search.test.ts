@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createMiniMaxSearch } from "./minimax-search";
+import { createMiniMaxSearch, truncateSources } from "./minimax-search";
 
 describe("createMiniMaxSearch", () => {
   it("sends web_search tool and collects url_citation annotations, truncated", async () => {
@@ -48,5 +48,15 @@ describe("createMiniMaxSearch", () => {
       ]
     }), { status: 200 })) as unknown as typeof fetch;
     await expect(createMiniMaxSearch({ apiKey: "k", fetch: fetchFn }).search("q", new AbortController().signal)).rejects.toMatchObject({ code: "INVALID_OUTPUT" });
+  });
+});
+
+describe("truncateSources", () => {
+  it("strips NUL and other C0 control chars from title/content but keeps newlines", () => {
+    const out = truncateSources([
+      { title: "ti\u0000tle\u0001", url: "https://a.example/", content: "line1\nline2\u0000\rline3\u0007" }
+    ]);
+    expect(out[0].title).toBe("title");
+    expect(out[0].content).toBe("line1\nline2\rline3");
   });
 });

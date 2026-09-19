@@ -1,5 +1,6 @@
 import { isIP } from "node:net";
 import { lookup as defaultDnsLookup } from "node:dns/promises";
+import { stripNul } from "../../text/sanitize";
 
 export const MAX_URL_BODY_BYTES = 20_480;
 export const URL_TIMEOUT_MS = 15_000;
@@ -168,7 +169,7 @@ export async function fetchUrlText(
       await reader.cancel().catch(() => {});
       const raw = new TextDecoder().decode(Buffer.concat(chunks).subarray(0, MAX_URL_BODY_BYTES));
       const type = response.headers.get("content-type") ?? "";
-      return type.includes("html") ? stripHtml(raw) : raw.replace(/\s+/g, " ").trim();
+      return stripNul(type.includes("html") ? stripHtml(raw) : raw.replace(/\s+/g, " ").trim());
     }
   } catch {
     return null;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dedupeKeyFor } from "./dedupe";
+import { dedupeKeyFor, normalizeText } from "./dedupe";
 
 describe("dedupeKeyFor", () => {
   it("is content sha256 for images", () => {
@@ -14,5 +14,11 @@ describe("dedupeKeyFor", () => {
   });
   it("rejects non-https url", () => {
     expect(() => dedupeKeyFor({ source: "web", kind: "url", url: "http://a.b" })).toThrow(/https/);
+  });
+});
+
+describe("normalizeText", () => {
+  it("strips U+0000", () => {
+    expect(normalizeText("has\u0000nul")).toBe("hasnul");
   });
 });

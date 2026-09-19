@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { MAX_SOURCES, MAX_SOURCE_CONTENT, searchResultSchema, type SearchResult } from "../analysis/card";
+import { stripControlChars } from "../text/sanitize";
 import { ProviderError, failureForHttpStatus } from "./errors";
 import { MINIMAX_BASE_URL, MINIMAX_MODEL } from "./minimax";
 
@@ -24,7 +25,7 @@ export function truncateSources(sources: Array<{ title: string; url: string; con
     const href = url.href;
     if (seen.has(href)) continue;
     seen.add(href);
-    out.push({ title: s.title.slice(0, 300), url: href, content: s.content.slice(0, MAX_SOURCE_CONTENT) });
+    out.push({ title: stripControlChars(s.title).slice(0, 300), url: href, content: stripControlChars(s.content).slice(0, MAX_SOURCE_CONTENT) });
     if (out.length >= MAX_SOURCES) break;
   }
   return out;

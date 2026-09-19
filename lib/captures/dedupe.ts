@@ -1,5 +1,6 @@
 import { sha256Hex } from "../storage/object-ref";
 import type { ImageMime } from "../storage/s3";
+import { stripNul } from "../text/sanitize";
 
 export type CaptureInput = {
   source: "web" | "telegram" | "import";
@@ -11,11 +12,11 @@ export type CaptureInput = {
 );
 
 export function normalizeText(text: string): string {
-  return text.trim().replace(/\s+/g, " ");
+  return stripNul(text).trim().replace(/\s+/g, " ");
 }
 
 export function normalizeUrl(url: string): string {
-  const parsed = new URL(url);
+  const parsed = new URL(stripNul(url));
   if (parsed.protocol !== "https:") throw new Error("url must use https");
   parsed.hash = "";
   const s = parsed.toString();

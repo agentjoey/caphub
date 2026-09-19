@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from "pg";
 import { newId } from "../ids";
+import { jsonStringifyStripNul, stripNul } from "../text/sanitize";
 import type { Card } from "./card";
 
 export interface UpsertCapabilityResult {
@@ -36,8 +37,9 @@ export async function upsertCapability(
      )
      SELECT upsert.id, upsert.verdict, prev.verdict AS previous_verdict, coalesce(prev.deleted_at, upsert.deleted_at) IS NOT NULL AS deleted
      FROM upsert LEFT JOIN prev ON true`,
-    [newId("cab"), row.captureId, row.runId, c.title, c.type, c.summary, JSON.stringify(c.signals), c.suggested_verdict, c.suggested_reason,
-      c.confidence, row.verdict, row.verdictBy, c.usage, JSON.stringify(c.playbook), c.tags, c.source_url]);
+    [newId("cab"), row.captureId, row.runId, stripNul(c.title), c.type, stripNul(c.summary), jsonStringifyStripNul(c.signals),
+      c.suggested_verdict, stripNul(c.suggested_reason), c.confidence, row.verdict, row.verdictBy, c.usage, jsonStringifyStripNul(c.playbook),
+      c.tags.map(stripNul), c.source_url === null ? null : stripNul(c.source_url)]);
   const out = r.rows[0];
   return { id: out.id, verdict: out.verdict, previousVerdict: out.previous_verdict, deleted: out.deleted };
 }

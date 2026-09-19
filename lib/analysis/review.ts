@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import { jsonStringifyStripNul } from "../text/sanitize";
 import { RunBudget } from "./budget";
 import { reviewNoteSchema, type ReviewNote } from "./card";
 import { TIMEOUTS } from "./pipeline";
@@ -32,6 +33,6 @@ export async function reviewCapability(deps: { pool: Pool; call: StructuredCall 
     timeoutMs: TIMEOUTS.review, signal
   });
   // updated_at is the optimistic-lock token for verdict decisions; a review note must not invalidate it.
-  await deps.pool.query("UPDATE caphub_v2.capabilities SET review_note = $2 WHERE id = $1", [capabilityId, JSON.stringify(note)]);
+  await deps.pool.query("UPDATE caphub_v2.capabilities SET review_note = $2 WHERE id = $1", [capabilityId, jsonStringifyStripNul(note)]);
   return note;
 }
