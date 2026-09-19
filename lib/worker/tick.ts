@@ -14,6 +14,7 @@ export async function runTick(deps: TickDeps, signal: AbortSignal): Promise<"idl
   const controller = new AbortController();
   const abort = () => controller.abort();
   signal.addEventListener("abort", abort, { once: true });
+  if (signal.aborted) controller.abort();
   let renewal: Promise<void> | undefined;
   const heartbeat = setInterval(() => {
     if (renewal) return;
@@ -27,8 +28,10 @@ export async function runTick(deps: TickDeps, signal: AbortSignal): Promise<"idl
     if (!controller.signal.aborted) await deps.queue.finish(lease, { state: "done" }, deps.clock());
   } catch (error) {
     if (!controller.signal.aborted) {
-      const code = error && typeof error === "object" && "code" in error ? String((error as { code: unknown }).code) : "UNAVAILABLE";
-      await deps.queue.finish(lease, { state: "failed", errorCode: code, errorMessage: error instanceof Error ? error.message.slice(0, 500) : String(error) }, deps.clock());
+      const rawCode = error && typeof error === "object" && "code" in error ? (error as { code: unknown }).code : undefined;
+      const code = typeof rawCode === "string" && rawCode.length > 0 ? rawCode : "UNAVAILABLE";
+      const message = error instanceof Error ? error.message : String(error);
+      await deps.queue.finish(lease, { state: "failed", errorCode: code, errorMessage: message.slice(0, 500) }, deps.clock());
     }
   } finally {
     clearInterval(heartbeat);

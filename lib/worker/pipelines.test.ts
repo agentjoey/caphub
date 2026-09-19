@@ -1,8 +1,10 @@
 import type { Pool } from "pg";
 import { describe, expect, it } from "vitest";
 import type { Config } from "../config";
+import type { Lease } from "../queue/runs";
 import type { ObjectStore } from "../storage/s3";
 import { buildWorkerPipelines, selectPipelineDeps } from "./pipelines";
+import { runTick } from "./tick";
 
 function config(tavilyApiKey?: string): Config {
   return {
@@ -39,5 +41,25 @@ describe("selectPipelineDeps", () => {
     const pipelines = buildWorkerPipelines(config(undefined), pool, objects);
     expect(selectPipelineDeps(pipelines, "minimax")).toBe(pipelines.minimax);
     expect(selectPipelineDeps(pipelines, "mixed")).toBeUndefined();
+  });
+});
+
+describe("a lease whose pipeline has no deps", () => {
+  it("finishes failed with PIPELINE_UNAVAILABLE through runTick", async () => {
+    const pipelines = buildWorkerPipelines(config(undefined), pool, objects);
+    const lease: Lease = { runId: "run_1", captureId: "cap_1", pipeline: "mixed", ownerToken: "t" };
+    const finished: unknown[] = [];
+    const queue = {
+      claim: async () => lease,
+      heartbeat: async () => true,
+      finish: async (_l: unknown, o: unknown) => { finished.push(o); return true; }
+    };
+    const run = (l: Lease) => {
+      const deps = selectPipelineDeps(pipelines, l.pipeline);
+      if (!deps) throw Object.assign(new Error(`no pipeline deps available for '${l.pipeline}'`), { code: "PIPELINE_UNAVAILABLE" });
+      return Promise.resolve(deps);
+    };
+    await runTick({ queue, run, clock: () => new Date(), ownerToken: () => "t" }, new AbortController().signal);
+    expect(finished).toEqual([{ state: "failed", errorCode: "PIPELINE_UNAVAILABLE", errorMessage: "no pipeline deps available for 'mixed'" }]);
   });
 });

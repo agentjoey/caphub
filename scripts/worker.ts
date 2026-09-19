@@ -28,16 +28,18 @@ async function main() {
   process.once("SIGTERM", stop);
   process.once("SIGINT", stop);
   const log = (o: Record<string, unknown>) => process.stdout.write(`${JSON.stringify({ ts: new Date().toISOString(), ...o })}\n`);
+  let retentionSweep: Promise<void> | undefined;
   try {
     if (mode === "dry-run") { log({ pipeline: config.pipeline, queue: await queue.summary() }); return; }
     const pipelines = buildWorkerPipelines(config, pool, objects);
     let nextRetention = 0;
     do {
-      if (config.retentionEnabled && Date.now() >= nextRetention) {
+      if (config.retentionEnabled && !retentionSweep && Date.now() >= nextRetention) {
         nextRetention = Date.now() + 3_600_000;
-        sweepRetention({ pool, objects }, { now: new Date(), dryRun: false })
-          .then((r) => log({ retention: r.length ? r : "nothing due" }))
-          .catch((e) => log({ retentionError: e instanceof Error ? e.message : String(e) }));
+        retentionSweep = sweepRetention({ pool, objects }, { now: new Date(), dryRun: false })
+          .then((r) => { log({ retention: r.length ? r : "nothing due" }); })
+          .catch((e) => { log({ retentionError: e instanceof Error ? e.message : String(e) }); })
+          .finally(() => { retentionSweep = undefined; });
       }
       try {
         const state = config.analysisEnabled
@@ -61,6 +63,7 @@ async function main() {
       await delay(2_000, undefined, { signal: controller.signal }).catch(() => {});
     } while (!controller.signal.aborted);
   } finally {
+    await retentionSweep;
     await pool.end();
   }
 }

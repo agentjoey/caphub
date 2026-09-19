@@ -10,20 +10,13 @@ export interface WorkerPipelines {
 
 /**
  * Builds the pipeline dependency sets the worker can run a lease against.
- * `minimax` deps are always available. `mixed` deps require a Tavily API
- * key; `createPipelineDeps` throws without one, so that case is treated as
- * "mixed unavailable" rather than a startup failure.
+ * `minimax` deps are always available. `mixed` deps are built only when a
+ * Tavily API key is configured, since `createPipelineDeps` requires one for
+ * the "mixed" pipeline; without a key, `mixed` is simply left unavailable.
  */
 export function buildWorkerPipelines(config: Config, pool: Pool, objects: ObjectStore): WorkerPipelines {
   const minimax = createPipelineDeps(config, pool, objects, "minimax");
-  let mixed: PipelineDeps | undefined;
-  if (config.providers.tavilyApiKey) {
-    try {
-      mixed = createPipelineDeps(config, pool, objects, "mixed");
-    } catch {
-      mixed = undefined;
-    }
-  }
+  const mixed = config.providers.tavilyApiKey ? createPipelineDeps(config, pool, objects, "mixed") : undefined;
   return { minimax, mixed };
 }
 
