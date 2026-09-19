@@ -17,6 +17,7 @@ const envSchema = z.object({
   MINIMAX_API_KEY: optional,
   DEEPSEEK_API_KEY: optional,
   TAVILY_API_KEY: optional,
+  GEMINI_API_KEY: optional,
   TELEGRAM_BOT_TOKEN: optional,
   TELEGRAM_OWNER_CHAT_ID: optional,
   CF_ACCESS_AUD: optional,
@@ -40,7 +41,7 @@ export interface Config {
   /** Local-only (vault-sync); never set on Railway. */
   databaseUrlReadonly?: string;
   s3?: S3Config;
-  providers: { minimaxApiKey?: string; deepseekApiKey?: string; tavilyApiKey?: string };
+  providers: { minimaxApiKey?: string; deepseekApiKey?: string; tavilyApiKey?: string; geminiApiKey?: string };
   telegram: { enabled: boolean; botToken?: string; ownerChatId?: string };
   access?: { aud: string; teamDomain: string };
   pipeline: Pipeline;
@@ -79,7 +80,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>, ro
     databaseUrl: e.DATABASE_URL!,
     databaseUrlReadonly: e.DATABASE_URL_READONLY,
     s3,
-    providers: { minimaxApiKey: e.MINIMAX_API_KEY, deepseekApiKey: e.DEEPSEEK_API_KEY, tavilyApiKey: e.TAVILY_API_KEY },
+    providers: { minimaxApiKey: e.MINIMAX_API_KEY, deepseekApiKey: e.DEEPSEEK_API_KEY, tavilyApiKey: e.TAVILY_API_KEY, geminiApiKey: e.GEMINI_API_KEY },
     telegram: { enabled: e.TELEGRAM_ENABLED, botToken: e.TELEGRAM_BOT_TOKEN, ownerChatId: e.TELEGRAM_OWNER_CHAT_ID },
     access: e.CF_ACCESS_AUD && e.CF_ACCESS_TEAM_DOMAIN ? { aud: e.CF_ACCESS_AUD, teamDomain: e.CF_ACCESS_TEAM_DOMAIN } : undefined,
     pipeline: e.PIPELINE,

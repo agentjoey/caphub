@@ -4,9 +4,11 @@ import { runPipeline } from "../lib/analysis/pipeline";
 import { loadConfig } from "../lib/config";
 import { createPool } from "../lib/db/pool";
 import { createDeepSeekCall } from "../lib/providers/deepseek";
+import { createGeminiEmbed } from "../lib/providers/gemini-embed";
 import { purgeDeletedCapabilities, sweepRetention } from "../lib/retention/retention";
 import { RunQueue } from "../lib/queue/runs";
 import { createObjectStore } from "../lib/storage/s3";
+import { runEmbedTick } from "../lib/worker/embeddings";
 import { buildWorkerPipelines, selectPipelineDeps } from "../lib/worker/pipelines";
 import { runReviewTick } from "../lib/worker/reviews";
 import { runTick } from "../lib/worker/tick";
@@ -35,7 +37,9 @@ async function main() {
     if (mode === "dry-run") { log({ pipeline: config.pipeline, queue: await queue.summary() }); return; }
     const pipelines = buildWorkerPipelines(config, pool, objects);
     const reviewCall = createDeepSeekCall({ apiKey: config.providers.deepseekApiKey });
+    const embedCall = config.providers.geminiApiKey ? createGeminiEmbed({ apiKey: config.providers.geminiApiKey }) : undefined;
     if (!config.analysisEnabled) log({ analysis: "disabled" });
+    if (!embedCall) log({ embeddings: "disabled" });
     let nextRetention = 0;
     do {
       if (config.retentionEnabled && !retentionSweep && Date.now() >= nextRetention) {
@@ -64,11 +68,20 @@ async function main() {
           }, controller.signal);
           if (state !== "idle") log({ tick: state });
           if (state === "idle") {
+            let reviewState: "idle" | "processed" = "idle";
             try {
-              const reviewState = await runReviewTick({ pool, call: reviewCall, log }, controller.signal);
+              reviewState = await runReviewTick({ pool, call: reviewCall, log }, controller.signal);
               if (reviewState !== "idle") log({ reviewTick: reviewState });
             } catch (e) {
               log({ reviewTickError: e instanceof Error ? e.message : String(e) });
+            }
+            if (reviewState === "idle" && embedCall) {
+              try {
+                const embedState = await runEmbedTick({ pool, embed: embedCall, log }, controller.signal);
+                if (embedState !== "idle") log({ embedTick: embedState });
+              } catch (e) {
+                log({ embedTickError: e instanceof Error ? e.message : String(e) });
+              }
             }
           }
         } catch (e) {

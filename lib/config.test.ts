@@ -26,7 +26,12 @@ describe("loadConfig web", () => {
     const c = loadConfig({ ...web, PIPELINE: "mixed", TELEGRAM_ENABLED: "true" }, "web");
     expect(c.access).toEqual({ aud: "aud", teamDomain: "team.cloudflareaccess.com" });
     expect(c.s3.bucket).toBe("caphub-objects");
-    expect(c.providers).toEqual({ minimaxApiKey: undefined, deepseekApiKey: undefined, tavilyApiKey: undefined });
+    expect(c.providers).toEqual({ minimaxApiKey: undefined, deepseekApiKey: undefined, tavilyApiKey: undefined, geminiApiKey: undefined });
+  });
+  it("is not required for web or worker, but is passed through when set", () => {
+    expect(loadConfig(web, "web").providers.geminiApiKey).toBeUndefined();
+    expect(loadConfig(worker, "worker").providers.geminiApiKey).toBeUndefined();
+    expect(loadConfig({ ...worker, GEMINI_API_KEY: "g" }, "worker").providers.geminiApiKey).toBe("g");
   });
   it("names every missing web variable", () => {
     expect(() => loadConfig({ ...db, ...s3 }, "web")).toThrow(/CF_ACCESS_AUD, CF_ACCESS_TEAM_DOMAIN required for web/);
