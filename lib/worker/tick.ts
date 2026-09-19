@@ -1,0 +1,39 @@
+import type { Lease, RunQueue } from "../queue/runs";
+
+export interface TickDeps {
+  queue: Pick<RunQueue, "claim" | "heartbeat" | "finish">;
+  run(lease: Lease, signal: AbortSignal): Promise<unknown>;
+  clock(): Date;
+  ownerToken(): string;
+}
+
+export async function runTick(deps: TickDeps, signal: AbortSignal): Promise<"idle" | "processed"> {
+  if (signal.aborted) return "idle";
+  const lease = await deps.queue.claim(deps.ownerToken(), deps.clock());
+  if (!lease) return "idle";
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal.addEventListener("abort", abort, { once: true });
+  let renewal: Promise<void> | undefined;
+  const heartbeat = setInterval(() => {
+    if (renewal) return;
+    renewal = deps.queue.heartbeat(lease, deps.clock())
+      .then((owned) => { if (!owned) controller.abort(); })
+      .catch(() => controller.abort())
+      .finally(() => { renewal = undefined; });
+  }, 30_000);
+  try {
+    await deps.run(lease, controller.signal);
+    if (!controller.signal.aborted) await deps.queue.finish(lease, { state: "done" }, deps.clock());
+  } catch (error) {
+    if (!controller.signal.aborted) {
+      const code = error && typeof error === "object" && "code" in error ? String((error as { code: unknown }).code) : "UNAVAILABLE";
+      await deps.queue.finish(lease, { state: "failed", errorCode: code, errorMessage: error instanceof Error ? error.message.slice(0, 500) : String(error) }, deps.clock());
+    }
+  } finally {
+    clearInterval(heartbeat);
+    signal.removeEventListener("abort", abort);
+    await renewal;
+  }
+  return "processed";
+}
