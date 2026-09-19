@@ -98,7 +98,7 @@ END $$;
 **Files:** `lib/db/migrations/005_embeddings.sql`、`lib/providers/gemini-embed.ts`(+test)、`lib/analysis/embedding.ts`(+test)、`lib/analysis/pipeline.ts`、`scripts/backfill-embeddings.ts`
 
 - [ ] controller 在 key 就绪后做一次真实探测（模型名、768 维、中英相似度）确认接口形状。
-- [ ] 迁移：`CREATE EXTENSION IF NOT EXISTS vector; ALTER TABLE caphub_v2.capabilities ADD COLUMN embedding vector(<dim>); CREATE INDEX … USING hnsw (embedding vector_cosine_ops);`
+- [ ] 迁移：`CREATE EXTENSION IF NOT EXISTS vector; ALTER TABLE caphub_v2.capabilities ADD COLUMN embedding vector(768); CREATE INDEX … USING hnsw (embedding vector_cosine_ops);`
 - [ ] `createGeminiEmbed({ apiKey, fetch? })`：`embed(texts, kind: "document" | "query")` → `number[][]`（768 维、L2 归一化），用 `batchEmbedContents`，超时 15 s，返回形状不对 → INVALID_OUTPUT。注入 fetch 测试。
 - [ ] `embeddingText(card, scenarioLabels)`；worker 在建卡后计算并写入（失败不影响建卡，记 step `embed`——需把 analysis_steps.step 的 CHECK 加入 'embed'，放进 005）。
 - [ ] `scripts/backfill-embeddings.ts`（dry-run 默认）。
