@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi, afterEach } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { CardSummary } from "./card-summary";
 import { PlaybookView } from "./playbook-view";
+import { CopyButton } from "./copy-button";
+
+afterEach(cleanup);
 
 const row = {
   id: "cab_1", captureId: "cap_1", title: "Scrapling 自适应爬虫框架", type: "skill", summary: "摘要文字", signals: ["a", "b"],
@@ -37,5 +40,25 @@ describe("PlaybookView", () => {
     render(<PlaybookView type="experience" playbook={{ kind: "experience", content: "核心步骤", when_to_use: "生成图片时" }} />);
     expect(screen.getByText("核心步骤")).toBeTruthy();
     expect(screen.getByText(/生成图片时/)).toBeTruthy();
+  });
+
+  it("renders reference points as a list", () => {
+    render(<PlaybookView type="skill" playbook={{ kind: "reference", points: ["要点一", "要点二"] }} />);
+    expect(screen.getByText("要点一")).toBeTruthy();
+    expect(screen.getByText("要点二")).toBeTruthy();
+  });
+});
+
+describe("CopyButton", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("shows 复制失败 when the clipboard write rejects", async () => {
+    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockRejectedValue(new Error("denied")) } });
+    render(<CopyButton text="hello" />);
+    fireEvent.click(screen.getByRole("button", { name: "复制" }));
+    await waitFor(() => expect(screen.getByText("复制失败")).toBeTruthy());
   });
 });

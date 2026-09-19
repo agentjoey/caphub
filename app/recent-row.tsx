@@ -7,18 +7,6 @@ import { RUN_STATE_LABEL, VERDICT_LABEL, errorLabel } from "../lib/library/label
 import { CapturePreview } from "../components/capability/capture-preview";
 import { rerunAction } from "./actions";
 
-const rtf = new Intl.RelativeTimeFormat("zh-CN", { numeric: "auto" });
-
-function relativeTime(iso: string): string {
-  const diffMs = new Date(iso).getTime() - Date.now();
-  const diffMinutes = Math.round(diffMs / 60000);
-  if (Math.abs(diffMinutes) < 60) return rtf.format(diffMinutes, "minute");
-  const diffHours = Math.round(diffMinutes / 60);
-  if (Math.abs(diffHours) < 24) return rtf.format(diffHours, "hour");
-  const diffDays = Math.round(diffHours / 24);
-  return rtf.format(diffDays, "day");
-}
-
 function fallbackTitle(item: RecentCapture): string {
   if (item.title) return item.title;
   if (item.text) return item.text.slice(0, 40);
@@ -32,7 +20,7 @@ function fallbackTitle(item: RecentCapture): string {
   return "截图";
 }
 
-export function RecentRow({ item }: { item: RecentCapture }) {
+export function RecentRow({ item, relativeTime }: { item: RecentCapture; relativeTime: string }) {
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -42,6 +30,8 @@ export function RecentRow({ item }: { item: RecentCapture }) {
     try {
       const result = await rerunAction(item.id);
       if (!result.ok) setMessage(result.message);
+    } catch {
+      setMessage("重跑失败，请稍后再试。");
     } finally {
       setPending(false);
     }
@@ -55,7 +45,7 @@ export function RecentRow({ item }: { item: RecentCapture }) {
         <div className="list-row__meta">
           {item.runState && <span className="badge">{RUN_STATE_LABEL[item.runState]}</span>}
           {item.verdict && <span className={`badge badge--${item.verdict}`}>{VERDICT_LABEL[item.verdict]}</span>}
-          <span>{relativeTime(item.createdAt)}</span>
+          <span>{relativeTime}</span>
         </div>
         {item.runState === "failed" && (
           <div className="list-row__meta">

@@ -1,6 +1,6 @@
 import type { CapabilityRow } from "../../lib/library/queries";
 import { TYPE_LABEL, USAGE_LABEL, VERDICT_LABEL } from "../../lib/library/labels";
-import { CapturePreview } from "./capture-preview";
+import { CapturePreview, captureTextExcerpt } from "./capture-preview";
 import { TagList } from "./tag-list";
 import { VerdictBadge } from "./verdict-badge";
 
@@ -18,6 +18,12 @@ export function CardSummary({ row }: { row: CapabilityRow }) {
         <p className="card-suggestion">
           建议{VERDICT_LABEL[row.suggestedVerdict]} · 置信度 {row.confidence} — {row.suggestedReason}
         </p>
+        {row.capture.kind === "text" && row.capture.text && (
+          <p className="capture-text">{captureTextExcerpt(row.capture.text)}</p>
+        )}
+        {row.capture.kind === "url" && row.capture.url && (
+          <p><a className="capture-url" href={row.capture.url} target="_blank" rel="noreferrer">{row.capture.url}</a></p>
+        )}
         <p className="card-summary">{row.summary}</p>
         {row.signals.length > 0 && (
           <ul className="card-signals">

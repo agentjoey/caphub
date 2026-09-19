@@ -33,15 +33,15 @@ export function AnalysisDetails({ detail }: { detail: CapabilityDetail }) {
       )}
       {detail.sources.length > 0 && (
         <ul>
-          {detail.sources.map((source) => (
-            <li key={source.url}><a href={source.url} target="_blank" rel="noreferrer">{source.title}</a></li>
+          {detail.sources.map((source, index) => (
+            <li key={`${index}-${source.url}`}><a href={source.url} target="_blank" rel="noreferrer">{source.title}</a></li>
           ))}
         </ul>
       )}
       <dl>
         <dt>投递</dt><dd>{detail.captureId}</dd>
         <dt>能力卡</dt><dd>{detail.id}</dd>
-        <dt>分析运行</dt><dd>{detail.runPipeline} · {detail.runState}</dd>
+        <dt>分析运行</dt><dd>{detail.runId} · {detail.runPipeline} · {detail.runState}</dd>
       </dl>
     </details>
   );

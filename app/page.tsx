@@ -7,6 +7,18 @@ import { RecentRow } from "./recent-row";
 
 export const dynamic = "force-dynamic";
 
+const rtf = new Intl.RelativeTimeFormat("zh-CN", { numeric: "auto" });
+
+function relativeTime(iso: string): string {
+  const diffMs = new Date(iso).getTime() - Date.now();
+  const diffMinutes = Math.round(diffMs / 60000);
+  if (Math.abs(diffMinutes) < 60) return rtf.format(diffMinutes, "minute");
+  const diffHours = Math.round(diffMinutes / 60);
+  if (Math.abs(diffHours) < 24) return rtf.format(diffHours, "hour");
+  const diffDays = Math.round(diffHours / 24);
+  return rtf.format(diffDays, "day");
+}
+
 export default async function Page() {
   const { pool } = getRuntime();
   const [items, stats] = await Promise.all([listRecentCaptures(pool), libraryStats(pool)]);
@@ -27,7 +39,7 @@ export default async function Page() {
         ) : (
           <ul className="list">
             {items.map((item) => (
-              <li key={item.id}><RecentRow item={item} /></li>
+              <li key={item.id}><RecentRow item={item} relativeTime={relativeTime(item.createdAt)} /></li>
             ))}
           </ul>
         )}

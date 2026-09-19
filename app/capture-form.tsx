@@ -52,16 +52,17 @@ export function CaptureForm() {
 
   const bothFilled = sourceUrl.trim().length > 0 && text.trim().length > 0;
   const hasContent = !!file || sourceUrl.trim().length > 0 || text.trim().length > 0;
+  const linkInvalid = !file && sourceUrl.trim().length > 0 && !sourceUrl.trim().startsWith("https://");
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (pending || !hasContent || (!file && bothFilled)) return;
+    if (pending || !hasContent || (!file && bothFilled) || linkInvalid) return;
     setPending(true);
     setError(null);
     try {
       const body = new FormData();
       if (file) body.set("file", file);
-      else body.set("text", (sourceUrl || text).trim());
+      else body.set("text", sourceUrl.trim() || text.trim());
       const response = await fetch("/api/captures", { method: "POST", body });
       const payload = (await response.json()) as { error?: string };
       if (!response.ok) {
@@ -80,8 +81,11 @@ export function CaptureForm() {
     }
   }
 
-  const submitLabel = pending ? "投递中…" : hasContent ? (bothFilled && !file ? "链接和文字请只填一项" : "投递") : "选择图片或填写内容后投递";
-  const submitDisabled = pending || !hasContent || (!file && bothFilled);
+  const submitLabel = pending ? "投递中…"
+    : linkInvalid ? "链接需以 https:// 开头"
+    : hasContent ? (bothFilled && !file ? "链接和文字请只填一项" : "投递")
+    : "选择图片或填写内容后投递";
+  const submitDisabled = pending || !hasContent || (!file && bothFilled) || linkInvalid;
 
   return (
     <>
@@ -124,8 +128,12 @@ export function CaptureForm() {
           <div className="caphub-field">
             <label htmlFor="capture-source">链接 <span>仅 HTTPS</span></label>
             <input id="capture-source" type="text" inputMode="url" placeholder="https://github.com/…" value={sourceUrl}
-              disabled={pending || !!file} onChange={(event) => setSourceUrl(event.target.value)} />
-            <p>一个能力的网页、仓库或文章地址。</p>
+              disabled={pending || !!file} aria-invalid={linkInvalid} onChange={(event) => setSourceUrl(event.target.value)} />
+            {linkInvalid ? (
+              <p className="caphub-inline-error" role="alert">链接需以 https:// 开头</p>
+            ) : (
+              <p>一个能力的网页、仓库或文章地址。</p>
+            )}
           </div>
           <div className="caphub-field">
             <label htmlFor="capture-text">文字 <span>{text.length.toLocaleString("en-US")} / 4,000</span></label>

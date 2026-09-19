@@ -1,27 +1,31 @@
 import type { CapabilityType, Playbook } from "../../lib/analysis/card";
 import { CopyButton } from "./copy-button";
 
+function repoUrl(repo: string): string {
+  return repo.startsWith("https://") ? repo : `https://github.com/${repo}`;
+}
+
 export function PlaybookView({ playbook, type }: { playbook: Playbook; type: CapabilityType }) {
   void type;
   if (playbook.kind === "integrate") {
     return (
       <div>
         {playbook.install.map((command, index) => (
-          <p key={index}>
+          <div key={index}>
             <pre>{command}</pre>
             <CopyButton text={command} />
-          </p>
+          </div>
         ))}
         {playbook.repo && (
-          <p>
-            <a href={`https://github.com/${playbook.repo}`} target="_blank" rel="noreferrer">{playbook.repo}</a>
-          </p>
+          <div>
+            <a href={repoUrl(playbook.repo)} target="_blank" rel="noreferrer">{playbook.repo}</a>
+          </div>
         )}
         {playbook.prompt_text && (
-          <p>
+          <div>
             <pre>{playbook.prompt_text}</pre>
             <CopyButton text={playbook.prompt_text} label="复制全文" />
-          </p>
+          </div>
         )}
       </div>
     );

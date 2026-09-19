@@ -79,7 +79,7 @@ export async function allTags(pool: Q): Promise<Array<{ name: string; count: num
 }
 
 export interface StepSummary { step: string; provider: string; model: string; attempt: number; ok: boolean; error: string | null; durationMs: number; inputTokens: number | null; outputTokens: number | null }
-export interface CapabilityDetail extends CapabilityRow { steps: StepSummary[]; sources: Array<{ title: string; url: string }>; runPipeline: string; runState: string }
+export interface CapabilityDetail extends CapabilityRow { steps: StepSummary[]; sources: Array<{ title: string; url: string }>; runPipeline: string; runState: string; runId: string }
 
 export async function getCapabilityDetail(pool: Q, id: string): Promise<CapabilityDetail | null> {
   const row = (await pool.query<CapabilityRow & { runPipeline: string; runState: string; runId: string }>(
@@ -92,8 +92,7 @@ export async function getCapabilityDetail(pool: Q, id: string): Promise<Capabili
             output_tokens AS "outputTokens", CASE WHEN step = 'search' AND ok THEN output ELSE NULL END AS output
      FROM caphub_v2.analysis_steps WHERE run_id = $1 ORDER BY id`, [row.runId])).rows;
   const search = steps.find((s) => s.step === "search" && s.ok)?.output as { sources?: Array<{ title: string; url: string }> } | undefined;
-  const { runId: _runId, ...rest } = toIso(row);
-  void _runId;
+  const rest = toIso(row);
   return {
     ...rest,
     steps: steps.map(({ output: _o, ...s }) => { void _o; return s; }),
