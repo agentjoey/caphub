@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildSpikeReport, enqueueSpikeRuns, parseEnqueuePipelines, renderSpikeMarkdown, spikePricesFromEnv } from "./report";
+import { buildSpikeReport, enqueueSpikeRuns, parseEnqueuePipelines, parseSpikeSource, renderSpikeMarkdown, spikePricesFromEnv } from "./report";
 
 describe("renderSpikeMarkdown", () => {
   const stepAvg = { vision: { durationMs: 4000, tokens: 3000 }, search: { durationMs: 5000, tokens: 5000 }, reason: { durationMs: 3000, tokens: 1000 } };
   const report = {
+    source: "import" as const,
     byPipeline: {
       minimax: { runs: 2, done: 2, failed: 0, avgDurationMs: 12000, avgTokens: 9000, inputTokens: 15000, outputTokens: 3000, failedAttemptTokens: 500, costUsd: 0.0123, costPerRunUsd: 0.00615, stepAvg },
       mixed: { runs: 2, done: 1, failed: 1, avgDurationMs: 8000, avgTokens: 4000, inputTokens: 7000, outputTokens: 1000, failedAttemptTokens: 0, costUsd: null, costPerRunUsd: null, stepAvg },
@@ -22,6 +23,11 @@ describe("renderSpikeMarkdown", () => {
 
   it("drops the review step row", () => {
     expect(renderSpikeMarkdown(report)).not.toMatch(/\| review \|/);
+  });
+
+  it("states the report's source in the heading", () => {
+    expect(renderSpikeMarkdown(report)).toContain("# A/B spike 结果（source: import）");
+    expect(renderSpikeMarkdown({ ...report, source: "web" })).toContain("# A/B spike 结果（source: web）");
   });
 });
 
@@ -49,18 +55,18 @@ function fakePool(handlers: Array<{ match: string; rows: unknown[]; rowCount?: n
 }
 
 describe("enqueueSpikeRuns", () => {
-  it("inserts one queued run per import capture for each pipeline, skipping existing queued/running/done runs", async () => {
+  it("inserts one queued run per import capture for each pipeline (default source), skipping existing queued/running/done runs", async () => {
     const { pool, calls } = fakePool([
       { match: "INSERT INTO caphub_v2.analysis_runs", rows: [], rowCount: 3 }
     ]);
     const n = await enqueueSpikeRuns(pool, ["minimax", "mixed"]);
     expect(n).toBe(6);
     expect(calls).toHaveLength(2);
-    expect(calls[0].values).toEqual(["minimax"]);
-    expect(calls[1].values).toEqual(["mixed"]);
+    expect(calls[0].values).toEqual(["minimax", "import"]);
+    expect(calls[1].values).toEqual(["mixed", "import"]);
     for (const c of calls) {
       expect(c.text).toContain("'run_' || substr(md5(random()::text || c.id || $1), 1, 16)");
-      expect(c.text).toContain("WHERE c.source = 'import'");
+      expect(c.text).toContain("WHERE c.source = $2");
       expect(c.text).toContain("r.pipeline = $1 AND r.state IN ('queued', 'running', 'done')");
     }
   });
@@ -76,7 +82,37 @@ describe("enqueueSpikeRuns", () => {
     const { pool, calls } = fakePool([{ match: "INSERT INTO caphub_v2.analysis_runs", rows: [], rowCount: 2 }]);
     const n = await enqueueSpikeRuns(pool, ["minimax_tavily"]);
     expect(n).toBe(2);
-    expect(calls[0].values).toEqual(["minimax_tavily"]);
+    expect(calls[0].values).toEqual(["minimax_tavily", "import"]);
+  });
+
+  it("scopes to a given source ('web' or 'telegram') via a $2 parameter", async () => {
+    const { pool, calls } = fakePool([{ match: "INSERT INTO caphub_v2.analysis_runs", rows: [], rowCount: 1 }]);
+    await enqueueSpikeRuns(pool, ["minimax"], "web");
+    expect(calls[0].values).toEqual(["minimax", "web"]);
+    expect(calls[0].text).toContain("WHERE c.source = $2");
+  });
+
+  it("applies no source filter for 'all'", async () => {
+    const { pool, calls } = fakePool([{ match: "INSERT INTO caphub_v2.analysis_runs", rows: [], rowCount: 1 }]);
+    await enqueueSpikeRuns(pool, ["minimax"], "all");
+    expect(calls[0].values).toEqual(["minimax"]);
+    expect(calls[0].text).toContain("WHERE true");
+    expect(calls[0].text).not.toContain("c.source");
+  });
+});
+
+describe("parseSpikeSource", () => {
+  it("defaults to 'import' when no value is given", () => {
+    expect(parseSpikeSource(undefined)).toBe("import");
+  });
+  it("accepts import, web, telegram, and all", () => {
+    expect(parseSpikeSource("import")).toBe("import");
+    expect(parseSpikeSource("web")).toBe("web");
+    expect(parseSpikeSource("telegram")).toBe("telegram");
+    expect(parseSpikeSource("all")).toBe("all");
+  });
+  it("rejects an unknown source", () => {
+    expect(() => parseSpikeSource("bogus")).toThrow(/bogus/);
   });
 });
 
@@ -138,6 +174,33 @@ describe("buildSpikeReport", () => {
     expect(report.byPipeline.minimax.stepAvg.vision).toEqual({ durationMs: 4000, tokens: 3000 });
     expect(report.byPipeline.minimax.stepAvg).not.toHaveProperty("review");
     expect(report.cards).toEqual(cardRows);
+    // default source is 'import', scoped via a $1 parameter on every query.
+    expect(report.source).toBe("import");
+    for (const c of calls) {
+      expect(c.text).toContain("c.source = $1");
+      expect(c.values).toEqual(["import"]);
+    }
+  });
+
+  it("scopes every query to a given source ('web') via a $1 parameter, and records it on the report", async () => {
+    const { pool, calls } = fakePool(handlers());
+    const report = await buildSpikeReport(pool, {}, "web");
+    expect(report.source).toBe("web");
+    for (const c of calls) {
+      expect(c.text).toContain("c.source = $1");
+      expect(c.values).toEqual(["web"]);
+    }
+  });
+
+  it("applies no source filter for 'all'", async () => {
+    const { pool, calls } = fakePool(handlers());
+    const report = await buildSpikeReport(pool, {}, "all");
+    expect(report.source).toBe("all");
+    for (const c of calls) {
+      expect(c.text).not.toContain("c.source");
+      expect(c.text).toMatch(/\btrue\b/);
+      expect(c.values).toEqual([]);
+    }
   });
 
   it("prices tokens per provider, ignoring zero-token providers, and is null when a provider with tokens is unpriced", async () => {

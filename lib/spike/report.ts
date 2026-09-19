@@ -18,6 +18,7 @@ export interface PipelineStat {
 }
 
 export interface SpikeReport {
+  source: SpikeSource;
   byPipeline: Record<Pipeline, PipelineStat>;
   cards: Array<{ captureId: string; pipeline: Pipeline; title: string; type: string; suggested_verdict: string; confidence: number; tags: string[] }>;
 }
@@ -47,6 +48,19 @@ const PIPELINES: Pipeline[] = ["minimax", "mixed", "minimax_tavily"];
 // review is a manual, per-capability action outside the A/B runs, so it never has spike data.
 const STEPS: ReportedStep[] = ["vision", "search", "reason"];
 
+/** The capture source a spike run/report is scoped to; 'all' means no source filter. */
+export type SpikeSource = "import" | "web" | "telegram" | "all";
+
+/**
+ * Builds a `c.source = $n` fragment (or "" for 'all', which applies no source filter) plus
+ * the value to push into the query's params, so callers can splice it into a WHERE clause
+ * without ever concatenating the source value itself into SQL text.
+ */
+function sourceFilter(source: SpikeSource, paramIndex: number): { clause: string; params: string[] } {
+  if (source === "all") return { clause: "true", params: [] };
+  return { clause: `c.source = $${paramIndex}`, params: [source] };
+}
+
 /**
  * Enqueues one 'queued' analysis_runs row per (import capture, pipeline) pair, for
  * every pipeline in `pipelines`. Skips a (capture, pipeline) pair that already has a
@@ -54,6 +68,9 @@ const STEPS: ReportedStep[] = ["vision", "search", "reason"];
  * random per row (`md5(random()::text || c.id || pipeline)`), never derived only from
  * capture id + pipeline, so re-enqueuing after a prior spike run (or a concurrent spike
  * against another pipeline set) can never collide with an existing run id.
+ *
+ * `source` scopes which captures are eligible ('import' by default, matching prior
+ * behaviour); 'all' enqueues runs for captures of any source.
  */
 /**
  * Parses the pipelines to enqueue from CLI args after `enqueue` (e.g. `["minimax_tavily"]`
@@ -68,19 +85,29 @@ export function parseEnqueuePipelines(args: readonly string[]): Pipeline[] {
   return requested as Pipeline[];
 }
 
-export async function enqueueSpikeRuns(pool: Pick<Pool, "query">, pipelines: Pipeline[]): Promise<number> {
+const SOURCES: SpikeSource[] = ["import", "web", "telegram", "all"];
+
+/** Validates a `--source` CLI value, defaulting to 'import' when none was passed. */
+export function parseSpikeSource(value: string | undefined): SpikeSource {
+  if (value === undefined) return "import";
+  if (!SOURCES.includes(value as SpikeSource)) throw new Error(`unknown source: ${value} (expected one of ${SOURCES.join(", ")})`);
+  return value as SpikeSource;
+}
+
+export async function enqueueSpikeRuns(pool: Pick<Pool, "query">, pipelines: Pipeline[], source: SpikeSource = "import"): Promise<number> {
   let n = 0;
+  const filter = sourceFilter(source, 2);
   for (const pipeline of pipelines) {
     const r = await pool.query(
       `INSERT INTO caphub_v2.analysis_runs (id, capture_id, pipeline, state)
        SELECT 'run_' || substr(md5(random()::text || c.id || $1), 1, 16), c.id, $1, 'queued'
        FROM caphub_v2.captures c
-       WHERE c.source = 'import'
+       WHERE ${filter.clause}
          AND NOT EXISTS (
            SELECT 1 FROM caphub_v2.analysis_runs r
            WHERE r.capture_id = c.id AND r.pipeline = $1 AND r.state IN ('queued', 'running', 'done')
          )`,
-      [pipeline]);
+      [pipeline, ...filter.params]);
     n += r.rowCount ?? 0;
   }
   return n;
@@ -94,7 +121,9 @@ function emptyPipelineStat(): PipelineStat {
 }
 
 /**
- * Builds the A/B spike report from import-sourced analysis_runs/analysis_steps rows.
+ * Builds the A/B spike report from analysis_runs/analysis_steps rows, scoped to captures
+ * of `source` ('import' by default, matching prior behaviour; 'all' applies no source
+ * filter).
  *
  * Cards come from analysis_steps (step = 'reason', ok), not from capabilities: the
  * capabilities table has one row per capture (UNIQUE(capture_id)), so a capture
@@ -103,7 +132,9 @@ function emptyPipelineStat(): PipelineStat {
  * (the parsed capability card, recorded by runStructured/recordStep) keeps both
  * pipelines' cards distinct, keyed by (capture, pipeline).
  */
-export async function buildSpikeReport(pool: Pick<Pool, "query">, prices: SpikePrices = {}): Promise<SpikeReport> {
+export async function buildSpikeReport(pool: Pick<Pool, "query">, prices: SpikePrices = {}, source: SpikeSource = "import"): Promise<SpikeReport> {
+  const filter = sourceFilter(source, 1);
+
   const runs = (await pool.query<{ pipeline: Pipeline; runs: string; done: string; failed: string; avg_ms: string | null }>(
     `SELECT r.pipeline, count(*)::text AS runs,
             count(*) FILTER (WHERE r.state = 'done')::text AS done,
@@ -111,8 +142,9 @@ export async function buildSpikeReport(pool: Pick<Pool, "query">, prices: SpikeP
             avg(extract(epoch FROM (r.finished_at - r.started_at)) * 1000) FILTER (WHERE r.state = 'done')::text AS avg_ms
      FROM caphub_v2.analysis_runs r
      JOIN caphub_v2.captures c ON c.id = r.capture_id
-     WHERE c.source = 'import'
-     GROUP BY r.pipeline`)).rows;
+     WHERE ${filter.clause}
+     GROUP BY r.pipeline`,
+    filter.params)).rows;
 
   const steps = (await pool.query<{ pipeline: Pipeline; step: StepName; avg_ms: string; avg_tokens: string }>(
     `SELECT r.pipeline, s.step,
@@ -121,8 +153,9 @@ export async function buildSpikeReport(pool: Pick<Pool, "query">, prices: SpikeP
      FROM caphub_v2.analysis_steps s
      JOIN caphub_v2.analysis_runs r ON r.id = s.run_id
      JOIN caphub_v2.captures c ON c.id = r.capture_id
-     WHERE c.source = 'import' AND s.ok
-     GROUP BY r.pipeline, s.step`)).rows;
+     WHERE ${filter.clause} AND s.ok
+     GROUP BY r.pipeline, s.step`,
+    filter.params)).rows;
 
   // Token usage of every step with token counts (ok or not), split so the report can show
   // totals, failed-attempt spend, the per-finished-run average and a per-provider cost.
@@ -134,8 +167,9 @@ export async function buildSpikeReport(pool: Pick<Pool, "query">, prices: SpikeP
      FROM caphub_v2.analysis_steps s
      JOIN caphub_v2.analysis_runs r ON r.id = s.run_id
      JOIN caphub_v2.captures c ON c.id = r.capture_id
-     WHERE c.source = 'import' AND (s.input_tokens IS NOT NULL OR s.output_tokens IS NOT NULL)
-     GROUP BY r.pipeline, s.provider, finished, s.ok`)).rows;
+     WHERE ${filter.clause} AND (s.input_tokens IS NOT NULL OR s.output_tokens IS NOT NULL)
+     GROUP BY r.pipeline, s.provider, finished, s.ok`,
+    filter.params)).rows;
 
   const cards = (await pool.query<SpikeReport["cards"][number]>(
     `SELECT DISTINCT ON (r.capture_id, r.pipeline)
@@ -148,8 +182,9 @@ export async function buildSpikeReport(pool: Pick<Pool, "query">, prices: SpikeP
      FROM caphub_v2.analysis_steps s
      JOIN caphub_v2.analysis_runs r ON r.id = s.run_id
      JOIN caphub_v2.captures c ON c.id = r.capture_id
-     WHERE s.step = 'reason' AND s.ok AND c.source = 'import'
-     ORDER BY r.capture_id, r.pipeline, s.id DESC`)).rows;
+     WHERE s.step = 'reason' AND s.ok AND ${filter.clause}
+     ORDER BY r.capture_id, r.pipeline, s.id DESC`,
+    filter.params)).rows;
 
   const byPipeline = Object.fromEntries(PIPELINES.map((p) => [p, emptyPipelineStat()])) as SpikeReport["byPipeline"];
   for (const r of runs) {
@@ -182,14 +217,14 @@ export async function buildSpikeReport(pool: Pick<Pool, "query">, prices: SpikeP
     x.costPerRunUsd = finishedRuns > 0 && finishedCost !== null ? finishedCost / finishedRuns : null;
   }
 
-  return { byPipeline, cards };
+  return { source, byPipeline, cards };
 }
 
 const usd = (v: number | null) => (v === null ? "n/a" : `$${v.toFixed(4)}`);
 
 export function renderSpikeMarkdown(r: SpikeReport): string {
   const lines = [
-    "# A/B spike 结果", "",
+    `# A/B spike 结果（source: ${r.source}）`, "",
     "| pipeline | runs | done | failed | 平均耗时 | 平均 tokens/run | 输入 tokens | 输出 tokens | 失败尝试 tokens | 成本 (USD) | 成本/run (USD) |",
     "|---|---|---|---|---|---|---|---|---|---|---|"
   ];
