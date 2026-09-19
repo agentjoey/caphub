@@ -1,0 +1,105 @@
+import type { Pool } from "pg";
+import type { Config, Pipeline } from "../config";
+import { createDeepSeekCall } from "../providers/deepseek";
+import { createMiniMaxCall } from "../providers/minimax";
+import { createMiniMaxSearch, type SearchCall } from "../providers/minimax-search";
+import { createTavilySearch } from "../providers/tavily";
+import type { Lease } from "../queue/runs";
+import type { ObjectStore } from "../storage/s3";
+import { RunBudget } from "./budget";
+import { upsertCapability } from "./capabilities";
+import { cardSchema, extractionSchema, type Extraction } from "./card";
+import { prepareMaterial, type MaterialDeps } from "./material";
+import { reasonPrompt, searchQuery, visionPrompt } from "./prompts";
+import { findSimilar } from "./similar";
+import { recordStep } from "./steps";
+import { runStructured, type StructuredCall } from "./structured";
+import { bumpTags, topTags } from "./tags";
+import { decideVerdict } from "./verdict";
+
+export const TIMEOUTS = { vision: 60_000, search: 60_000, reason: 120_000, review: 120_000 } as const;
+
+export interface PipelineDeps {
+  pool: Pool; objects: ObjectStore; vision: StructuredCall; search: SearchCall; reason: StructuredCall;
+  material: MaterialDeps; threshold: number;
+}
+
+export function createPipelineDeps(config: Config, pool: Pool, objects: ObjectStore, pipeline: Pipeline): PipelineDeps {
+  const minimax = createMiniMaxCall({ apiKey: config.providers.minimaxApiKey });
+  if (pipeline === "mixed") {
+    if (!config.providers.tavilyApiKey) throw new Error("TAVILY_API_KEY is required when pipeline is 'mixed'");
+    return {
+      pool, objects, vision: minimax,
+      search: createTavilySearch({ apiKey: config.providers.tavilyApiKey }),
+      reason: createDeepSeekCall({ apiKey: config.providers.deepseekApiKey }),
+      material: {}, threshold: config.verdictAutoThreshold
+    };
+  }
+  return { pool, objects, vision: minimax, search: createMiniMaxSearch({ apiKey: config.providers.minimaxApiKey }), reason: minimax, material: {}, threshold: config.verdictAutoThreshold };
+}
+
+async function runSearch(deps: PipelineDeps, runId: string, query: string, budget: RunBudget, signal: AbortSignal) {
+  if (!query.trim()) return { sources: [] };
+  budget.assertCanCall();
+  budget.calls += 1;
+  const started = Date.now();
+  const base = { runId, step: "search" as const, provider: deps.search.provider, model: deps.search.model, attempt: 1 };
+  const t = new AbortController();
+  const timer = setTimeout(() => t.abort(), TIMEOUTS.search);
+  signal.addEventListener("abort", () => t.abort(), { once: true });
+  try {
+    const out = await deps.search.search(query, t.signal);
+    budget.charge(out.usage.inputTokens + out.usage.outputTokens);
+    await recordStep(deps.pool, { ...base, inputTokens: out.usage.inputTokens, outputTokens: out.usage.outputTokens, durationMs: Date.now() - started, ok: true, output: out.value });
+    return out.value;
+  } catch (error) {
+    // 搜索失败不致命：记录后继续，reason 仍可基于素材给卡
+    await recordStep(deps.pool, { ...base, durationMs: Date.now() - started, ok: false, error: error instanceof Error && "code" in error ? String((error as { code: unknown }).code) : "UNAVAILABLE" });
+    return { sources: [] };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function runPipeline(deps: PipelineDeps, lease: Lease, signal: AbortSignal): Promise<{ capabilityId: string; verdict: string }> {
+  const capture = (await deps.pool.query<{ kind: "image" | "text" | "url"; object_key: string | null; mime_type: string | null; text: string | null; url: string | null }>(
+    "SELECT kind, object_key, mime_type, text, url FROM caphub_v2.captures WHERE id = $1", [lease.captureId])).rows[0];
+  if (!capture) throw new Error("CAPTURE_NOT_FOUND");
+  let bytes: Uint8Array | null = null;
+  if (capture.object_key) {
+    try {
+      bytes = await deps.objects.get({ key: capture.object_key, digest: capture.object_key.split("/")[2], bytes: 0 });
+    } catch (error) {
+      if (capture.kind === "image") {
+        throw Object.assign(new Error("OBJECT_UNAVAILABLE"), { code: "OBJECT_UNAVAILABLE", cause: error });
+      }
+      bytes = null;
+    }
+  }
+  const material = await prepareMaterial({ kind: capture.kind, bytes: bytes ?? undefined, text: capture.text, url: capture.url }, deps.material, signal);
+  const budget = new RunBudget();
+
+  let extraction: Extraction | null = null;
+  if (material.kind === "image") {
+    extraction = await runStructured({
+      pool: deps.pool, runId: lease.runId, step: "vision", call: deps.vision,
+      prompt: visionPrompt(material.ocrText), images: [{ data: material.png, mediaType: "image/png" }],
+      schemaName: "extraction", schema: extractionSchema, budget, timeoutMs: TIMEOUTS.vision, signal
+    });
+  }
+
+  const search = await runSearch(deps, lease.runId, searchQuery(extraction, material), budget, signal);
+  const similarSeed = extraction?.what ?? (material.kind === "text" ? material.text : material.kind === "url" ? material.text ?? material.url : "");
+  const [similar, existingTags] = await Promise.all([findSimilar(deps.pool, similarSeed), topTags(deps.pool)]);
+
+  const card = await runStructured({
+    pool: deps.pool, runId: lease.runId, step: "reason", call: deps.reason,
+    prompt: reasonPrompt({ material, extraction, sources: search.sources, similar, existingTags }),
+    schemaName: "capability_card", schema: cardSchema, budget, timeoutMs: TIMEOUTS.reason, signal
+  });
+
+  const decision = decideVerdict(card, deps.threshold);
+  const stored = await upsertCapability(deps.pool, { captureId: lease.captureId, runId: lease.runId, card, verdict: decision.verdict, verdictBy: decision.by });
+  if (stored.verdict === "keep") await bumpTags(deps.pool, card.tags);
+  return { capabilityId: stored.id, verdict: stored.verdict };
+}
