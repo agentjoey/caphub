@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { cardSchema } from "./card";
+import { cardSchema, isValidTag } from "./card";
 
 const valid = {
   title: "用 Playwright 生成 axe 可访问性报告", type: "skill", summary: "一段摘要",
@@ -9,6 +9,37 @@ const valid = {
   usage: "integrate", playbook: { kind: "integrate", install: ["npm i -D @axe-core/playwright"], repo: null, prompt_text: null },
   tags: ["testing", "accessibility"], source_url: null
 };
+
+describe("isValidTag", () => {
+  it("accepts valid lowercase alphanumeric tags", () => {
+    expect(isValidTag("rag")).toBe(true);
+    expect(isValidTag("webdev")).toBe(true);
+  });
+
+  it("accepts valid hyphenated tags", () => {
+    expect(isValidTag("web-scraping")).toBe(true);
+    expect(isValidTag("ai-agents")).toBe(true);
+  });
+
+  it("rejects tags with spaces", () => {
+    expect(isValidTag("Web Scraping")).toBe(false);
+  });
+
+  it("rejects Chinese tags", () => {
+    expect(isValidTag("金融预测")).toBe(false);
+  });
+
+  it("rejects reserved type words", () => {
+    expect(isValidTag("skill")).toBe(false);
+    expect(isValidTag("experience")).toBe(false);
+    expect(isValidTag("plugin")).toBe(false);
+  });
+
+  it("rejects reserved playbook words", () => {
+    expect(isValidTag("integrate")).toBe(false);
+    expect(isValidTag("reference")).toBe(false);
+  });
+});
 
 describe("cardSchema", () => {
   it("accepts a valid card", () => { expect(cardSchema.parse(valid)).toEqual(valid); });

@@ -41,6 +41,14 @@ export const RESERVED_TAGS = ["skill", "experience", "plugin", "prompt", "other"
 const TAG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /**
+ * Checks if a tag is valid: must match the tag pattern and not be a reserved word.
+ * Used both by the tagsSchema validation and by topTags to filter legacy data.
+ */
+export function isValidTag(tag: string): boolean {
+  return TAG_PATTERN.test(tag) && !(RESERVED_TAGS as readonly string[]).includes(tag);
+}
+
+/**
  * Tags are normalised (trim → lowercase → drop empty → dedupe) before the 1–6 count is
  * enforced, so ["RAG", "rag ", " "] becomes ["rag"]. Expressed as transform → pipe so the
  * JSON Schema sent to providers (output side of the pipe) is still representable.
@@ -52,8 +60,7 @@ const TAG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const tagsSchema = z.array(z.string().max(40))
   .transform((tags) => [...new Set(tags.map((t) => t.trim().toLowerCase()).filter((t) => t.length > 0))])
   .pipe(z.array(z.string().min(1).max(40)
-    .regex(TAG_PATTERN, "tag must be lowercase English words joined by hyphens (e.g. web-scraping)")
-    .refine((t) => !(RESERVED_TAGS as readonly string[]).includes(t), "tag must not be a reserved type/usage word"))
+    .refine(isValidTag, "tag must be lowercase English words joined by hyphens (e.g. web-scraping) and not a reserved type/usage word"))
     .min(1).max(6));
 
 export const cardSchema = z.object({

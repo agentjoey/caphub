@@ -1,8 +1,12 @@
 import type { Pool, PoolClient } from "pg";
+import { isValidTag } from "./card";
 
 export async function topTags(pool: Pick<Pool, "query">, limit = 100): Promise<string[]> {
-  const r = await pool.query<{ name: string }>("SELECT name FROM caphub_v2.tags ORDER BY use_count DESC, name LIMIT $1", [limit]);
-  return r.rows.map((x) => x.name);
+  // Fetch more rows to account for filtering out invalid legacy tags
+  const fetchLimit = limit * 2;
+  const r = await pool.query<{ name: string }>("SELECT name FROM caphub_v2.tags ORDER BY use_count DESC, name LIMIT $1", [fetchLimit]);
+  const validTags = r.rows.map((x) => x.name).filter(isValidTag);
+  return validTags.slice(0, limit);
 }
 
 /** DISTINCT guards ON CONFLICT DO UPDATE against touching one row twice (PG 21000). */
