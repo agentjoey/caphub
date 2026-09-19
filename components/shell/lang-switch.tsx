@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import type { Locale } from "../../lib/i18n";
 import { setLocaleAction } from "../../lib/i18n/set-locale-action";
 
-export function LangSwitch({ locale, ariaLabel = "切换界面语言" }: { locale: Locale; ariaLabel?: string }) {
+export function LangSwitch({ locale, ariaLabel }: { locale: Locale; ariaLabel: string }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
