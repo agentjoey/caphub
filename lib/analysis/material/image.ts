@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdtempSync, symlinkSync } from "node:fs";
+import { copyFileSync, mkdtempSync, symlinkSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -6,6 +6,8 @@ import sharp from "sharp";
 
 export const MAX_EDGE_PX = 2000;
 export const OCR_TIMEOUT_MS = 15_000;
+// Keep OCR text within a small, predictable token budget for downstream analysis prompts.
+const OCR_TEXT_MAX_CHARS = 8000;
 
 export interface ImageMaterial {
   kind: "image";
@@ -37,7 +39,7 @@ function resolvePackagedLanguage(language: (typeof PACKAGED_LANGUAGES)[number]):
 // without ever reaching out to a CDN.
 let sharedLangPath: string | undefined;
 
-function packagedLangPath(): string {
+export function packagedLangPath(): string {
   if (sharedLangPath) return sharedLangPath;
   const dir = mkdtempSync(path.join(tmpdir(), "caphub-tessdata-"));
   for (const language of PACKAGED_LANGUAGES) {
@@ -45,7 +47,6 @@ function packagedLangPath(): string {
     const filename = `${data.code}.traineddata${data.gzip ? ".gz" : ""}`;
     const source = path.join(data.langPath, filename);
     const target = path.join(dir, filename);
-    if (existsSync(target)) continue;
     try {
       symlinkSync(source, target);
     } catch {
@@ -56,10 +57,15 @@ function packagedLangPath(): string {
   return dir;
 }
 
-let recognizer: Promise<{ recognize(png: Uint8Array): Promise<string> }> | undefined;
+interface Recognizer {
+  recognize(png: Uint8Array): Promise<string>;
+  terminate(): Promise<void>;
+}
 
-async function packagedOcr(png: Uint8Array): Promise<string> {
-  recognizer ??= (async () => {
+let recognizer: Promise<Recognizer> | undefined;
+
+function createPackagedRecognizer(): Promise<Recognizer> {
+  return (async () => {
     const { createWorker } = await import("tesseract.js");
     const worker = await createWorker([...PACKAGED_LANGUAGES], 1, {
       langPath: packagedLangPath(),
@@ -70,10 +76,65 @@ async function packagedOcr(png: Uint8Array): Promise<string> {
       async recognize(bytes: Uint8Array) {
         const result = await worker.recognize(Buffer.from(bytes));
         return result.data.text;
+      },
+      async terminate() {
+        await worker.terminate();
       }
     };
   })();
+}
+
+async function packagedOcr(png: Uint8Array): Promise<string> {
+  recognizer ??= createPackagedRecognizer();
   return (await recognizer).recognize(png);
+}
+
+// If OCR times out or is aborted, the shared worker may be mid-recognition
+// with no way to cancel cleanly; terminate it and drop the memoized instance
+// so the next call starts a fresh worker instead of starving behind a stuck one.
+async function discardSharedRecognizer(): Promise<void> {
+  const stale = recognizer;
+  recognizer = undefined;
+  if (!stale) return;
+  try {
+    const worker = await stale;
+    await worker.terminate();
+  } catch {
+    // best-effort cleanup only
+  }
+}
+
+async function runOcr(
+  ocr: (png: Uint8Array) => Promise<string>,
+  png: Uint8Array,
+  usesSharedRecognizer: boolean,
+  signal?: AbortSignal
+): Promise<string> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  let timedOutOrAborted = false;
+  try {
+    return await Promise.race([
+      ocr(png),
+      new Promise<string>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          timedOutOrAborted = true;
+          reject(new Error("OCR_TIMEOUT"));
+        }, OCR_TIMEOUT_MS);
+        onAbort = () => {
+          timedOutOrAborted = true;
+          reject(new Error("ABORTED"));
+        };
+        signal?.addEventListener("abort", onAbort, { once: true });
+      })
+    ]);
+  } catch {
+    if (timedOutOrAborted && usesSharedRecognizer) await discardSharedRecognizer();
+    return "";
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    if (onAbort) signal?.removeEventListener("abort", onAbort);
+  }
 }
 
 export async function prepareImage(
@@ -89,30 +150,13 @@ export async function prepareImage(
     : image;
   const { data, info } = await resized.png().toBuffer({ resolveWithObject: true });
   const png = new Uint8Array(data);
+  const usesSharedRecognizer = deps.ocr === undefined;
   const ocr = deps.ocr ?? packagedOcr;
-  let ocrText = "";
-  try {
-    ocrText = await Promise.race([
-      ocr(png),
-      new Promise<string>((_resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error("OCR_TIMEOUT")), OCR_TIMEOUT_MS);
-        signal?.addEventListener(
-          "abort",
-          () => {
-            clearTimeout(timer);
-            reject(new Error("ABORTED"));
-          },
-          { once: true }
-        );
-      })
-    ]);
-  } catch {
-    ocrText = "";
-  }
+  const ocrText = await runOcr(ocr, png, usesSharedRecognizer, signal);
   return {
     kind: "image",
     png,
-    ocrText: ocrText.replace(/\s+/g, " ").trim().slice(0, 8000),
+    ocrText: ocrText.replace(/\s+/g, " ").trim().slice(0, OCR_TEXT_MAX_CHARS),
     width: info.width,
     height: info.height
   };

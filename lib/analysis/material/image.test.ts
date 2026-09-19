@@ -1,6 +1,7 @@
+import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
-import { prepareImage } from "./image";
+import { packagedLangPath, prepareImage } from "./image";
 
 describe("prepareImage", () => {
   it("normalizes to png with bounded size and uses injected ocr", async () => {
@@ -20,5 +21,13 @@ describe("prepareImage", () => {
       }
     });
     expect(m.ocrText).toBe("");
+  });
+});
+
+describe("packagedLangPath", () => {
+  it("stages packaged eng and chi_sim traineddata locally without touching the network", () => {
+    const dir = packagedLangPath();
+    expect(existsSync(`${dir}/eng.traineddata.gz`)).toBe(true);
+    expect(existsSync(`${dir}/chi_sim.traineddata.gz`)).toBe(true);
   });
 });
