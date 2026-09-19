@@ -7,7 +7,7 @@
 
 ## Services
 
-Config as code: `web` uses `railway.json`; `worker` uses `railway.worker.json` (set as the worker service's config file path). Both pin region `asia-southeast1-eqsg3a` (Singapore), 1 replica.
+Service settings live in Railway (Config as Code is deprecated for new services): web → Dockerfile.web, sleep on, restart ON_FAILURE×5; worker → Dockerfile.worker, sleep off, restart ALWAYS. Region: `railway scale -s <service> asia-southeast1-eqsg3a=1` (Singapore, 1 replica).
 
 
 | Service | Dockerfile | Port | Region | Replicas | Sleeping |
