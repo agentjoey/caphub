@@ -9,7 +9,7 @@ const LABEL: Record<string, string> = { queued: "排队中", running: "分析中
 export default async function Page() {
   const items = await listRecentCaptures(getRuntime().pool);
   return (
-    <main style={{ maxWidth: 720, margin: "0 auto", padding: 24 }}>
+    <div>
       <h1>投递</h1>
       <CaptureForm />
       <h2>最近 20 条</h2>
@@ -22,6 +22,6 @@ export default async function Page() {
           </li>
         ))}
       </ul>
-    </main>
+    </div>
   );
 }
