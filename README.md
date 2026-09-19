@@ -14,5 +14,6 @@ npm run worker
 
 ## Spec
 
-完整设计规格见 alljobs 仓库：
-`docs/superpowers/specs/2026-09-19-caphub-v2-design.md`（Task 18 会把该 spec 搬到本仓库）。
+完整设计规格见 [`docs/superpowers/specs/2026-09-19-caphub-v2-design.md`](./docs/superpowers/specs/2026-09-19-caphub-v2-design.md)。
+
+基础实现计划见 [`docs/superpowers/plans/2026-09-19-caphub-v2-foundation.md`](./docs/superpowers/plans/2026-09-19-caphub-v2-foundation.md)。
