@@ -34,4 +34,16 @@ describe("embedSearchQuery", () => {
     expect(await embedSearchQuery("key", "hello", fetchImpl as unknown as typeof fetch)).toBeNull();
     warn.mockRestore();
   });
+
+  it("logs only a short message on failure, never the raw error object/stack", async () => {
+    const fetchImpl = vi.fn(async () => { throw new Error("network down"); });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await embedSearchQuery("key", "hello", fetchImpl as unknown as typeof fetch);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]).toHaveLength(1);
+    // The fetch failure is wrapped as a ProviderError by createGeminiEmbed; only its short
+    // `provider call failed: <code>` message is logged, never the raw error object/stack.
+    expect(warn.mock.calls[0][0]).toBe("library search: query embedding failed, falling back to non-semantic search (provider call failed: UNAVAILABLE)");
+    warn.mockRestore();
+  });
 });

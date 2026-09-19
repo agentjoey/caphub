@@ -46,4 +46,32 @@ describe("matchScenarios", () => {
   it("returns empty for an empty/blank query", () => {
     expect(matchScenarios("   ", SCENARIOS)).toEqual([]);
   });
+
+  it("matches an ASCII keyword as a whole word (positive control for the false-positive tests below)", () => {
+    expect(matchScenarios("video editing tips", SCENARIOS)).toEqual(["video"]);
+  });
+
+  it("does not false-positive on a short ASCII keyword found only as a substring of a longer word", () => {
+    const scenarios = [
+      { slug: "design", labelZh: "设计", labelEn: "Design", keywords: ["ux", "ui", "figma"] },
+      { slug: "marketing", labelZh: "营销", labelEn: "Marketing", keywords: ["ads", "seo"] },
+      { slug: "coding", labelZh: "编程", labelEn: "Coding", keywords: ["code", "debug"] }
+    ];
+    expect(matchScenarios("linux", scenarios)).toEqual([]);
+    expect(matchScenarios("a guide to backups", scenarios)).toEqual([]);
+    expect(matchScenarios("how to build this", scenarios)).toEqual([]);
+    expect(matchScenarios("threads app", scenarios)).toEqual([]);
+    expect(matchScenarios("downloads folder", scenarios)).toEqual([]);
+    expect(matchScenarios("vscode extensions", scenarios)).toEqual([]);
+  });
+
+  it("still matches a short ASCII keyword as its own whole word", () => {
+    const scenarios = [{ slug: "design", labelZh: "设计", labelEn: "Design", keywords: ["ux", "ui"] }];
+    expect(matchScenarios("improve the ux of this app", scenarios)).toEqual(["design"]);
+    expect(matchScenarios("ui review needed", scenarios)).toEqual(["design"]);
+  });
+
+  it("keeps plain substring matching for CJK keywords/labels", () => {
+    expect(matchScenarios("视频剪辑软件推荐", SCENARIOS)).toEqual(["video"]);
+  });
 });

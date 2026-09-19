@@ -1,3 +1,4 @@
+import type { Pool } from "pg";
 import { loadConfig } from "../lib/config";
 import { loadScenarios, scenariosPromptList, scenariosResultSchemaFor } from "../lib/analysis/scenarios";
 import { createPool } from "../lib/db/pool";
@@ -5,6 +6,22 @@ import { createDeepSeekCall } from "../lib/providers/deepseek";
 
 function parseArgs(args: string[]): { apply: boolean } {
   return { apply: args.includes("--apply") };
+}
+
+/**
+ * Writes the backfilled `scenarios` for one card. Only scenarios (+ the embedding it
+ * invalidates) are touched: this is a classification backfill, not a re-analysis, so
+ * `updated_at` (and everything else the card contains) must not move. Clearing
+ * `embedding`/`embedded_at` forces the worker's embed tick to re-embed the card with the new
+ * scenario labels — otherwise, since a prior embed tick may already have run against this card
+ * before the backfill (and `updated_at` is deliberately not bumped), the embedding would stay
+ * stale forever.
+ */
+export function applyScenarioBackfill(pool: Pick<Pool, "query">, id: string, scenarios: string[]) {
+  return pool.query(
+    "UPDATE caphub_v2.capabilities SET scenarios = $2, embedding = NULL, embedded_at = NULL WHERE id = $1",
+    [id, scenarios]
+  );
 }
 
 async function main() {
@@ -44,9 +61,7 @@ async function main() {
         const raw = await call.invoke({ prompt, schemaName: "capability_scenarios", schema: resultSchema }, new AbortController().signal);
         const parsed = resultSchema.parse(raw.value);
         if (apply) {
-          // Only the scenarios column is touched: this is a classification backfill, not a
-          // re-analysis, so updated_at (and everything else the card contains) must not move.
-          await pool.query("UPDATE caphub_v2.capabilities SET scenarios = $2 WHERE id = $1", [row.id, parsed.scenarios]);
+          await applyScenarioBackfill(pool, row.id, parsed.scenarios);
         }
         log({ capabilityId: row.id, scenarios: parsed.scenarios, applied: apply });
         done += 1;
@@ -61,7 +76,11 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  process.stderr.write(`backfill-scenarios failed: ${error instanceof Error ? error.message : error}\n`);
-  process.exitCode = 1;
-});
+// Only run when invoked as a CLI script (`npx tsx scripts/backfill-scenarios.ts`), not when
+// imported (e.g. by scripts/backfill-scenarios.test.ts, for applyScenarioBackfill).
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((error) => {
+    process.stderr.write(`backfill-scenarios failed: ${error instanceof Error ? error.message : error}\n`);
+    process.exitCode = 1;
+  });
+}

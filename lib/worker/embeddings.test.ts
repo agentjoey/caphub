@@ -116,6 +116,48 @@ describe("runEmbedTick", () => {
     expect(calls.some((c) => c.text.includes("UPDATE caphub_v2.capabilities SET embedding"))).toBe(false);
   });
 
+  it("falls back to embedding one row at a time when the batch call fails with INVALID_OUTPUT, so one bad text can't block the rest", async () => {
+    const rows = [
+      { id: "cab_1", title: "BAD", summary: "S1", tags: [], updated_at: updatedAt, label_zh: [], label_en: [] },
+      { id: "cab_2", title: "GOOD", summary: "S2", tags: [], updated_at: updatedAt, label_zh: [], label_en: [] }
+    ];
+    const { pool, calls } = fakePool(rows, [1]);
+    const seenBatches: string[][] = [];
+    const embed = {
+      embed: async (texts: string[]) => {
+        seenBatches.push(texts);
+        if (texts.length > 1) throw Object.assign(new Error("bad request"), { code: "INVALID_OUTPUT" });
+        if (texts[0]!.includes("BAD")) throw Object.assign(new Error("bad request"), { code: "INVALID_OUTPUT" });
+        return texts.map(() => Array(768).fill(0.2));
+      }
+    };
+    const logs: Record<string, unknown>[] = [];
+    const result = await runEmbedTick({ pool, embed, log: (o) => logs.push(o) }, new AbortController().signal);
+    expect(result).toBe("embedded");
+    // One batch attempt, then one call per row.
+    expect(seenBatches).toHaveLength(3);
+    expect(seenBatches[1]).toHaveLength(1);
+    expect(seenBatches[2]).toHaveLength(1);
+    const updates = calls.filter((c) => c.text.includes("UPDATE caphub_v2.capabilities SET embedding"));
+    expect(updates).toHaveLength(1);
+    expect(updates[0]!.values[0]).toBe("cab_2");
+    expect(logs).toContainEqual({ embed: "batch-failed", code: "INVALID_OUTPUT", fallback: "per-row" });
+    expect(logs).toContainEqual({ embed: "row-embed-failed", code: "INVALID_OUTPUT" });
+    expect(logs).toContainEqual({ embed: "done", written: 1, skipped: 1 });
+    // Never logs the offending text.
+    expect(JSON.stringify(logs)).not.toMatch(/BAD/);
+  });
+
+  it("still returns 'error' without a per-row fallback for a transient batch failure (e.g. TIMEOUT)", async () => {
+    const rows = [{ id: "cab_1", title: "T1", summary: "S1", tags: [], updated_at: updatedAt, label_zh: [], label_en: [] }];
+    const { pool } = fakePool(rows);
+    let calls = 0;
+    const embed = { embed: async () => { calls += 1; throw Object.assign(new Error("timeout"), { code: "TIMEOUT" }); } };
+    const result = await runEmbedTick({ pool, embed }, new AbortController().signal);
+    expect(result).toBe("error");
+    expect(calls).toBe(1);
+  });
+
   it("never includes texts or an api key in the failure log", async () => {
     const rows = [{ id: "cab_1", title: "SECRET TITLE", summary: "S1", tags: [], updated_at: updatedAt, label_zh: [], label_en: [] }];
     const { pool } = fakePool(rows);

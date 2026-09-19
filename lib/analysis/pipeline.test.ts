@@ -80,8 +80,10 @@ describe("runPipeline", () => {
   it("saves the capability and its tag bump in one transaction on a pool client", async () => {
     const { d, sql, released } = deps("text");
     await runPipeline(d, { runId: "run_tx", captureId: "cap_tx", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
-    const tx = sql.filter((q) => q.client).map((q) => q.text.includes("INSERT INTO caphub_v2.capabilities") ? "upsert" : q.text.includes("INSERT INTO caphub_v2.tags") ? "bump" : q.text);
-    expect(tx).toEqual(["BEGIN", "upsert", "bump", "COMMIT"]);
+    const tx = sql.filter((q) => q.client).map((q) => q.text.includes("INSERT INTO caphub_v2.capabilities") ? "upsert"
+      : q.text.includes("UPDATE caphub_v2.capabilities SET serial") ? "assign-serial"
+      : q.text.includes("INSERT INTO caphub_v2.tags") ? "bump" : q.text);
+    expect(tx).toEqual(["BEGIN", "upsert", "assign-serial", "bump", "COMMIT"]);
     expect(released()).toBe(1);
   });
 

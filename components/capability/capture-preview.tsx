@@ -20,24 +20,28 @@ export interface CapturePreviewData {
   retentionPurgedAt?: string | null;
 }
 
-function FullImage({ originalSrc, thumbSrc, purged, eligibleAt, locale }: {
-  originalSrc: string | null; thumbSrc: string | null; purged: boolean; eligibleAt: string | null; locale: Locale;
+function FullImage({ originalSrc, thumbSrc, purged, purgeDate, locale }: {
+  originalSrc: string | null; thumbSrc: string | null; purged: boolean; purgeDate: string | null; locale: Locale;
 }) {
   const dict = getDict(locale).capturePreview;
-  const [failed, setFailed] = useState(purged || !originalSrc);
-  if (failed && thumbSrc) {
+  // `purged` is the server's own knowledge (retentionPurgedAt) and drives the purge note.
+  // `clientFailed` is only a local <img onError>: it swaps to the thumbnail (a broken original
+  // may just be a transient load failure) but never asserts a purge the server hasn't confirmed.
+  const [clientFailed, setClientFailed] = useState(false);
+  const showThumb = purged || clientFailed || !originalSrc;
+  if (showThumb) {
+    if (!thumbSrc) return <span className="capture-full">{dict.noImage}</span>;
     return (
       <div>
         {/* eslint-disable-next-line @next/next/no-img-element -- images are served by the access-guarded /api/objects proxy */}
         <img className="capture-full" src={thumbSrc} loading="lazy" alt={dict.thumbAlt} />
-        {eligibleAt && <p className="notice">{format(dict.purgeNote, { date: formatDateTime(eligibleAt, locale) })}</p>}
+        {purged && purgeDate && <p className="notice">{format(dict.purgeNote, { date: formatDateTime(purgeDate, locale) })}</p>}
       </div>
     );
   }
-  if (!originalSrc) return <span className="capture-full">{dict.noImage}</span>;
   return (
     // eslint-disable-next-line @next/next/no-img-element -- images are served by the access-guarded /api/objects proxy
-    <img className="capture-full" src={originalSrc} loading="lazy" alt={dict.fullAlt} onError={() => setFailed(true)} />
+    <img className="capture-full" src={originalSrc} loading="lazy" alt={dict.fullAlt} onError={() => setClientFailed(true)} />
   );
 }
 
@@ -58,7 +62,7 @@ export function CapturePreview({ capture, size = "thumb", locale = "zh" }: { cap
         originalSrc={originalSrc}
         thumbSrc={thumbSrc}
         purged={Boolean(capture.retentionPurgedAt)}
-        eligibleAt={capture.retentionEligibleAt ?? null}
+        purgeDate={capture.retentionPurgedAt ?? capture.retentionEligibleAt ?? null}
         locale={locale}
       />
     );

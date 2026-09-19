@@ -8,6 +8,7 @@ import { createGeminiEmbed } from "../lib/providers/gemini-embed";
 import { purgeDeletedCapabilities, sweepRetention } from "../lib/retention/retention";
 import { RunQueue } from "../lib/queue/runs";
 import { createObjectStore } from "../lib/storage/s3";
+import { EmbedBackoff } from "../lib/worker/embed-backoff";
 import { runEmbedTick } from "../lib/worker/embeddings";
 import { buildWorkerPipelines, selectPipelineDeps } from "../lib/worker/pipelines";
 import { runReviewTick } from "../lib/worker/reviews";
@@ -40,6 +41,7 @@ async function main() {
     const embedCall = config.providers.geminiApiKey ? createGeminiEmbed({ apiKey: config.providers.geminiApiKey }) : undefined;
     if (!config.analysisEnabled) log({ analysis: "disabled" });
     if (!embedCall) log({ embeddings: "disabled" });
+    const embedBackoff = new EmbedBackoff();
     let nextRetention = 0;
     do {
       if (config.retentionEnabled && !retentionSweep && Date.now() >= nextRetention) {
@@ -76,11 +78,18 @@ async function main() {
               log({ reviewTickError: e instanceof Error ? e.message : String(e) });
             }
             if (reviewState === "idle" && embedCall) {
-              try {
-                const embedState = await runEmbedTick({ pool, embed: embedCall, log }, controller.signal);
-                if (embedState !== "idle") log({ embedTick: embedState });
-              } catch (e) {
-                log({ embedTickError: e instanceof Error ? e.message : String(e) });
+              if (embedBackoff.shouldSkip()) {
+                log({ embedTick: "skipped-backoff" });
+              } else {
+                try {
+                  const embedState = await runEmbedTick({ pool, embed: embedCall, log }, controller.signal);
+                  if (embedState !== "idle") log({ embedTick: embedState });
+                  if (embedState === "error") embedBackoff.onError();
+                  else embedBackoff.reset();
+                } catch (e) {
+                  log({ embedTickError: e instanceof Error ? e.message : String(e) });
+                  embedBackoff.onError();
+                }
               }
             }
           }

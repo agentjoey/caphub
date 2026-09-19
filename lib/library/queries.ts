@@ -5,7 +5,7 @@ import { parseSerialQuery } from "./serial";
 
 export const PAGE_SIZE = 20;
 /** Minimum cosine similarity for an embedding-only match to count as a search candidate. */
-export const SEMANTIC_MIN = 0.62;
+export const SEMANTIC_MIN = 0.65;
 type Q = Pick<Pool, "query">;
 
 const CARD_COLUMNS = `
@@ -102,7 +102,7 @@ export function listLibrary(pool: Q, f: LibraryFilter, search: LibrarySearchCont
       ` + CASE WHEN ${scenarioMatch} THEN 0.25 ELSE 0 END` +
       ` + CASE WHEN ${ilikeMatch} THEN 0.15 ELSE 0 END)`;
 
-    return paged(pool, clauses.join(" AND "), values, f.page, `${score} DESC, cb.updated_at DESC`);
+    return paged(pool, clauses.join(" AND "), values, f.page, `${score} DESC, cb.updated_at DESC, cb.id`);
   }
 
   if (serial !== null) add((i) => `cb.serial = $${i}`, serial);

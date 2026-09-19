@@ -36,13 +36,19 @@ describe("CapturePreview (full size)", () => {
     expect(screen.getByText(`原图已于 ${formatDateTime("2026-09-20T08:00:00.000Z")} 清除，仅保留缩略图`)).toBeTruthy();
   });
 
-  it("falls back to the thumbnail on an onError from the original, as a second line of defense", () => {
+  it("falls back to the thumbnail (with no purge claim) on a client onError, since the server hasn't confirmed a purge", () => {
     render(<CapturePreview capture={{ ...baseImage, retentionEligibleAt: "2026-09-20T08:00:00.000Z", retentionPurgedAt: null }} size="full" />);
     const img = screen.getByRole("img");
     expect(img.getAttribute("src")).toBe(`/api/objects/${baseImage.objectKey}`);
     fireEvent.error(img);
     expect(screen.getByRole("img").getAttribute("src")).toBe(`/api/objects/${baseImage.thumbKey}`);
-    expect(screen.getByText(`原图已于 ${formatDateTime("2026-09-20T08:00:00.000Z")} 清除，仅保留缩略图`)).toBeTruthy();
+    expect(screen.queryByText(/清除/)).toBeNull();
+  });
+
+  it("shows a placeholder instead of a broken image when the server-known-purged original has no thumbnail", () => {
+    render(<CapturePreview capture={{ ...baseImage, thumbKey: null, retentionEligibleAt: "2026-09-20T08:00:00.000Z", retentionPurgedAt: "2026-09-20T08:00:00.000Z" }} size="full" />);
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.getByText("无图")).toBeTruthy();
   });
 
   it("shows a placeholder when there is neither an original nor a thumbnail", () => {

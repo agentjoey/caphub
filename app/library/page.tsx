@@ -8,7 +8,7 @@ import { typeLabel, usageLabel } from "../../lib/library/labels";
 import { embedSearchQuery } from "../../lib/library/query-embedding";
 import { allTags, libraryStats, listLibrary, scenarioStats, PAGE_SIZE } from "../../lib/library/queries";
 import { matchScenarios } from "../../lib/library/scenario-match";
-import { formatSerial, parseSerialQuery } from "../../lib/library/serial";
+import { displaySerial, parseSerialQuery } from "../../lib/library/serial";
 import { libraryHref, parseLibraryParams } from "../../lib/library/search-params";
 import { getRuntime } from "../../lib/runtime";
 import { getLocale } from "../../lib/i18n/locale";
@@ -35,14 +35,18 @@ export default async function Page({
   const isSerialQuery = Boolean(q && parseSerialQuery(q) !== null);
   const scenarios = await loadScenarios(pool);
   const matchedScenarioSlugs = q && !isSerialQuery ? matchScenarios(q, scenarios) : [];
-  const queryEmbedding = q && !isSerialQuery ? await embedSearchQuery(config.providers.geminiApiKey, q) : null;
+  // Kicked off alongside stats/tags/scenario counts below (it's a ~15s-timeout network call to
+  // the embedding provider, not a local DB query) rather than awaited up front; only listLibrary
+  // actually needs the resolved value.
+  const queryEmbeddingPromise = q && !isSerialQuery ? embedSearchQuery(config.providers.geminiApiKey, q) : Promise.resolve(null);
 
-  const [stats, scenarioCounts, tags, { items, total }] = await Promise.all([
+  const [stats, scenarioCounts, tags, queryEmbedding] = await Promise.all([
     libraryStats(pool),
     scenarioStats(pool, { discarded: filter.discarded }),
     allTags(pool),
-    listLibrary(pool, filter, { queryEmbedding, matchedScenarioSlugs })
+    queryEmbeddingPromise
   ]);
+  const { items, total } = await listLibrary(pool, filter, { queryEmbedding, matchedScenarioSlugs });
   const topTags = tags.slice(0, TOP_TAGS);
   const hasFilters = Boolean(filter.q || filter.types?.length || filter.tags?.length || filter.scenarios?.length || filter.usage || filter.discarded);
   const hasPrev = filter.page > 1;
@@ -164,8 +168,8 @@ export default async function Page({
                   <div>
                     <div className="list-row__title">
                       {row.title}
-                      {formatSerial(row.type, row.serial) && (
-                        <span className="serial"> {formatSerial(row.type, row.serial)}</span>
+                      {displaySerial(row.verdict, row.type, row.serial) && (
+                        <span className="serial"> {displaySerial(row.verdict, row.type, row.serial)}</span>
                       )}
                     </div>
                     <div className="list-row__meta">

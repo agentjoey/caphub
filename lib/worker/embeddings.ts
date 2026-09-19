@@ -48,18 +48,39 @@ export async function runEmbedTick(deps: EmbedTickDeps, signal: AbortSignal): Pr
   if (rows.length === 0) return "idle";
 
   const texts = rows.map((r) => embeddingText({ title: r.title, summary: r.summary, tags: r.tags, scenarioLabels: [...r.label_zh, ...r.label_en] }));
-  let vectors: number[][];
+  let vectors: Array<number[] | undefined>;
   try {
     vectors = await deps.embed.embed(texts, "document", signal);
   } catch (error) {
-    deps.log?.({ embed: "failed", code: runErrorCode(error) });
-    return "error";
+    const code = runErrorCode(error);
+    // A non-transient error (a bad request the provider will never accept as a batch — a
+    // malformed/oversized text, or some other 4xx that isn't rate-limiting) means the batch
+    // itself, not the provider, is at fault: one bad row would otherwise block the whole queue
+    // forever, since the same batch keeps getting re-selected. Retry the batch one row at a
+    // time instead so a single bad text can't wedge every other row behind it; a row that still
+    // fails alone is skipped for this tick (it stays a candidate for the next one).
+    if (code !== "INVALID_OUTPUT") {
+      deps.log?.({ embed: "failed", code });
+      return "error";
+    }
+    deps.log?.({ embed: "batch-failed", code, fallback: "per-row" });
+    vectors = await Promise.all(texts.map(async (text) => {
+      try {
+        const [vector] = await deps.embed.embed([text], "document", signal);
+        return vector;
+      } catch (rowError) {
+        deps.log?.({ embed: "row-embed-failed", code: runErrorCode(rowError) });
+        return undefined;
+      }
+    }));
   }
 
   let written = 0;
   let skipped = 0;
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
+    const vector = vectors[i];
+    if (!vector) { skipped += 1; continue; }
     try {
       // node-postgres reads timestamptz back as a millisecond-precision JS Date, so comparing
       // it straight against the µs-precision column read here would almost never match and the
@@ -69,7 +90,7 @@ export async function runEmbedTick(deps: EmbedTickDeps, signal: AbortSignal): Pr
       const result = await deps.pool.query(
         `UPDATE caphub_v2.capabilities SET embedding = $2::vector, embedded_at = updated_at
          WHERE id = $1 AND date_trunc('milliseconds', updated_at) = $3::timestamptz`,
-        [row.id, toVectorLiteral(vectors[i]), row.updated_at]
+        [row.id, toVectorLiteral(vector), row.updated_at]
       );
       if (result.rowCount) written += 1;
       else skipped += 1;

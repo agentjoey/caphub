@@ -96,3 +96,59 @@ the Railway dashboard ("Redeploy" on the prior deployment), rather than revertin
 - Both `web` and `worker`: replicas = 1.
 - `web`: Railway app sleeping enabled where the plan supports it (idles when there is no traffic).
 - `worker`: sleeping disabled — it must keep running to poll the run queue and sweep retention.
+
+## M2.5 release
+
+M2.5 adds scenarios, thumbnails, serials, and embeddings. Migrations `004` and `005` are additive
+(new nullable columns/tables), so the order below is safe to run with the old code still live in
+between steps, but do them in order — a couple of steps below exist specifically to close the gaps
+that would otherwise open up during a rolling release:
+
+1. **Apply migrations 004 + 005**, locally, with the Neon owner connection string (never from
+   Railway — see Migrations above):
+   ```bash
+   npm run migrate
+   ```
+2. **Backfill scenarios and thumbnails** for cards that predate this release, via the worker
+   service so it runs with `DATABASE_URL`/`S3_*`/`DEEPSEEK_API_KEY` already configured:
+   ```bash
+   railway run -s worker -- npx tsx scripts/backfill-scenarios.ts --apply
+   railway run -s worker -- npx tsx scripts/backfill-thumbs.ts --apply
+   ```
+   Run without `--apply` first to preview `candidates`/`done`/`failed` counts. The scenario
+   backfill clears `embedding`/`embedded_at` on every card it touches (see
+   `scripts/backfill-scenarios.ts`), so the embed tick picks those cards up on its own afterward.
+3. **Push/merge to `main`** — this auto-deploys both `web` and `worker`.
+4. **Serial catch-up.** Old code (pre-Task-6) evaluated `nextval()` in the INSERT's `VALUES` list,
+   so a card whose analysis run finished in the window between step 3's deploy starting and the
+   `worker` image actually rolling over could be `verdict = 'keep'` but slip through without a
+   serial if that window raced a re-run. After both services are confirmed live (Rollback section
+   above has the dashboard check), close that gap with an idempotent, ordered catch-up — run as
+   the Neon owner (or `caphub_v2_app`, which has `UPDATE` on the table) in a single `DO` block so
+   each row gets the next serial in `created_at, id` order rather than in whatever order a
+   multi-row `UPDATE ... RETURNING` would (non-deterministically) apply them:
+   ```sql
+   DO $$
+   DECLARE r RECORD;
+   BEGIN
+     FOR r IN
+       SELECT id FROM caphub_v2.capabilities
+       WHERE verdict = 'keep' AND serial IS NULL
+       ORDER BY created_at, id
+     LOOP
+       UPDATE caphub_v2.capabilities SET serial = nextval('caphub_v2.capability_serial') WHERE id = r.id;
+     END LOOP;
+   END $$;
+   ```
+5. **Confirm the embed tick has drained.** Should reach `0` within a few minutes of the backfills
+   finishing (the worker loop polls every 2s when idle):
+   ```sql
+   SELECT count(*) FROM caphub_v2.capabilities
+   WHERE deleted_at IS NULL AND (embedding IS NULL OR embedded_at < updated_at);
+   ```
+6. **Smoke test** against the live `caphub.agentjoey.ai`:
+   - Loading the site while logged out redirects to the Cloudflare Access login page.
+   - `/library`, search `视频` — returns scenario/semantic-matched results, no server error.
+   - Search `SKL-1` — resolves to the serial-numbered card directly.
+   - Switch the UI language (zh ⇄ en) via the chrome switch — labels and dates re-render in the
+     new locale without a full reload glitch.

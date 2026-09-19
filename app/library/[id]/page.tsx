@@ -8,7 +8,7 @@ import { VerdictBadge } from "../../../components/capability/verdict-badge";
 import { formatDateTime } from "../../../lib/library/format";
 import { errorLabel, typeLabel, usageLabel } from "../../../lib/library/labels";
 import { getCapabilityDetail } from "../../../lib/library/queries";
-import { formatSerial } from "../../../lib/library/serial";
+import { displaySerial } from "../../../lib/library/serial";
 import { libraryHref } from "../../../lib/library/search-params";
 import { getRuntime } from "../../../lib/runtime";
 import { getLocale } from "../../../lib/i18n/locale";
@@ -24,7 +24,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const dict = getDict(locale);
   const [detail, scenarios] = await Promise.all([getCapabilityDetail(pool, id), loadScenarios(pool)]);
   if (!detail || detail.deletedAt) notFound();
-  const serial = formatSerial(detail.type, detail.serial);
+  const serial = displaySerial(detail.verdict, detail.type, detail.serial);
   const cardScenarios = scenarios.filter((s) => detail.scenarios.includes(s.slug));
 
   return (

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatSerial, parseSerialQuery } from "./serial";
+import { displaySerial, formatSerial, parseSerialQuery } from "./serial";
 
 describe("formatSerial", () => {
   it("returns null when there is no serial yet", () => {
@@ -14,6 +14,18 @@ describe("formatSerial", () => {
   });
   it("does not truncate serials with 5+ digits", () => {
     expect(formatSerial("skill", 12345)).toBe("SKL-12345");
+  });
+});
+
+describe("displaySerial", () => {
+  it("shows the serial for a kept card", () => {
+    expect(displaySerial("keep", "skill", 6)).toBe("SKL-0006");
+  });
+  it("hides the serial for a discarded card even though it still has one in the DB", () => {
+    expect(displaySerial("discard", "skill", 6)).toBeNull();
+  });
+  it("hides the serial for a pending card", () => {
+    expect(displaySerial("pending", "skill", null)).toBeNull();
   });
 });
 

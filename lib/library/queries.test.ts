@@ -58,6 +58,11 @@ describe("library queries", () => {
     expect(text).toMatch(new RegExp(`>= \\$\\d+`));
     expect(values).toEqual(expect.arrayContaining(["[0.1,0.2]", "web scraping", "%web scraping%", ["data"], SEMANTIC_MIN]));
   });
+  it("listLibrary's scored hybrid query tie-breaks on cb.id so equally-scored, equally-updated rows have a stable order", async () => {
+    const { pool, calls } = recorder([[], [{ total: "0" }]]);
+    await listLibrary(pool, { q: "web scraping", page: 1 }, { queryEmbedding: [0.1, 0.2] });
+    expect(calls[0].text).toMatch(/ORDER BY \(COALESCE\(CASE WHEN cb\.embedding IS NOT NULL[\s\S]*DESC, cb\.updated_at DESC, cb\.id\b/);
+  });
   it("listLibrary escapes ILIKE metacharacters in q", async () => {
     const { pool, calls } = recorder([[], [{ total: "0" }]]);
     await listLibrary(pool, { q: "100%_done", page: 1 });

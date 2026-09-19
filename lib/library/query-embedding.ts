@@ -20,7 +20,10 @@ export async function embedSearchQuery(
     const [vector] = await embed.embed([q], "query", controller.signal);
     return vector ?? null;
   } catch (error) {
-    console.warn("library search: query embedding failed, falling back to non-semantic search", error);
+    // Short message only: no stack trace, no error object (never risk leaking a provider
+    // response body or other detail into logs).
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`library search: query embedding failed, falling back to non-semantic search (${message})`);
     return null;
   } finally {
     clearTimeout(timer);
