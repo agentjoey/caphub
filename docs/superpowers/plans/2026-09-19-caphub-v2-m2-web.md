@@ -190,7 +190,7 @@ button { background: transparent; border: 0; padding: 0; cursor: pointer; }
 a { color: inherit; }
 ```
 2. 从 `$ALLJOBS/app/globals.css` 逐字复制：`:root` 与 `*, *::before, *::after`（约 290–332 行）、`body` / `:focus-visible` / `.skip-link`（334–360 行附近）、`.app-header` / `.brand` / `.primary-nav`（376–448 行）、`.main-content`（714–718）、`.badge` 基础类（599 行起的 `.badge { … }` 一条）、`.btn` / `.btn--primary`（886–917）、`.sr-only`（966–976）、`prefers-reduced-motion` 块（1175–1183）、≤600px 媒体查询中针对 `.app-header` / `.primary-nav` / `.main-content` 的三条（1129–1173 内）。行号以实际文件为准，按选择器名定位。
-3. 从 `$ALLJOBS/app/globals.css` 逐字复制 Caphub 投递相关类：`.caphub-intro` … `.caphub-error`（40–156 行），以及 ≤720px 媒体查询里针对这些类的规则（127–153 行）。删除 `.caphub-custody*` 与 `.caphub-receipt*` 两组（v2 不用）。
+3. 从 `$ALLJOBS/app/globals.css` 逐字复制 Caphub 投递相关类：`.caphub-intro` … `.caphub-error`（40–156 行），以及 ≤720px 媒体查询里针对这些类的规则（127–153 行）。保留 `.caphub-custody*`（投递页底部深色说明条要用），删除 `.caphub-receipt*`（v2 不用）。
 4. 新增（v2 专用，逐字写入）：
 ```css
 .brand__sub { color: var(--ink-muted); font-weight: 400; }
@@ -1057,7 +1057,31 @@ describe("PlaybookView", () => {
 </div>
 ```
   `RecentRow`（放在 `app/recent-row.tsx`，client 组件，因为有重跑按钮）：左 `CapturePreview thumb`；中：标题 = `item.title ?? (text 前 40 字 | url 主机名 | "截图")`，meta 行 = 状态徽章（排队中/分析中/已建卡/失败）+ 结论徽章（有 capability 时）+ 相对时间（`Intl.RelativeTimeFormat("zh-CN")`）；失败时显示 `errorLabel(errorCode)` 与“重跑”按钮（调用 `rerunAction(item.id)`，结果非 ok 时显示 message）；右：有 capability → `<Link className="btn" href={`/library/${capabilityId}`}>查看</Link>`（deleted 时不显示链接）。
-  `capture-form.tsx`：改用 `.caphub-workbench` 两栏结构（左：`.caphub-evidence-panel` 拖拽/粘贴/选择图片的 `.caphub-drop-zone`，保留现有逻辑与“清除图片”；右：`.caphub-context-panel` 里 `.caphub-field` 包 textarea「或粘贴文字 / URL」，`.caphub-submit` 按钮「投递」，pending 时 `.caphub-spinner`）。提交成功后显示 `.notice`：新建 → “已收到，正在排队分析”；重复 → “这张图/这段内容之前投递过，已指向原记录”。
+  `capture-form.tsx`：**严格参照 v1 投递页布局**（Human 提供的截图：`$ALLJOBS/components/caphub/capture-form.tsx` 的结构与类名），只把文案换成中文、把右栏改成 v2 的文字/链接输入：
+```
+<form className="caphub-workbench">
+  <section className="caphub-evidence-panel">
+    <div className="caphub-section-heading"><h2>截图</h2><span>一张图片 · 最大 10 MB</span></div>
+    <div className="caphub-drop-zone"> 未选图：<div className="caphub-drop-content">
+        <span className="caphub-upload-mark">{上传图标：内联 SVG，24px，stroke currentColor，与 lucide Upload 同形}</span>
+        <span className="caphub-promise">投递 → 分析 → 建档</span>
+        <h3>把截图拖到这里</h3>
+        <p>支持 PNG、JPEG、WebP，也可以直接粘贴。同一张图不会重复分析。</p>
+        <button type="button" className="caphub-quiet-button">选择图片</button></div>
+      已选图：<div className="caphub-selected-file"><span className="caphub-file-mark">PNG|JPEG|WEBP</span><div><strong>{文件名}</strong><small>{类型} · {大小}</small></div><button type="button" className="caphub-quiet-button">清除图片</button></div>
+      出错：<p className="caphub-inline-error" role="alert">…</p>
+    </div>
+  </section>
+  <section className="caphub-context-panel">
+    <div className="caphub-section-heading"><h2>文字或链接</h2><span>不传图时使用</span></div>
+    <div className="caphub-field"><label>链接 <span>仅 HTTPS</span></label><input type="text" inputMode="url" placeholder="https://github.com/…" /><p>一个能力的网页、仓库或文章地址。</p></div>
+    <div className="caphub-field"><label>文字 <span>{n} / 4,000</span></label><textarea maxLength={4000} placeholder="粘贴一段 prompt、经验或说明……" /></div>
+    <button className="caphub-submit" type="submit">{pending && <span className="caphub-spinner" />}{按钮文案}</button>
+  </section>
+</form>
+<section className="caphub-custody"><div><strong>投递一次，在这里跟进分析。</strong><p>原图在 30 天后清除，分析结果与卡片保留。把握大的结论会自动执行。</p></div><span className="caphub-custody__state">拿不准的进 Review</span></section>
+```
+  规则：选了图片时右栏的两个输入 `disabled`，并在右栏标题右侧显示“本次投递图片”；未选图时链接与文字二选一（都填则提示“链接和文字请只填一项”）；按钮文案：无内容 → 置灰“选择图片或填写内容后投递”，有内容 → “投递”，提交中 → “投递中…”。链接提交走 `text` 字段（API 会把纯 https 链接识别为 url 类型）。v1 的 `.caphub-intro` 标题区用 `<h1>投递一个能力。</h1><p>上传截图、文字或链接，跟进分析并决定是否建档。</p>` + 右侧 `Link.caphub-quiet-button`“去 Review（{pending}）”。截图验收（Task 10）须与 v1 截图逐区域对照：标题区、两栏工作台、斜纹拖放区、深色说明条。
 - [ ] **Step 5:** `npm test`、typecheck、lint、build 通过。
 - [ ] **Step 6:** 提交 `feat(web): shared capability components and redesigned submit page`。
 
