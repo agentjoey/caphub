@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { loadScenarios } from "../../../lib/analysis/scenarios";
 import { AnalysisDetails } from "../../../components/capability/analysis-details";
 import { CapturePreview } from "../../../components/capability/capture-preview";
 import { PlaybookView } from "../../../components/capability/playbook-view";
@@ -7,6 +8,8 @@ import { VerdictBadge } from "../../../components/capability/verdict-badge";
 import { formatDateTime } from "../../../lib/library/format";
 import { errorLabel, TYPE_LABEL, USAGE_LABEL } from "../../../lib/library/labels";
 import { getCapabilityDetail } from "../../../lib/library/queries";
+import { formatSerial } from "../../../lib/library/serial";
+import { libraryHref } from "../../../lib/library/search-params";
 import { getRuntime } from "../../../lib/runtime";
 import { DetailActions } from "./detail-actions";
 
@@ -15,18 +18,32 @@ export const dynamic = "force-dynamic";
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { pool } = getRuntime();
-  const detail = await getCapabilityDetail(pool, id);
+  const [detail, scenarios] = await Promise.all([getCapabilityDetail(pool, id), loadScenarios(pool)]);
   if (!detail || detail.deletedAt) notFound();
+  const serial = formatSerial(detail.type, detail.serial);
+  const cardScenarios = scenarios.filter((s) => detail.scenarios.includes(s.slug));
 
   return (
     <div>
       <p><Link href="/library">← 能力库</Link></p>
       <div className="page-head">
         <div>
-          <h1 className="page-title">{detail.title}</h1>
+          <h1 className="page-title">
+            {detail.title}
+            {serial && <span className="serial"> {serial}</span>}
+          </h1>
           <p className="page-subtitle">
             {TYPE_LABEL[detail.type]} · {USAGE_LABEL[detail.usage]} · <VerdictBadge verdict={detail.verdict} verdictBy={detail.verdictBy} /> · 创建于 {formatDateTime(detail.createdAt)}
           </p>
+          {cardScenarios.length > 0 && (
+            <div className="filter-row">
+              {cardScenarios.map((s) => (
+                <Link key={s.slug} className="chip" href={libraryHref({ page: 1 }, { scenarios: [s.slug] })}>
+                  {s.labelZh}
+                </Link>
+              ))}
+            </div>
+          )}
         </div>
       </div>
       <div className="detail-grid">

@@ -368,7 +368,9 @@ body {
 .tag { display: inline-flex; padding: 2px 7px; font-family: var(--font-mono); font-size: 11px; color: var(--ink-muted); background: var(--paper-recessed); border: 1px solid var(--hairline); border-radius: var(--radius-sm); }
 .tag-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .stat-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-bottom: 24px; }
-.stat { background: var(--paper-raised); border: 1px solid var(--hairline); border-radius: var(--radius-md); padding: 14px 16px; box-shadow: 0 1px 2px rgba(22, 20, 14, 0.04); }
+.stat { display: block; background: var(--paper-raised); border: 1px solid var(--hairline); border-radius: var(--radius-md); padding: 14px 16px; box-shadow: 0 1px 2px rgba(22, 20, 14, 0.04); text-decoration: none; color: inherit; }
+a.stat:hover { background: var(--paper-recessed); }
+.stat[aria-current="true"] { border-color: var(--amber-border); background: var(--amber-soft); }
 .stat__label { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; color: var(--ink-faint); letter-spacing: 0.05em; }
 .stat__value { margin-top: 4px; font-size: 26px; font-weight: 700; line-height: 1.1; }
 .stat--accent { border-color: var(--amber-border); background: var(--amber-soft); }
@@ -377,6 +379,7 @@ body {
 .list-row:hover { background: var(--paper-raised); }
 .list-row__title { font-weight: 650; overflow-wrap: anywhere; }
 .list-row__meta { margin-top: 4px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--ink-muted); font-size: 13px; }
+.serial { font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--ink-faint); }
 .thumb { width: 56px; height: 56px; border-radius: var(--radius-md); border: 1px solid var(--hairline); background: var(--paper-recessed); object-fit: cover; display: grid; place-items: center; font-family: var(--font-mono); font-size: 10px; color: var(--ink-faint); overflow: hidden; }
 .empty { padding: 18px; color: var(--ink-muted); background: var(--paper-raised); border: 1px dashed var(--hairline-strong); border-radius: var(--radius-lg); font-size: 14px; }
 .inline-error { padding: 10px 12px; color: var(--rust); background: var(--rust-soft); border: 1px solid var(--rust-border); border-radius: var(--radius-md); font-size: 13px; }

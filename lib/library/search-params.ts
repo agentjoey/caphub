@@ -1,4 +1,4 @@
-import { capabilityTypeSchema, isValidTag, type CapabilityType } from "../analysis/card";
+import { capabilityTypeSchema, isValidTag, SCENARIO_SLUG_PATTERN, type CapabilityType } from "../analysis/card";
 import type { LibraryFilter } from "./queries";
 
 type RawParams = Record<string, string | string[] | undefined>;
@@ -17,6 +17,7 @@ export function parseLibraryParams(sp: RawParams): LibraryFilter {
   const qRaw = first(sp.q)?.trim();
   const types = toArray(sp.type).filter((t): t is CapabilityType => capabilityTypeSchema.safeParse(t).success);
   const tags = toArray(sp.tag).filter(isValidTag);
+  const scenarios = toArray(sp.scenario).filter((s) => SCENARIO_SLUG_PATTERN.test(s));
   const usageRaw = first(sp.usage);
   const usage = usageRaw === "integrate" || usageRaw === "reference" ? usageRaw : undefined;
   const discarded = first(sp.discarded) === "1" ? true : undefined;
@@ -27,6 +28,7 @@ export function parseLibraryParams(sp: RawParams): LibraryFilter {
     q: qRaw && qRaw.length > 0 ? qRaw : undefined,
     types: types.length > 0 ? types : undefined,
     tags: tags.length > 0 ? tags : undefined,
+    scenarios: scenarios.length > 0 ? scenarios : undefined,
     usage,
     discarded,
     page
@@ -47,6 +49,7 @@ export function libraryHref(filter: LibraryFilter, patch: Partial<LibraryFilter>
   if (merged.q) params.set("q", merged.q);
   for (const type of merged.types ?? []) params.append("type", type);
   for (const tag of merged.tags ?? []) params.append("tag", tag);
+  for (const scenario of merged.scenarios ?? []) params.append("scenario", scenario);
   if (merged.usage) params.set("usage", merged.usage);
   if (merged.discarded) params.set("discarded", "1");
   if (merged.page && merged.page > 1) params.set("page", String(merged.page));

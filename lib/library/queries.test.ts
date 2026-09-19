@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { listLibrary, listPending, libraryStats, getCapabilityDetail, PAGE_SIZE } from "./queries";
+import { listLibrary, listPending, libraryStats, scenarioStats, getCapabilityDetail, PAGE_SIZE, SEMANTIC_MIN } from "./queries";
 
 function recorder(rows: unknown[][]) {
   const calls: Array<{ text: string; values: unknown[] }> = [];
@@ -31,6 +31,54 @@ describe("library queries", () => {
     const { pool, calls } = recorder([[], [{ total: "0" }]]);
     await listLibrary(pool, { discarded: true, page: 1 });
     expect(calls[0].text).toMatch(/cb\.verdict = 'discard'/);
+  });
+  it("listLibrary filters by scenarios via array overlap", async () => {
+    const { pool, calls } = recorder([[], [{ total: "0" }]]);
+    await listLibrary(pool, { scenarios: ["coding", "writing"], page: 1 });
+    expect(calls[0].text).toMatch(/cb\.scenarios && \$\d+::text\[\]/);
+    expect(calls[0].values).toEqual(expect.arrayContaining([["coding", "writing"]]));
+  });
+  it("listLibrary with a serial-shaped q returns only that serial, no scoring", async () => {
+    const { pool, calls } = recorder([[], [{ total: "0" }]]);
+    await listLibrary(pool, { q: "SKL-0012", page: 1 });
+    expect(calls[0].text).toMatch(/cb\.serial = \$\d+/);
+    expect(calls[0].values).toContain(12);
+    expect(calls[0].text).not.toMatch(/embedding/);
+    expect(calls[0].text).not.toMatch(/ORDER BY \(/);
+    expect(calls[0].text).toMatch(/ORDER BY cb\.created_at DESC/);
+  });
+  it("listLibrary with a non-serial q builds a scored hybrid query", async () => {
+    const { pool, calls } = recorder([[], [{ total: "0" }]]);
+    await listLibrary(pool, { q: "web scraping", page: 1 }, { queryEmbedding: [0.1, 0.2], matchedScenarioSlugs: ["data"] });
+    const { text, values } = calls[0];
+    expect(text).toMatch(/1 - \(cb\.embedding <=> \$\d+::vector\)/);
+    expect(text).toMatch(/cb\.scenarios && \$\d+::text\[\]/);
+    expect(text).toMatch(/cb\.title ILIKE \$\d+ OR cb\.summary ILIKE \$\d+ OR EXISTS \(SELECT 1 FROM unnest\(cb\.tags\) tg WHERE tg ILIKE \$\d+\)/);
+    expect(text).toMatch(/ORDER BY \(COALESCE\(CASE WHEN cb\.embedding IS NOT NULL/);
+    expect(text).toMatch(new RegExp(`>= \\$\\d+`));
+    expect(values).toEqual(expect.arrayContaining(["[0.1,0.2]", "web scraping", "%web scraping%", ["data"], SEMANTIC_MIN]));
+  });
+  it("listLibrary escapes ILIKE metacharacters in q", async () => {
+    const { pool, calls } = recorder([[], [{ total: "0" }]]);
+    await listLibrary(pool, { q: "100%_done", page: 1 });
+    expect(calls[0].values).toContain("%100\\%\\_done%");
+  });
+  it("listLibrary passes null vector when no query embedding is available", async () => {
+    const { pool, calls } = recorder([[], [{ total: "0" }]]);
+    await listLibrary(pool, { q: "web scraping", page: 1 });
+    expect(calls[0].values).toContain(null);
+  });
+  it("scenarioStats counts kept cards per scenario slug", async () => {
+    const { pool, calls } = recorder([[{ slug: "coding", count: "5" }, { slug: "data", count: "2" }]]);
+    const stats = await scenarioStats(pool);
+    expect(calls[0].text).toMatch(/unnest\(scenarios\)/);
+    expect(calls[0].values).toEqual(["keep"]);
+    expect(stats).toEqual([{ slug: "coding", count: 5 }, { slug: "data", count: 2 }]);
+  });
+  it("scenarioStats respects discarded", async () => {
+    const { pool, calls } = recorder([[]]);
+    await scenarioStats(pool, { discarded: true });
+    expect(calls[0].values).toEqual(["discard"]);
   });
   it("libraryStats counts kept by type, distinct tags of kept, and pending", async () => {
     const { pool } = recorder([[{ type: "skill", n: "3" }, { type: "prompt", n: "1" }], [{ n: "7" }], [{ n: "2" }]]);
