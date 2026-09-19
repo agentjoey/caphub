@@ -4,7 +4,8 @@ import { upsertCapability } from "./capabilities";
 
 const card: Card = {
   title: "t", type: "prompt", summary: "s", signals: ["a", "b"], suggested_verdict: "keep", suggested_reason: "r",
-  confidence: 0.9, usage: "integrate", playbook: { kind: "integrate", install: [], repo: null, prompt_text: "p" }, tags: ["x"], source_url: null
+  confidence: 0.9, usage: "integrate", playbook: { kind: "integrate", install: [], repo: null, prompt_text: "p" }, tags: ["x"], source_url: null,
+  scenarios: ["coding"]
 };
 
 describe("upsertCapability", () => {
@@ -21,6 +22,7 @@ describe("upsertCapability", () => {
     expect(sql).toContain("INSERT INTO caphub_v2.capabilities");
     expect(sql).toContain("review_error = NULL");
     expect(sql).toContain("review_requested_at = NULL");
+    expect(sql).toContain("scenarios = excluded.scenarios");
     expect(out).toEqual({ id: "cab_1", verdict: "keep", previousVerdict: null, deleted: false });
   });
 
@@ -60,7 +62,8 @@ describe("upsertCapability", () => {
     const dirty: Card = {
       ...card,
       title: "t\u0000itle", summary: "s\u0000ummary", signals: ["a\u0000", "b"], suggested_reason: "r\u0000eason",
-      playbook: { kind: "integrate", install: [], repo: null, prompt_text: "p\u0000" }, tags: ["x\u0000"], source_url: "https://a.b/\u0000"
+      playbook: { kind: "integrate", install: [], repo: null, prompt_text: "p\u0000" }, tags: ["x\u0000"], source_url: "https://a.b/\u0000",
+      scenarios: ["coding\u0000"]
     };
     await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card: dirty, verdict: "keep", verdictBy: "auto" });
     for (const p of params) {
@@ -74,5 +77,6 @@ describe("upsertCapability", () => {
     expect(JSON.parse(params[13] as string)).toEqual({ kind: "integrate", install: [], repo: null, prompt_text: "p" });
     expect(params[14]).toEqual(["x"]);
     expect(params[15]).toBe("https://a.b/");
+    expect(params[16]).toEqual(["coding"]);
   });
 });

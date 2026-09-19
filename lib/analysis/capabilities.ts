@@ -23,14 +23,14 @@ export async function upsertCapability(
      ), upsert AS (
        INSERT INTO caphub_v2.capabilities
          (id, capture_id, run_id, title, type, summary, signals, suggested_verdict, suggested_reason, confidence,
-          verdict, verdict_by, verdict_at, usage, playbook, tags, source_url, serial)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CASE WHEN $12::text IS NULL THEN NULL ELSE now() END, $13, $14, $15, $16,
+          verdict, verdict_by, verdict_at, usage, playbook, tags, source_url, scenarios, serial)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CASE WHEN $12::text IS NULL THEN NULL ELSE now() END, $13, $14, $15, $16, $17,
          CASE WHEN $11 = 'keep' THEN nextval('caphub_v2.capability_serial') ELSE NULL END)
        ON CONFLICT (capture_id) DO UPDATE SET
          run_id = excluded.run_id, title = excluded.title, type = excluded.type, summary = excluded.summary,
          signals = excluded.signals, suggested_verdict = excluded.suggested_verdict, suggested_reason = excluded.suggested_reason,
          confidence = excluded.confidence, usage = excluded.usage, playbook = excluded.playbook, tags = excluded.tags,
-         source_url = excluded.source_url, review_note = NULL, review_error = NULL, review_requested_at = NULL,
+         source_url = excluded.source_url, scenarios = excluded.scenarios, review_note = NULL, review_error = NULL, review_requested_at = NULL,
          notified_at = NULL, updated_at = now(),
          verdict = CASE WHEN caphub_v2.capabilities.verdict_by = 'human' THEN caphub_v2.capabilities.verdict ELSE excluded.verdict END,
          verdict_by = CASE WHEN caphub_v2.capabilities.verdict_by = 'human' THEN 'human' ELSE excluded.verdict_by END,
@@ -44,7 +44,7 @@ export async function upsertCapability(
      FROM upsert LEFT JOIN prev ON true`,
     [newId("cab"), row.captureId, row.runId, stripNul(c.title), c.type, stripNul(c.summary), jsonStringifyStripNul(c.signals),
       c.suggested_verdict, stripNul(c.suggested_reason), c.confidence, row.verdict, row.verdictBy, c.usage, jsonStringifyStripNul(c.playbook),
-      c.tags.map(stripNul), c.source_url === null ? null : stripNul(c.source_url)]);
+      c.tags.map(stripNul), c.source_url === null ? null : stripNul(c.source_url), c.scenarios.map(stripNul)]);
   const out = r.rows[0];
   return { id: out.id, verdict: out.verdict, previousVerdict: out.previous_verdict, deleted: out.deleted };
 }

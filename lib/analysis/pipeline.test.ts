@@ -3,7 +3,8 @@ import { createPipelineDeps, runPipeline, type PipelineDeps } from "./pipeline";
 
 const card = {
   title: "t", type: "prompt", summary: "s", signals: ["a", "b"], suggested_verdict: "keep", suggested_reason: "r",
-  confidence: 0.9, usage: "integrate", playbook: { kind: "integrate", install: [], repo: null, prompt_text: "p" }, tags: ["x"], source_url: null
+  confidence: 0.9, usage: "integrate", playbook: { kind: "integrate", install: [], repo: null, prompt_text: "p" }, tags: ["x"], source_url: null,
+  scenarios: ["coding"]
 };
 const pendingCard = { ...card, confidence: 0.5 };
 const extraction = { what: "w", visible_text: "", commands: [], prompt_text: null, source_hints: [], questions: [] };
@@ -29,6 +30,9 @@ function deps(kind: Kind, opts: { reasonValue?: unknown; failTagBump?: boolean }
       };
     }
     if (text.startsWith("SELECT name FROM caphub_v2.tags")) return { rows: [{ name: "x" }] };
+    if (text.startsWith("SELECT slug, label_zh, label_en, keywords FROM caphub_v2.scenarios")) {
+      return { rows: [{ slug: "coding", label_zh: "编程", label_en: "Coding", keywords: ["code"] }] };
+    }
     if (text.startsWith("SELECT id, title, tags FROM caphub_v2.capabilities")) return { rows: [] };
     if (text.includes("INSERT INTO caphub_v2.capabilities")) {
       // values: [id, captureId, runId, title, type, summary, signals, suggested_verdict,
@@ -142,6 +146,21 @@ describe("runPipeline", () => {
     const failedStep = sql.find((q) => q.text.includes("caphub_v2.analysis_steps") && q.values[1] === "search" && q.values[8] === false);
     expect(failedStep).toBeDefined();
     expect(failedStep!.values[9]).toBe("UNAVAILABLE");
+  });
+
+  it("fails the run with a clear error when no scenarios are configured", async () => {
+    const { d } = deps("text");
+    const inner = d.pool as unknown as { query: (text: string, values?: unknown[]) => Promise<{ rows: unknown[] }> };
+    d.pool = {
+      query: (text: string, values: unknown[] = []) =>
+        text.startsWith("SELECT slug, label_zh, label_en, keywords FROM caphub_v2.scenarios")
+          ? Promise.resolve({ rows: [] })
+          : inner.query(text, values),
+      connect: (d.pool as unknown as { connect: () => unknown }).connect
+    } as never;
+    await expect(
+      runPipeline(d, { runId: "run_no_scenarios", captureId: "cap_no_scenarios", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal)
+    ).rejects.toThrow(/no scenarios/);
   });
 
   it("rethrows BUDGET when the search response blows the token budget, without invoking reason", async () => {

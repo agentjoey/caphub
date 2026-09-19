@@ -87,7 +87,8 @@ const SPECS: DemoSpec[] = [
       usage: "integrate",
       playbook: { kind: "integrate", install: ["pip install scrapling"], repo: "https://github.com/D4Vinci/Scrapling", prompt_text: null },
       tags: ["web-scraping", "python", "anti-bot"],
-      source_url: "https://github.com/D4Vinci/Scrapling"
+      source_url: "https://github.com/D4Vinci/Scrapling",
+      scenarios: ["coding", "data"]
     }
   },
   {
@@ -112,7 +113,8 @@ const SPECS: DemoSpec[] = [
         when_to_use: "遇到并发编辑冲突或乐观锁更新没有生效时"
       },
       tags: ["nextjs", "optimistic-locking", "debugging"],
-      source_url: null
+      source_url: null,
+      scenarios: ["coding"]
     }
   },
   {
@@ -133,7 +135,8 @@ const SPECS: DemoSpec[] = [
       usage: "integrate",
       playbook: { kind: "integrate", install: ["npm install -g tavily-mcp"], repo: "https://github.com/tavily-ai/tavily-mcp", prompt_text: null },
       tags: ["mcp", "search", "tavily"],
-      source_url: "https://github.com/tavily-ai/tavily-mcp"
+      source_url: "https://github.com/tavily-ai/tavily-mcp",
+      scenarios: ["coding", "research", "automation"]
     }
   },
   {
@@ -159,7 +162,8 @@ const SPECS: DemoSpec[] = [
         prompt_text: "你是一个信息整理助手。给定多篇来源文本，输出：1) 一句话标题；2) 3-5 条要点，每条标注对应来源编号；3) 若来源之间有冲突，单独列出。不要编造来源中没有的信息。"
       },
       tags: ["prompt-engineering", "summarization"],
-      source_url: null
+      source_url: null,
+      scenarios: ["writing", "research"]
     }
   },
   {
@@ -187,7 +191,8 @@ const SPECS: DemoSpec[] = [
         ]
       },
       tags: ["postgres", "full-text-search", "chinese-nlp"],
-      source_url: "https://example.com/pg-fts-chinese-benchmark"
+      source_url: "https://example.com/pg-fts-chinese-benchmark",
+      scenarios: ["coding", "data"]
     }
   },
   {
@@ -208,7 +213,8 @@ const SPECS: DemoSpec[] = [
       usage: "reference",
       playbook: { kind: "reference", points: ["javascript: 书签脚本原理简单，靠 html2canvas 截图", "已被 scripts/shot.mjs 取代，无需保留"] },
       tags: ["screenshot", "legacy"],
-      source_url: null
+      source_url: null,
+      scenarios: ["automation"]
     }
   }
 ];

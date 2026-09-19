@@ -63,7 +63,27 @@ export const tagsSchema = z.array(z.string().max(40))
     .refine(isValidTag, "tag must be lowercase English words joined by hyphens (e.g. web-scraping) and not a reserved type/usage word"))
     .min(1).max(6));
 
-export const cardSchema = z.object({
+/**
+ * Matches the `scenarios.slug` CHECK in migration 004: lowercase alphanumeric segments
+ * joined by hyphens. Used as-is (no enum) in the static cardSchema, where the live list of
+ * valid slugs isn't available; `cardSchemaFor` (lib/analysis/scenarios.ts) narrows this to
+ * an actual `z.enum` of the loaded slugs for real pipeline runs.
+ */
+export const SCENARIO_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/**
+ * Optional/default-[] so callers without a loaded scenario list (tests, seed data, the
+ * spike script) can keep constructing cards without one. `cardSchemaFor` overrides this
+ * field with a real `min(1).max(3)` enum once a slug list is known.
+ */
+export const scenariosSchema = z.array(z.string().max(40).regex(SCENARIO_SLUG_PATTERN)).max(3).default([]);
+
+/**
+ * The bare object shape, without the cross-field superRefine below. Exported so
+ * `cardSchemaFor` can `.extend()` a field (ZodObject supports this; the ZodEffects
+ * produced by `.superRefine()` does not) and then re-apply the same cross-field rules.
+ */
+export const cardObjectSchema = z.object({
   title: z.string().min(1).max(60),
   type: capabilityTypeSchema,
   summary: z.string().min(1).max(800),
@@ -74,8 +94,14 @@ export const cardSchema = z.object({
   usage: z.enum(["integrate", "reference"]),
   playbook: playbookSchema,
   tags: tagsSchema,
-  source_url: z.string().url().nullable()
-}).superRefine((card, ctx) => {
+  source_url: z.string().url().nullable(),
+  scenarios: scenariosSchema
+});
+
+export function refineCard<T extends { type: CapabilityType; usage: "integrate" | "reference"; playbook: Playbook }>(
+  card: T,
+  ctx: z.RefinementCtx
+): void {
   if (card.type === "experience" && card.playbook.kind !== "experience") {
     ctx.addIssue({ code: "custom", path: ["playbook"], message: "experience type requires experience playbook" });
   }
@@ -90,7 +116,9 @@ export const cardSchema = z.object({
       ctx.addIssue({ code: "custom", path: ["playbook"], message: "reference usage requires reference playbook" });
     }
   }
-});
+}
+
+export const cardSchema = cardObjectSchema.superRefine(refineCard);
 export type Card = z.infer<typeof cardSchema>;
 
 export const reviewNoteSchema = z.object({ agrees: z.boolean(), points: z.array(z.string().max(300)).max(8) });

@@ -7,7 +7,7 @@ const valid = {
   signals: ["解决 CI 里可访问性回归", "与库里已有 e2e-a11y 重叠"],
   suggested_verdict: "keep", suggested_reason: "有可执行命令", confidence: 0.9,
   usage: "integrate", playbook: { kind: "integrate", install: ["npm i -D @axe-core/playwright"], repo: null, prompt_text: null },
-  tags: ["testing", "accessibility"], source_url: null
+  tags: ["testing", "accessibility"], source_url: null, scenarios: []
 };
 
 describe("isValidTag", () => {
@@ -95,6 +95,14 @@ describe("cardSchema", () => {
       usage: "reference",
       playbook: { kind: "experience", content: "test content", when_to_use: "test when" }
     }).usage).toBe("reference");
+  });
+  it("defaults scenarios to [] when omitted", () => {
+    expect(cardSchema.parse(valid).scenarios).toEqual([]);
+  });
+  it("accepts slug-shaped scenario strings and rejects malformed ones", () => {
+    expect(cardSchema.parse({ ...valid, scenarios: ["coding", "web-scraping"] }).scenarios).toEqual(["coding", "web-scraping"]);
+    expect(() => cardSchema.parse({ ...valid, scenarios: ["Not Valid"] })).toThrow();
+    expect(() => cardSchema.parse({ ...valid, scenarios: ["a", "b", "c", "d"] })).toThrow();
   });
   it("allows repo as owner/repo format in integrate playbook", () => {
     expect(cardSchema.parse({

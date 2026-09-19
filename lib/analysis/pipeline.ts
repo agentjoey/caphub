@@ -9,9 +9,10 @@ import type { Lease } from "../queue/runs";
 import type { ObjectStore } from "../storage/s3";
 import { RunBudget } from "./budget";
 import { upsertCapability } from "./capabilities";
-import { cardSchema, extractionSchema, type Extraction } from "./card";
+import { extractionSchema, type Extraction } from "./card";
 import { prepareMaterial, type MaterialDeps } from "./material";
 import { reasonPrompt, searchQuery, visionPrompt } from "./prompts";
+import { cardSchemaFor, loadScenarios } from "./scenarios";
 import { findSimilar } from "./similar";
 import { recordStep } from "./steps";
 import { runStructured, withTimeout, type StructuredCall } from "./structured";
@@ -109,12 +110,15 @@ export async function runPipeline(deps: PipelineDeps, lease: Lease, signal: Abor
 
   const search = await runSearch(deps, lease.runId, searchQuery(extraction, material), budget, signal);
   const similarSeed = extraction?.what ?? (material.kind === "text" ? material.text : material.kind === "url" ? material.text ?? material.url : "");
-  const [similar, existingTags] = await Promise.all([findSimilar(deps.pool, similarSeed, lease.captureId), topTags(deps.pool)]);
+  const [similar, existingTags, scenarios] = await Promise.all([
+    findSimilar(deps.pool, similarSeed, lease.captureId), topTags(deps.pool), loadScenarios(deps.pool)
+  ]);
+  if (!scenarios.length) throw new Error("no scenarios configured in caphub_v2.scenarios; cannot run reason step");
 
   const card = await runStructured({
     pool: deps.pool, runId: lease.runId, step: "reason", call: deps.reason,
-    prompt: reasonPrompt({ material, extraction, sources: search.sources, similar, existingTags }),
-    schemaName: "capability_card", schema: cardSchema, budget, timeoutMs: TIMEOUTS.reason, signal
+    prompt: reasonPrompt({ material, extraction, sources: search.sources, similar, existingTags, scenarios }),
+    schemaName: "capability_card", schema: cardSchemaFor(scenarios.map((s) => s.slug)), budget, timeoutMs: TIMEOUTS.reason, signal
   });
 
   const decision = decideVerdict(card, deps.threshold);
