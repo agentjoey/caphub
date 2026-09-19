@@ -64,12 +64,12 @@ export async function runEmbedTick(deps: EmbedTickDeps, signal: AbortSignal): Pr
       return "error";
     }
     deps.log?.({ embed: "batch-failed", code, fallback: "per-row" });
-    vectors = await Promise.all(texts.map(async (text) => {
+    vectors = await Promise.all(texts.map(async (text, i) => {
       try {
         const [vector] = await deps.embed.embed([text], "document", signal);
         return vector;
       } catch (rowError) {
-        deps.log?.({ embed: "row-embed-failed", code: runErrorCode(rowError) });
+        deps.log?.({ embed: "row-embed-failed", capability: rows[i].id, code: runErrorCode(rowError) });
         return undefined;
       }
     }));
@@ -77,10 +77,11 @@ export async function runEmbedTick(deps: EmbedTickDeps, signal: AbortSignal): Pr
 
   let written = 0;
   let skipped = 0;
+  let embedFailed = false;
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     const vector = vectors[i];
-    if (!vector) { skipped += 1; continue; }
+    if (!vector) { skipped += 1; embedFailed = true; continue; }
     try {
       // node-postgres reads timestamptz back as a millisecond-precision JS Date, so comparing
       // it straight against the µs-precision column read here would almost never match and the
@@ -100,5 +101,7 @@ export async function runEmbedTick(deps: EmbedTickDeps, signal: AbortSignal): Pr
     }
   }
   deps.log?.({ embed: "done", written, skipped });
-  return written > 0 ? "embedded" : "idle";
+  if (written > 0) return "embedded";
+  if (embedFailed) return "error";
+  return "idle";
 }

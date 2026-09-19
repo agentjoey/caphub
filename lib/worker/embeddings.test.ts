@@ -142,10 +142,46 @@ describe("runEmbedTick", () => {
     expect(updates).toHaveLength(1);
     expect(updates[0]!.values[0]).toBe("cab_2");
     expect(logs).toContainEqual({ embed: "batch-failed", code: "INVALID_OUTPUT", fallback: "per-row" });
-    expect(logs).toContainEqual({ embed: "row-embed-failed", code: "INVALID_OUTPUT" });
+    expect(logs).toContainEqual({ embed: "row-embed-failed", capability: "cab_1", code: "INVALID_OUTPUT" });
     expect(logs).toContainEqual({ embed: "done", written: 1, skipped: 1 });
     // Never logs the offending text.
     expect(JSON.stringify(logs)).not.toMatch(/BAD/);
+  });
+
+  it("returns 'error' (not 'idle') when every row in an INVALID_OUTPUT fallback batch fails to embed, so the caller's backoff isn't reset for a poison row", async () => {
+    const rows = [{ id: "cab_poison", title: "BAD", summary: "S1", tags: [], updated_at: updatedAt, label_zh: [], label_en: [] }];
+    const { pool, calls } = fakePool(rows);
+    const embed = {
+      embed: async () => {
+        throw Object.assign(new Error("bad request"), { code: "INVALID_OUTPUT" });
+      }
+    };
+    const logs: Record<string, unknown>[] = [];
+    const result = await runEmbedTick({ pool, embed, log: (o) => logs.push(o) }, new AbortController().signal);
+    expect(result).toBe("error");
+    expect(logs).toContainEqual({ embed: "row-embed-failed", capability: "cab_poison", code: "INVALID_OUTPUT" });
+    expect(logs).toContainEqual({ embed: "done", written: 0, skipped: 1 });
+    expect(calls.some((c) => c.text.includes("UPDATE caphub_v2.capabilities SET embedding"))).toBe(false);
+  });
+
+  it("returns 'embedded' when a mixed INVALID_OUTPUT fallback batch writes at least one row", async () => {
+    const rows = [
+      { id: "cab_1", title: "BAD", summary: "S1", tags: [], updated_at: updatedAt, label_zh: [], label_en: [] },
+      { id: "cab_2", title: "GOOD", summary: "S2", tags: [], updated_at: updatedAt, label_zh: [], label_en: [] }
+    ];
+    const { pool } = fakePool(rows, [1]);
+    const embed = {
+      embed: async (texts: string[]) => {
+        if (texts.length > 1) throw Object.assign(new Error("bad request"), { code: "INVALID_OUTPUT" });
+        if (texts[0]!.includes("BAD")) throw Object.assign(new Error("bad request"), { code: "INVALID_OUTPUT" });
+        return texts.map(() => Array(768).fill(0.2));
+      }
+    };
+    const logs: Record<string, unknown>[] = [];
+    const result = await runEmbedTick({ pool, embed, log: (o) => logs.push(o) }, new AbortController().signal);
+    expect(result).toBe("embedded");
+    expect(logs).toContainEqual({ embed: "row-embed-failed", capability: "cab_1", code: "INVALID_OUTPUT" });
+    expect(logs).toContainEqual({ embed: "done", written: 1, skipped: 1 });
   });
 
   it("still returns 'error' without a per-row fallback for a transient batch failure (e.g. TIMEOUT)", async () => {
