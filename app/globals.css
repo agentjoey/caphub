@@ -386,7 +386,7 @@ body {
   .thumb { width: 44px; height: 44px; }
 }
 
-/* Review card + capture preview */
+/* Card summary + capture preview */
 .review-card { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 16px; }
 .review-card .thumb { width: 72px; height: 72px; }
 .card-title { font-size: 17px; font-weight: 650; letter-spacing: -0.015em; }
@@ -404,3 +404,34 @@ body {
 .capture-full { max-width: 100%; max-height: 560px; object-fit: contain; border-radius: var(--radius-md); border: 1px solid var(--hairline); }
 .capture-text { padding: 12px 14px; color: var(--ink-muted); background: var(--paper-recessed); border-left: 3px solid var(--hairline-strong); border-radius: var(--radius-sm); font-size: 13.5px; }
 .capture-url { color: var(--ink); text-decoration: underline; word-break: break-all; }
+
+.recent { margin-top: 28px; }
+
+/* Review item (Task 7): wraps CardSummary + AnalysisDetails + actions with a lifecycle state.
+   Named .review-item (not .review-card) because .review-card is already CardSummary's inner
+   thumb+content grid class (components/capability/card-summary.tsx) — reusing it here would
+   double up as a grid container around CardSummary/AnalysisDetails/actions and break layout. */
+.review-item { margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--hairline-strong); }
+.review-item:last-child { border-bottom: 0; }
+.review-item[data-state="done"] { opacity: .55; }
+.review-item__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
+.review-item[data-state="stale"] .review-item__actions { opacity: .5; pointer-events: none; }
+.review-item__message { margin-top: 10px; }
+.review-item__done { margin-top: 14px; font-weight: 600; }
+
+/* Suggestion editor */
+.suggestion-editor { display: grid; gap: 12px; margin-top: 14px; padding: 16px; background: var(--paper-recessed); border: 1px solid var(--hairline); border-radius: var(--radius-md); }
+.suggestion-editor label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; }
+.suggestion-editor select, .suggestion-editor input[type="text"], .suggestion-editor input:not([type]) {
+  padding: 8px 10px; color: var(--ink); background: var(--paper-raised); border: 1px solid var(--hairline-strong); border-radius: var(--radius-md); font: inherit; font-size: 14px;
+}
+.suggestion-editor fieldset { display: flex; flex-wrap: wrap; gap: 14px; margin: 0; padding: 0; border: 0; }
+.suggestion-editor fieldset label { flex-direction: row; align-items: center; gap: 6px; font-weight: 500; }
+.suggestion-editor legend { padding: 0; margin-bottom: 4px; font-size: 13px; font-weight: 600; }
+.suggestion-editor__hint { margin: 0; color: var(--ink-faint); font-size: 12px; }
+
+/* Pagination */
+.pagination { display: flex; justify-content: space-between; gap: 12px; margin-top: 20px; }
+.pagination a, .pagination span { padding: 8px 14px; font-size: 13px; font-weight: 600; border: 1px solid var(--hairline-strong); border-radius: var(--radius-md); text-decoration: none; color: var(--ink); }
+.pagination a:hover { background: var(--paper-raised); }
+.pagination span[aria-disabled="true"] { color: var(--ink-faint); cursor: not-allowed; }
