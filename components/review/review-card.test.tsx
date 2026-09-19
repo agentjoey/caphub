@@ -7,10 +7,12 @@ const decideAction = vi.fn<(...args: unknown[]) => Promise<ActionResult>>(
   async () => ({ ok: false, reason: "CONFLICT", message: "已在别处处理" })
 );
 const editSuggestionAction = vi.fn<(...args: unknown[]) => Promise<ActionResult>>();
+const rerunAction = vi.fn<(...args: unknown[]) => Promise<ActionResult>>();
 
 vi.mock("../../app/actions", () => ({
   decideAction: (...args: unknown[]) => decideAction(...(args as [])),
-  editSuggestionAction: (...args: unknown[]) => editSuggestionAction(...(args as []))
+  editSuggestionAction: (...args: unknown[]) => editSuggestionAction(...(args as [])),
+  rerunAction: (...args: unknown[]) => rerunAction(...(args as []))
 }));
 
 import { ReviewCard } from "./review-card";
@@ -28,6 +30,7 @@ const detail = { ...row, steps: [], sources: [], runPipeline: "mixed", runState:
 beforeEach(() => {
   decideAction.mockClear();
   editSuggestionAction.mockReset();
+  rerunAction.mockReset();
 });
 
 afterEach(cleanup);
@@ -113,6 +116,40 @@ describe("ReviewCard", () => {
     expect(select.disabled).toBe(true);
     expect(tagsInput.disabled).toBe(true);
     expect((saveButton as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("shows the queued message and calls rerunAction with the capture id on success", async () => {
+    rerunAction.mockResolvedValueOnce({ ok: true, updatedAt: "2026-09-19T00:01:00.000Z" });
+    render(<ReviewCard row={row as never} detail={detail as never} />);
+    fireEvent.click(screen.getByRole("button", { name: "重跑分析" }));
+    await waitFor(() => expect(screen.getByText("已加入分析队列，完成后刷新查看")).toBeTruthy());
+    expect(rerunAction).toHaveBeenCalledWith("cap_1");
+    // The card itself is not marked done/finished by a rerun — 保留/丢弃/改建议 stay usable.
+    expect((screen.getByRole("button", { name: "保留" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("shows the error message and does not go stale when rerun conflicts (already queued)", async () => {
+    rerunAction.mockResolvedValueOnce({ ok: false, reason: "CONFLICT", message: "已在排队或分析中" });
+    const { container } = render(<ReviewCard row={row as never} detail={detail as never} />);
+    fireEvent.click(screen.getByRole("button", { name: "重跑分析" }));
+    await waitFor(() => expect(screen.getByText("已在排队或分析中")).toBeTruthy());
+    expect(container.querySelector("[data-state='stale']")).toBeNull();
+    expect((screen.getByRole("button", { name: "保留" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("disables 保留/丢弃/改建议/重跑分析 while the rerun request is in flight", async () => {
+    let resolveRerun!: (r: ActionResult) => void;
+    rerunAction.mockImplementationOnce(() => new Promise((resolve) => { resolveRerun = resolve; }));
+    render(<ReviewCard row={row as never} detail={detail as never} />);
+    fireEvent.click(screen.getByRole("button", { name: "重跑分析" }));
+
+    expect((screen.getByRole("button", { name: "重跑分析" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "保留" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "丢弃" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "改建议" }) as HTMLButtonElement).disabled).toBe(true);
+
+    resolveRerun({ ok: true, updatedAt: "2026-09-19T00:01:00.000Z" });
+    await waitFor(() => expect((screen.getByRole("button", { name: "重跑分析" }) as HTMLButtonElement).disabled).toBe(false));
   });
 
   it("wires the tag hint to the tags input via aria-describedby", () => {

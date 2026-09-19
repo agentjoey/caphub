@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { loadScenarios } from "../../../lib/analysis/scenarios";
 import { AnalysisDetails } from "../../../components/capability/analysis-details";
 import { CapturePreview } from "../../../components/capability/capture-preview";
@@ -24,6 +24,10 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const dict = getDict(locale);
   const [detail, scenarios] = await Promise.all([getCapabilityDetail(pool, id), loadScenarios(pool)]);
   if (!detail || detail.deletedAt) notFound();
+  // Pending cards live on /review, not in the library — send the viewer there instead of
+  // rendering a library detail page for a card that hasn't been decided yet. redirect() throws,
+  // so it must run outside any try/catch.
+  if (detail.verdict === "pending") redirect(`/review#${id}`);
   const serial = displaySerial(detail.verdict, detail.type, detail.serial);
   const cardScenarios = scenarios.filter((s) => detail.scenarios.includes(s.slug));
 

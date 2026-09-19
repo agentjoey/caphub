@@ -508,7 +508,10 @@ a.stat--accent:hover { background: #fcebcc; border-color: var(--amber-border); }
    Named .review-item (not .review-card) because .review-card is already CardSummary's inner
    thumb+content grid class (components/capability/card-summary.tsx) — reusing it here would
    double up as a grid container around CardSummary/AnalysisDetails/actions and break layout. */
-.review-item { margin-bottom: var(--space-6); padding-bottom: var(--space-6); border-bottom: 1px solid var(--hairline-strong); }
+/* Matches .app-header's 60px height plus a little breathing room, so a #<id> anchor jump
+   (from the home page's recent-captures "查看/View" link on a pending card) doesn't land the
+   card underneath the sticky header. */
+.review-item { scroll-margin-top: 76px; margin-bottom: var(--space-6); padding-bottom: var(--space-6); border-bottom: 1px solid var(--hairline-strong); }
 .review-item:last-child { border-bottom: 0; }
 .review-item[data-state="done"] { opacity: .55; }
 .review-item__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: var(--space-4); }

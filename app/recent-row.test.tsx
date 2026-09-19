@@ -40,6 +40,12 @@ describe("RecentRow", () => {
     expect(screen.getByRole("link", { name: "查看" }).getAttribute("href")).toBe("/library/cab_1");
   });
 
+  it("links to the review anchor instead of the library detail page when the card is pending", () => {
+    const item: RecentCapture = { ...base, runState: "done", errorCode: null, capabilityId: "cab_1", verdict: "pending", deleted: false };
+    render(<RecentRow item={item} relativeTime="1 分钟前" />);
+    expect(screen.getByRole("link", { name: "查看" }).getAttribute("href")).toBe("/review#cab_1");
+  });
+
   it("shows a 已删除 badge instead of the verdict badge when soft-deleted", () => {
     const item: RecentCapture = { ...base, runState: "done", errorCode: null, capabilityId: "cab_1", verdict: "keep", deleted: true };
     render(<RecentRow item={item} relativeTime="1 分钟前" />);

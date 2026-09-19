@@ -62,7 +62,12 @@ export function RecentRow({ item, relativeTime, locale = "zh" }: { item: RecentC
         )}
       </div>
       {item.capabilityId && !item.deleted && (
-        <Link className="btn" href={`/library/${item.capabilityId}`}>{dict.view}</Link>
+        <Link
+          className="btn"
+          href={item.verdict === "pending" ? `/review#${item.capabilityId}` : `/library/${item.capabilityId}`}
+        >
+          {dict.view}
+        </Link>
       )}
     </div>
   );

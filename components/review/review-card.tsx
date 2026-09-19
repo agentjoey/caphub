@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { decideAction, editSuggestionAction } from "../../app/actions";
+import { decideAction, editSuggestionAction, rerunAction } from "../../app/actions";
 import type { CapabilityType } from "../../lib/analysis/card";
 import type { CapabilityDetail, CapabilityRow } from "../../lib/library/queries";
 import { getDict, type Locale } from "../../lib/i18n";
@@ -73,13 +73,36 @@ export function ReviewCard({ row, detail, locale = "zh" }: { row: CapabilityRow;
     }
   }
 
+  async function rerun() {
+    if (busy) return;
+    setState("saving");
+    setMessage(null);
+    try {
+      const result = await rerunAction(row.captureId);
+      // Same reasoning as DetailActions' rerun(): requestRerun() only inserts an
+      // analysis_runs row keyed by captureId, it never touches this capability's updated_at,
+      // and a CONFLICT here means "已在排队或分析中" (already queued/running) — not a lock
+      // conflict on this row — so it must not go stale.
+      if (result.ok) {
+        setMessage(dict.detailActions.rerunQueued);
+        setState("idle");
+        return;
+      }
+      setMessage(result.message);
+      setState("idle");
+    } catch {
+      setMessage(dict.detailActions.genericError);
+      setState("idle");
+    }
+  }
+
   function toggleEditing() {
     if (busy) return; // collapsing (or opening) mid-save is disabled — avoids setState after unmount
     setEditing((v) => !v);
   }
 
   return (
-    <div className="review-item" data-state={state}>
+    <div className="review-item" data-state={state} id={row.id}>
       <CardSummary row={row} locale={locale} />
       <AnalysisDetails detail={detail} locale={locale} />
       {message && <p className="inline-error review-item__message">{message}</p>}
@@ -91,6 +114,7 @@ export function ReviewCard({ row, detail, locale = "zh" }: { row: CapabilityRow;
             <button type="button" className="btn btn--primary" disabled={busy} onClick={() => decide("keep")}>{dict.detailActions.keep}</button>
             <button type="button" className="btn btn--danger" disabled={busy} onClick={() => decide("discard")}>{dict.detailActions.discard}</button>
             <button type="button" className="btn" disabled={busy} onClick={toggleEditing}>{dict.detailActions.editSuggestion}</button>
+            <button type="button" className="btn" disabled={busy} onClick={rerun}>{dict.detailActions.rerun}</button>
           </div>
           {editing && (
             <SuggestionEditor
