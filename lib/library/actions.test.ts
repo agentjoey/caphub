@@ -26,6 +26,12 @@ describe("decide", () => {
     await decide(pool, { id: "cab_1", expectedUpdatedAt: T, verdict: "discard" });
     expect(calls.some((c) => c.text.includes("INSERT INTO caphub_v2.tags"))).toBe(false);
   });
+  it("assigns a serial only when keeping, and never clears an existing one", async () => {
+    const { pool, calls } = fakePool((t) => t.startsWith("UPDATE caphub_v2.capabilities") ? { rows: [{ updated_at: new Date(T), tags: ["python"], previous: "pending" }] } : { rows: [] });
+    await decide(pool, { id: "cab_1", expectedUpdatedAt: T, verdict: "keep" });
+    const upd = calls.find((c) => c.text.startsWith("UPDATE caphub_v2.capabilities"))!;
+    expect(upd.text).toMatch(/serial = CASE WHEN \$3 = 'keep' THEN coalesce\(serial, nextval\('caphub_v2\.capability_serial'\)\) ELSE serial END/);
+  });
   it("returns CONFLICT when the row changed and NOT_FOUND when missing", async () => {
     const conflict = fakePool((t) => t.startsWith("SELECT 1") ? { rows: [{ "?column?": 1 }] } : { rows: [] });
     expect(await decide(conflict.pool, { id: "cab_1", expectedUpdatedAt: T, verdict: "keep" })).toMatchObject({ ok: false, reason: "CONFLICT", message: "已在别处处理" });
@@ -54,6 +60,7 @@ describe("editSuggestion", () => {
     expect(upd.values).toContainEqual(["web-scraping"]);
     expect(upd.text).toMatch(/verdict = 'keep'/);
     expect(upd.text).toMatch(LOCK_CLAUSE);
+    expect(upd.text).toMatch(/serial = coalesce\(serial, nextval\('caphub_v2\.capability_serial'\)\)/);
   });
   it("rejects malformed input without touching the database", async () => {
     const { pool, calls } = fakePool(() => ({ rows: [] }));

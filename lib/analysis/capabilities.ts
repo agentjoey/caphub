@@ -23,8 +23,9 @@ export async function upsertCapability(
      ), upsert AS (
        INSERT INTO caphub_v2.capabilities
          (id, capture_id, run_id, title, type, summary, signals, suggested_verdict, suggested_reason, confidence,
-          verdict, verdict_by, verdict_at, usage, playbook, tags, source_url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CASE WHEN $12::text IS NULL THEN NULL ELSE now() END, $13, $14, $15, $16)
+          verdict, verdict_by, verdict_at, usage, playbook, tags, source_url, serial)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CASE WHEN $12::text IS NULL THEN NULL ELSE now() END, $13, $14, $15, $16,
+         CASE WHEN $11 = 'keep' THEN nextval('caphub_v2.capability_serial') ELSE NULL END)
        ON CONFLICT (capture_id) DO UPDATE SET
          run_id = excluded.run_id, title = excluded.title, type = excluded.type, summary = excluded.summary,
          signals = excluded.signals, suggested_verdict = excluded.suggested_verdict, suggested_reason = excluded.suggested_reason,
@@ -33,7 +34,10 @@ export async function upsertCapability(
          notified_at = NULL, updated_at = now(),
          verdict = CASE WHEN caphub_v2.capabilities.verdict_by = 'human' THEN caphub_v2.capabilities.verdict ELSE excluded.verdict END,
          verdict_by = CASE WHEN caphub_v2.capabilities.verdict_by = 'human' THEN 'human' ELSE excluded.verdict_by END,
-         verdict_at = CASE WHEN caphub_v2.capabilities.verdict_by = 'human' THEN caphub_v2.capabilities.verdict_at ELSE excluded.verdict_at END
+         verdict_at = CASE WHEN caphub_v2.capabilities.verdict_by = 'human' THEN caphub_v2.capabilities.verdict_at ELSE excluded.verdict_at END,
+         serial = CASE WHEN (CASE WHEN caphub_v2.capabilities.verdict_by = 'human' THEN caphub_v2.capabilities.verdict ELSE excluded.verdict END) = 'keep'
+                    THEN coalesce(caphub_v2.capabilities.serial, nextval('caphub_v2.capability_serial'))
+                    ELSE caphub_v2.capabilities.serial END
        RETURNING id, verdict, deleted_at
      )
      SELECT upsert.id, upsert.verdict, prev.verdict AS previous_verdict, coalesce(prev.deleted_at, upsert.deleted_at) IS NOT NULL AS deleted

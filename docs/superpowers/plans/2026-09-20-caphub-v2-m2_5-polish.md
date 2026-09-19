@@ -14,7 +14,7 @@
    - 场景清单（可维护的表，初始 12 个）：视频 video、音频 audio、图像 image、写作 writing、编程 coding、设计 design、营销 marketing、数据 data、自动化 automation、研究 research、效率 productivity、学习 learning；每个场景带中英文名与关键词（如 视频：剪辑、配音、字幕、短视频、动画）。
    - AI 建卡时为每张卡选 1–3 个场景（schema 用当前清单校验）；已有卡用一次性脚本补分类。
    - 语义检索：每张卡生成一个向量（Neon pgvector），文本 = 标题 + 摘要 + 标签 + 场景名；搜索框输入时对查询也生成向量，按“语义相似度 + 全文命中 + 场景命中”综合排序。这样搜“视频”能找到配音、剪辑、风格提示词，也解决中文不分词搜不到的问题。
-   - Embedding 模型：MiniMax embeddings（与现有 MiniMax key 同一账号）。**web 服务需要新增 `MINIMAX_API_KEY`（仅用于查询向量）**。
+   - Embedding 模型：~~MiniMax embeddings~~ → **Google Gemini `gemini-embedding-001`**（2026-09-20 探测：MiniMax embo-01 对现有 key 恒返回 1002 RPM 限流、官方文档已无该接口；Human 选定 Gemini）。输出维度 768（`outputDimensionality`，需自行 L2 归一化），文档用 `RETRIEVAL_DOCUMENT`、查询用 `RETRIEVAL_QUERY`。**web 与 worker 都需要 `GEMINI_API_KEY`（Human 在 Railway 填写）**。
 4. **中文 / EN 只切界面文字**：导航、按钮、标签名、提示、状态、错误文案走字典；卡片正文保持生成时的语言；语言存 cookie，header 右侧切换；`<html lang>` 跟随。
 5. **统计块即筛选**：能力库 5 个类型统计块可点击筛选（选中高亮），移除下方重复的类型 chips。
 6. **排版美化**：加载字体（英文 General Sans、等宽 IBM Plex Mono、中文走系统苹方/思源黑体栈），统一字号层级与行高（正文 1.7）、控制行长、间距 token；提示词正文改正文字体（命令仍等宽）；“详情”折叠区的步骤表与来源列表重排。
@@ -22,8 +22,8 @@
 ## 需要 Human 授权（执行前逐项确认）
 
 - 生产 Neon：启用 `vector` 扩展，执行迁移 004、005。
-- 真实调用：MiniMax embeddings（已有卡回填一次；之后每张新卡 1 次、每次搜索 1 次）；DeepSeek 为已有卡补场景（一次性，约 20 次）。
-- Railway web 服务新增变量 `MINIMAX_API_KEY`（我可以从 worker 服务复制，走 stdin 不打印）。
+- 真实调用：Gemini embeddings（已有卡回填一次；之后每张新卡 1 次、每次搜索 1 次）；DeepSeek 为已有卡补场景（一次性，约 20 次）。
+- Railway web + worker 新增变量 `GEMINI_API_KEY`（Human 填写）。
 - 临时 Neon branch 验证（建 / 删）。
 
 ## Global Constraints
@@ -32,7 +32,7 @@
 - 编号前缀映射固定：`skill→SKL, experience→EXP, plugin→PLG, prompt→PRM, other→OTH`；数字至少 4 位补零。
 - 缩略图 key：`thumb/sha256/<2hex>/<64hex>.webp`；`/api/objects` 同时服务原图与缩略图，只服务 captures 表引用的 key。
 - 场景 slug 为英文小写（与标签同规则），中英文名在表里维护。
-- embedding 维度以 MiniMax 实际返回为准（Task 4 先做一次真实探测并写进迁移）。
+- embedding：Gemini `gemini-embedding-001`，768 维，L2 归一化后入库；列类型 `vector(768)`。
 
 ---
 
@@ -95,11 +95,11 @@ END $$;
 
 ### Task 4: 迁移 005 — pgvector 与 embedding
 
-**Files:** `lib/db/migrations/005_embeddings.sql`、`lib/providers/minimax-embed.ts`(+test)、`lib/analysis/embedding.ts`(+test)、`lib/analysis/pipeline.ts`、`scripts/backfill-embeddings.ts`
+**Files:** `lib/db/migrations/005_embeddings.sql`、`lib/providers/gemini-embed.ts`(+test)、`lib/analysis/embedding.ts`(+test)、`lib/analysis/pipeline.ts`、`scripts/backfill-embeddings.ts`
 
-- [ ] 先做一次真实探测（授权后由 controller 执行）：调用 MiniMax embeddings，记录模型名、维度、单价口径，写入本文件。
+- [ ] controller 在 key 就绪后做一次真实探测（模型名、768 维、中英相似度）确认接口形状。
 - [ ] 迁移：`CREATE EXTENSION IF NOT EXISTS vector; ALTER TABLE caphub_v2.capabilities ADD COLUMN embedding vector(<dim>); CREATE INDEX … USING hnsw (embedding vector_cosine_ops);`
-- [ ] `createMiniMaxEmbed({ apiKey, fetch? })`：`embed(texts, kind: "db" | "query")`，超时 15 s，缺 usage → INVALID_OUTPUT。注入 fetch 测试。
+- [ ] `createGeminiEmbed({ apiKey, fetch? })`：`embed(texts, kind: "document" | "query")` → `number[][]`（768 维、L2 归一化），用 `batchEmbedContents`，超时 15 s，返回形状不对 → INVALID_OUTPUT。注入 fetch 测试。
 - [ ] `embeddingText(card, scenarioLabels)`；worker 在建卡后计算并写入（失败不影响建卡，记 step `embed`——需把 analysis_steps.step 的 CHECK 加入 'embed'，放进 005）。
 - [ ] `scripts/backfill-embeddings.ts`（dry-run 默认）。
 
@@ -107,7 +107,7 @@ END $$;
 
 **Files:** `lib/library/queries.ts`、`lib/library/search-params.ts`、`app/library/page.tsx`、`app/library/library-filters.tsx`、`lib/runtime.ts`、`lib/config.ts`
 
-- [ ] web 配置：`MINIMAX_API_KEY` 对 web 变为可选；有则启用语义检索，无则退回全文 + 场景 + 模糊匹配。
+- [ ] web 配置：`GEMINI_API_KEY` 对 web 与 worker 均可选；有则启用语义检索，无则退回全文 + 场景 + 模糊匹配。
 - [ ] `listLibrary` 增加：`scenarios?: string[]` 筛选；`serial` 精确定位（`parseSerialQuery`）；有 q 时：语义相似度（cosine）+ 全文命中 + 场景关键词命中（q 命中场景中文名 / 关键词 → 该场景卡加权）+ `title/summary ILIKE %q%` 兜底；综合得分排序，语义相似度低于阈值（初始 0.35，常量）且无其他命中的不返回。
 - [ ] 统计块改为链接筛选（选中 `aria-current`），删除类型 chips；场景 chips 新增一行（中文名 + 数量）。
 - [ ] 列表与详情显示编号（`SKL-0012`），未入库的卡不显示。

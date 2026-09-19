@@ -24,6 +24,23 @@ describe("upsertCapability", () => {
     expect(out).toEqual({ id: "cab_1", verdict: "keep", previousVerdict: null, deleted: false });
   });
 
+  it("assigns a serial via nextval only when the resulting verdict is keep, and never clears an existing one", async () => {
+    let sql = "";
+    const pool = {
+      query: async (text: string) => {
+        sql = text;
+        return { rows: [{ id: "cab_1", verdict: "keep", previous_verdict: null, deleted: false }] };
+      }
+    };
+    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card, verdict: "keep", verdictBy: "auto" });
+    expect(sql).toContain("nextval('caphub_v2.capability_serial')");
+    expect(sql).toMatch(/coalesce\(caphub_v2\.capabilities\.serial, nextval\('caphub_v2\.capability_serial'\)\)/);
+    // The resulting-verdict computation gates the serial assignment on ON CONFLICT, mirroring
+    // the existing human-verdict-wins CASE used for `verdict` itself.
+    expect(sql).toMatch(/serial = CASE WHEN[\s\S]*THEN coalesce\(caphub_v2\.capabilities\.serial, nextval/);
+    expect(sql).toMatch(/ELSE caphub_v2\.capabilities\.serial END/);
+  });
+
   it("surfaces the prior row's verdict and deleted state on a re-run", async () => {
     const pool = {
       query: async () => ({ rows: [{ id: "cab_1", verdict: "keep", previous_verdict: "pending", deleted: true }] })

@@ -47,7 +47,8 @@ export function decide(pool: Pool, input: { id: string; expectedUpdatedAt: strin
   }
   return tx(pool, async (db) => {
     const r = await db.query<{ updated_at: Date; tags: string[]; previous: string }>(
-      `UPDATE caphub_v2.capabilities cb SET verdict = $3, verdict_by = 'human', verdict_at = now(), updated_at = now()
+      `UPDATE caphub_v2.capabilities cb SET verdict = $3, verdict_by = 'human', verdict_at = now(), updated_at = now(),
+         serial = CASE WHEN $3 = 'keep' THEN coalesce(serial, nextval('caphub_v2.capability_serial')) ELSE serial END
        FROM (SELECT verdict AS previous FROM caphub_v2.capabilities WHERE id = $1) prev
        WHERE cb.id = $1 AND date_trunc('milliseconds', cb.updated_at) = $2::timestamptz AND cb.deleted_at IS NULL
        RETURNING cb.updated_at, cb.tags, prev.previous`,
@@ -72,7 +73,8 @@ export function editSuggestion(pool: Pool, input: { id: string; expectedUpdatedA
   }
   return tx(pool, async (db) => {
     const r = await db.query<{ updated_at: Date; tags: string[]; previous: string }>(
-      `UPDATE caphub_v2.capabilities cb SET type = $3, usage = $4, tags = $5, verdict = 'keep', verdict_by = 'human', verdict_at = now(), updated_at = now()
+      `UPDATE caphub_v2.capabilities cb SET type = $3, usage = $4, tags = $5, verdict = 'keep', verdict_by = 'human', verdict_at = now(), updated_at = now(),
+         serial = coalesce(serial, nextval('caphub_v2.capability_serial'))
        FROM (SELECT verdict AS previous FROM caphub_v2.capabilities WHERE id = $1) prev
        WHERE cb.id = $1 AND date_trunc('milliseconds', cb.updated_at) = $2::timestamptz AND cb.deleted_at IS NULL
        RETURNING cb.updated_at, cb.tags, prev.previous`,
