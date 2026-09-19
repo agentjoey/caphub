@@ -11,5 +11,20 @@ export function buildStructuredPrompt(input: StructuredInput): string {
 
 export function parseJsonObject(text: string): unknown {
   const trimmed = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  return JSON.parse(trimmed);
+  try {
+    return JSON.parse(trimmed);
+  } catch (error) {
+    // Tolerate a single leading/trailing prose line wrapped around one JSON object:
+    // extract from the first "{" to the matching last "}" before giving up.
+    const start = trimmed.indexOf("{");
+    const end = trimmed.lastIndexOf("}");
+    if (start !== -1 && end > start) {
+      try {
+        return JSON.parse(trimmed.slice(start, end + 1));
+      } catch {
+        // fall through to the original error below
+      }
+    }
+    throw error;
+  }
 }

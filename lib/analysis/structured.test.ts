@@ -56,4 +56,59 @@ describe("runStructured", () => {
     await expect(runStructured({ ...base(call, pool), budget })).rejects.toMatchObject({ code: "BUDGET" });
     expect(rows).toEqual([{ step: "reason", attempt: 1, ok: false }]);
   });
+
+  function fullRecorder(): { rows: Array<Record<string, unknown>>; pool: Pick<Pool, "query"> } {
+    const rows: Array<Record<string, unknown>> = [];
+    return {
+      rows,
+      pool: {
+        query: async (_t: string, v: unknown[]) => {
+          rows.push({ step: v[1], attempt: v[4], inputTokens: v[5], outputTokens: v[6], ok: v[8], error: v[9], output: v[10] ? JSON.parse(v[10] as string) : null });
+          return { rows: [] };
+        }
+      } as unknown as Pick<Pool, "query">
+    };
+  }
+
+  it("retries once on unparseable output and succeeds on the second attempt", async () => {
+    const { rows, pool } = fullRecorder();
+    let calls = 0;
+    const seenCorrection: unknown[] = [];
+    const call: StructuredCall = {
+      provider: "x", model: "m",
+      invoke: async (i: { correction?: unknown }) => {
+        calls += 1;
+        seenCorrection.push(i.correction);
+        if (calls === 1) throw new ProviderError("INVALID_OUTPUT", { raw: "not json", usage: { inputTokens: 5, outputTokens: 6 } });
+        return { value: { n: 1 }, usage: { inputTokens: 1, outputTokens: 1 } };
+      }
+    };
+    expect(await runStructured(base(call, pool))).toEqual({ n: 1 });
+    expect(calls).toBe(2);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ attempt: 1, ok: false, error: "INVALID_JSON", inputTokens: 5, outputTokens: 6, output: { raw: "not json" } });
+    expect(rows[1]).toMatchObject({ attempt: 2, ok: true });
+    expect(seenCorrection[1]).toEqual({ issues: ["response was not a single valid JSON object"] });
+  });
+
+  it("throws INVALID_OUTPUT when the output is unparseable twice, recording two rows", async () => {
+    const { rows, pool } = fullRecorder();
+    const call: StructuredCall = {
+      provider: "x", model: "m",
+      invoke: async () => { throw new ProviderError("INVALID_OUTPUT", { raw: "still not json", usage: { inputTokens: 2, outputTokens: 3 } }); }
+    };
+    await expect(runStructured(base(call, pool))).rejects.toMatchObject({ code: "INVALID_OUTPUT" });
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.error === "INVALID_JSON")).toBe(true);
+  });
+
+  it("records HTTP status/body detail in the step error text for other provider errors", async () => {
+    const { rows, pool } = fullRecorder();
+    const call: StructuredCall = {
+      provider: "x", model: "m",
+      invoke: async () => { throw new ProviderError("INVALID_OUTPUT", { detail: "HTTP 400: bad request: missing field" }); }
+    };
+    await expect(runStructured(base(call, pool))).rejects.toMatchObject({ code: "INVALID_OUTPUT" });
+    expect(rows[0].error).toContain("400");
+  });
 });

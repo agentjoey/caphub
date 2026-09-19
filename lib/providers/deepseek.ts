@@ -34,14 +34,20 @@ export function createDeepSeekCall(opts: { apiKey: string; fetch?: typeof fetch 
       } catch (error) {
         throw new ProviderError(signal.aborted ? "ABORTED" : "UNAVAILABLE", { cause: error });
       }
-      if (!response.ok) throw new ProviderError(failureForHttpStatus(response.status));
+      if (!response.ok) {
+        const bodyText = await response.text().catch(() => "");
+        throw new ProviderError(failureForHttpStatus(response.status), { detail: `HTTP ${response.status}: ${bodyText.slice(0, 500)}` });
+      }
       const parsed = responseSchema.safeParse(await response.json().catch(() => null));
       if (!parsed.success || parsed.data.status !== "completed") throw new ProviderError("INVALID_OUTPUT");
       const text = parsed.data.output.flatMap((m) => m.content).map((c) => c.text).find((t) => t.trim());
       if (!text) throw new ProviderError("INVALID_OUTPUT");
+      const usage = { inputTokens: parsed.data.usage.input_tokens, outputTokens: parsed.data.usage.output_tokens };
       let value: unknown;
-      try { value = parseJsonObject(text); } catch (error) { throw new ProviderError("INVALID_OUTPUT", { cause: error }); }
-      return { value, usage: { inputTokens: parsed.data.usage.input_tokens, outputTokens: parsed.data.usage.output_tokens } };
+      try { value = parseJsonObject(text); } catch (error) {
+        throw new ProviderError("INVALID_OUTPUT", { cause: error, raw: text.slice(0, 20_000), usage });
+      }
+      return { value, usage };
     }
   };
 }

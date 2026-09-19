@@ -36,7 +36,10 @@ export function createMiniMaxCall(opts: { apiKey: string; fetch?: typeof fetch }
       } catch (error) {
         throw new ProviderError(signal.aborted ? "ABORTED" : "UNAVAILABLE", { cause: error });
       }
-      if (!response.ok) throw new ProviderError(failureForHttpStatus(response.status));
+      if (!response.ok) {
+        const bodyText = await response.text().catch(() => "");
+        throw new ProviderError(failureForHttpStatus(response.status), { detail: `HTTP ${response.status}: ${bodyText.slice(0, 500)}` });
+      }
       let payload: ChatCompletion;
       try { payload = await response.json() as ChatCompletion; } catch (error) { throw new ProviderError("INVALID_OUTPUT", { cause: error }); }
       const text = payload.choices?.[0]?.message?.content;
@@ -44,9 +47,12 @@ export function createMiniMaxCall(opts: { apiKey: string; fetch?: typeof fetch }
       if (typeof payload.usage?.prompt_tokens !== "number" || typeof payload.usage?.completion_tokens !== "number") {
         throw new ProviderError("INVALID_OUTPUT");
       }
+      const usage = { inputTokens: payload.usage.prompt_tokens, outputTokens: payload.usage.completion_tokens };
       let value: unknown;
-      try { value = parseJsonObject(text); } catch (error) { throw new ProviderError("INVALID_OUTPUT", { cause: error }); }
-      return { value, usage: { inputTokens: payload.usage.prompt_tokens, outputTokens: payload.usage.completion_tokens } };
+      try { value = parseJsonObject(text); } catch (error) {
+        throw new ProviderError("INVALID_OUTPUT", { cause: error, raw: text.slice(0, 20_000), usage });
+      }
+      return { value, usage };
     }
   };
 }

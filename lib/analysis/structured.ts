@@ -34,6 +34,10 @@ export function withTimeout(signal: AbortSignal, ms: number): { signal: AbortSig
   return { signal: controller.signal, clear: () => { clearTimeout(timer); signal.removeEventListener("abort", onAbort); }, timedOut: () => timedOut };
 }
 
+function errorText(code: string, detail?: string): string {
+  return (detail ? `${code}: ${detail}` : code).slice(0, 500);
+}
+
 export async function runStructured<T>(req: RunStructuredRequest<T>): Promise<T> {
   let issues: string[] | undefined;
   for (const attempt of [1, 2] as const) {
@@ -46,9 +50,26 @@ export async function runStructured<T>(req: RunStructuredRequest<T>): Promise<T>
     try {
       raw = await req.call.invoke({ prompt: req.prompt, images: req.images, schemaName: req.schemaName, schema: req.schema, ...(issues ? { correction: { issues } } : {}) }, t.signal);
     } catch (error) {
+      // HTTP call succeeded (usage present) but the text was not parseable JSON: don't lose it.
+      // Charge tokens, record an INVALID_JSON step with the raw text, and retry once via the
+      // same correction path as a schema failure.
+      if (!t.timedOut() && error instanceof ProviderError && error.code === "INVALID_OUTPUT" && error.raw !== undefined && error.usage !== undefined) {
+        const durationMs = Date.now() - started;
+        const { usage, raw: rawText } = error;
+        try {
+          req.budget.charge(usage.inputTokens + usage.outputTokens);
+        } catch (budgetError) {
+          await recordStep(req.pool, { ...base, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, durationMs, ok: false, error: "BUDGET", output: { raw: rawText } });
+          throw budgetError;
+        }
+        await recordStep(req.pool, { ...base, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, durationMs, ok: false, error: "INVALID_JSON", output: { raw: rawText } });
+        issues = ["response was not a single valid JSON object"];
+        continue;
+      }
       const code = t.timedOut() ? "TIMEOUT" : error instanceof ProviderError ? error.code : "UNAVAILABLE";
-      await recordStep(req.pool, { ...base, durationMs: Date.now() - started, ok: false, error: code });
-      throw new ProviderError(code, { cause: error });
+      const detail = !t.timedOut() && error instanceof ProviderError ? error.detail : undefined;
+      await recordStep(req.pool, { ...base, durationMs: Date.now() - started, ok: false, error: errorText(code, detail) });
+      throw new ProviderError(code, { cause: error, detail });
     } finally {
       t.clear();
     }
