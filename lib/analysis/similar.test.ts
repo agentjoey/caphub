@@ -27,7 +27,7 @@ describe("findSimilar", () => {
   it("returns [] without querying when no tokens can be extracted", async () => {
     let called = false;
     const pool = { query: async () => { called = true; return { rows: [] }; } };
-    const out = await findSimilar(pool as never, "   ");
+    const out = await findSimilar(pool as never, "   ", "cap_self");
     expect(out).toEqual([]);
     expect(called).toBe(false);
   });
@@ -42,9 +42,18 @@ describe("findSimilar", () => {
         return { rows: [{ id: "cab_1", title: "t", tags: ["x"] }] };
       }
     };
-    const out = await findSimilar(pool as never, "claude code");
+    const out = await findSimilar(pool as never, "claude code", "cap_self");
     expect(sql).toContain("to_tsquery('simple', $1)");
     expect(values[0]).toBe("'claude' | 'code'");
     expect(out).toEqual([{ id: "cab_1", title: "t", tags: ["x"] }]);
+  });
+
+  it("excludes the capture being analysed", async () => {
+    let sql = "";
+    let values: unknown[] = [];
+    const pool = { query: async (text: string, v: unknown[]) => { sql = text; values = v; return { rows: [] }; } };
+    await findSimilar(pool as never, "claude code", "cap_self");
+    expect(sql).toContain("capture_id <> $3");
+    expect(values[2]).toBe("cap_self");
   });
 });

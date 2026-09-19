@@ -1,4 +1,4 @@
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { newId } from "../ids";
 import type { Card } from "./card";
 
@@ -12,11 +12,11 @@ export interface UpsertCapabilityResult {
 }
 
 export async function upsertCapability(
-  pool: Pick<Pool, "query">,
+  db: Pick<Pool | PoolClient, "query">,
   row: { captureId: string; runId: string; card: Card; verdict: "keep" | "discard" | "pending"; verdictBy: "auto" | null }
 ): Promise<UpsertCapabilityResult> {
   const c = row.card;
-  const r = await pool.query<{ id: string; verdict: string; previous_verdict: string | null; deleted: boolean }>(
+  const r = await db.query<{ id: string; verdict: string; previous_verdict: string | null; deleted: boolean }>(
     `WITH prev AS (
        SELECT verdict, deleted_at FROM caphub_v2.capabilities WHERE capture_id = $2
      ), upsert AS (

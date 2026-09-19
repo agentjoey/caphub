@@ -35,13 +35,14 @@ export function similarTokens(seed: string): string[] {
   return tokens;
 }
 
-export async function findSimilar(pool: Pick<Pool, "query">, text: string, limit = 5): Promise<Array<{ id: string; title: string; tags: string[] }>> {
+/** Kept capabilities resembling `text`, excluding the capture currently being analysed. */
+export async function findSimilar(pool: Pick<Pool, "query">, text: string, captureId: string, limit = 5): Promise<Array<{ id: string; title: string; tags: string[] }>> {
   const tokens = similarTokens(text.slice(0, 500));
   if (!tokens.length) return [];
   const q = tokens.map((t) => `'${t}'`).join(" | ");
   const r = await pool.query<{ id: string; title: string; tags: string[] }>(
     `SELECT id, title, tags FROM caphub_v2.capabilities
-     WHERE verdict = 'keep' AND deleted_at IS NULL AND search @@ to_tsquery('simple', $1)
-     ORDER BY ts_rank(search, to_tsquery('simple', $1)) DESC LIMIT $2`, [q, limit]);
+     WHERE verdict = 'keep' AND deleted_at IS NULL AND capture_id <> $3 AND search @@ to_tsquery('simple', $1)
+     ORDER BY ts_rank(search, to_tsquery('simple', $1)) DESC LIMIT $2`, [q, limit, captureId]);
   return r.rows;
 }

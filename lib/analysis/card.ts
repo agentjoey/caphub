@@ -31,6 +31,15 @@ export const playbookSchema = z.discriminatedUnion("kind", [
 ]);
 export type Playbook = z.infer<typeof playbookSchema>;
 
+/**
+ * Tags are normalised (trim → lowercase → drop empty → dedupe) before the 1–6 count is
+ * enforced, so ["RAG", "rag ", " "] becomes ["rag"]. Expressed as transform → pipe so the
+ * JSON Schema sent to providers (output side of the pipe) is still representable.
+ */
+export const tagsSchema = z.array(z.string().max(40))
+  .transform((tags) => [...new Set(tags.map((t) => t.trim().toLowerCase()).filter((t) => t.length > 0))])
+  .pipe(z.array(z.string().min(1).max(40)).min(1).max(6));
+
 export const cardSchema = z.object({
   title: z.string().min(1).max(60),
   type: capabilityTypeSchema,
@@ -41,7 +50,7 @@ export const cardSchema = z.object({
   confidence: z.number().min(0).max(1),
   usage: z.enum(["integrate", "reference"]),
   playbook: playbookSchema,
-  tags: z.array(z.string().min(1).max(40).transform((t) => t.toLowerCase().trim())).min(1).max(6),
+  tags: tagsSchema,
   source_url: z.string().url().nullable()
 }).superRefine((card, ctx) => {
   if (card.type === "experience" && card.playbook.kind !== "experience") {

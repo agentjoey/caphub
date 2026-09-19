@@ -10,33 +10,40 @@ const extraction = { what: "w", visible_text: "", commands: [], prompt_text: nul
 
 type Kind = "image" | "text" | "url";
 
-function deps(kind: Kind, opts: { reasonValue?: unknown } = {}) {
+function deps(kind: Kind, opts: { reasonValue?: unknown; failTagBump?: boolean } = {}) {
   const calls: string[] = [];
-  const sql: Array<{ text: string; values: unknown[] }> = [];
-  const pool = {
-    query: async (text: string, values: unknown[] = []) => {
-      sql.push({ text, values });
-      if (text.startsWith("SELECT kind, object_key")) {
-        return {
-          rows: [{
-            kind,
-            object_key: kind === "image" ? "sha256/aa/" + "a".repeat(64) : null,
-            mime_type: "image/png",
-            text: kind === "text" ? "hello" : null,
-            url: kind === "url" ? "https://example.com/a" : null
-          }]
-        };
-      }
-      if (text.startsWith("SELECT name FROM caphub_v2.tags")) return { rows: [{ name: "x" }] };
-      if (text.startsWith("SELECT id, title, tags FROM caphub_v2.capabilities")) return { rows: [] };
-      if (text.includes("INSERT INTO caphub_v2.capabilities")) {
-        // values: [id, captureId, runId, title, type, summary, signals, suggested_verdict,
-        //          suggested_reason, confidence, verdict, verdictBy, usage, playbook, tags, source_url]
-        const verdict = values[10] as string;
-        return { rows: [{ id: "cab_1", verdict, previous_verdict: null, deleted: false }] };
-      }
-      return { rows: [] };
+  const sql: Array<{ text: string; values: unknown[]; client?: boolean }> = [];
+  let released = 0;
+  const query = async (text: string, values: unknown[] = []) => {
+    sql.push({ text, values });
+    if (opts.failTagBump && text.includes("INSERT INTO caphub_v2.tags")) throw Object.assign(new Error("duplicate"), { code: "21000" });
+    if (text.startsWith("SELECT kind, object_key")) {
+      return {
+        rows: [{
+          kind,
+          object_key: kind === "image" ? "sha256/aa/" + "a".repeat(64) : null,
+          mime_type: "image/png",
+          text: kind === "text" ? "hello" : null,
+          url: kind === "url" ? "https://example.com/a" : null
+        }]
+      };
     }
+    if (text.startsWith("SELECT name FROM caphub_v2.tags")) return { rows: [{ name: "x" }] };
+    if (text.startsWith("SELECT id, title, tags FROM caphub_v2.capabilities")) return { rows: [] };
+    if (text.includes("INSERT INTO caphub_v2.capabilities")) {
+      // values: [id, captureId, runId, title, type, summary, signals, suggested_verdict,
+      //          suggested_reason, confidence, verdict, verdictBy, usage, playbook, tags, source_url]
+      const verdict = values[10] as string;
+      return { rows: [{ id: "cab_1", verdict, previous_verdict: null, deleted: false }] };
+    }
+    return { rows: [] };
+  };
+  const pool = {
+    query: (text: string, values: unknown[] = []) => query(text, values),
+    connect: async () => ({
+      query: (text: string, values: unknown[] = []) => { const r = query(text, values); sql[sql.length - 1].client = true; return r; },
+      release: () => { released += 1; }
+    })
   };
   const d: PipelineDeps = {
     pool: pool as never,
@@ -47,7 +54,7 @@ function deps(kind: Kind, opts: { reasonValue?: unknown } = {}) {
     material: { ocr: async () => "", fetch: kind === "url" ? (async () => new Response("hello world", { status: 200, headers: { "content-type": "text/plain" } })) as typeof fetch : undefined },
     threshold: 0.8
   };
-  return { d, calls, sql };
+  return { d, calls, sql, released: () => released };
 }
 
 describe("runPipeline", () => {
@@ -64,6 +71,37 @@ describe("runPipeline", () => {
     expect(insert.values).toContain("auto");
     const tagBump = sql.find((q) => q.text.includes("INSERT INTO caphub_v2.tags"));
     expect(tagBump).toBeDefined();
+  });
+
+  it("saves the capability and its tag bump in one transaction on a pool client", async () => {
+    const { d, sql, released } = deps("text");
+    await runPipeline(d, { runId: "run_tx", captureId: "cap_tx", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
+    const tx = sql.filter((q) => q.client).map((q) => q.text.includes("INSERT INTO caphub_v2.capabilities") ? "upsert" : q.text.includes("INSERT INTO caphub_v2.tags") ? "bump" : q.text);
+    expect(tx).toEqual(["BEGIN", "upsert", "bump", "COMMIT"]);
+    expect(released()).toBe(1);
+  });
+
+  it("rolls back the capability when the tag bump fails", async () => {
+    const { d, sql, released } = deps("text", { failTagBump: true });
+    await expect(runPipeline(d, { runId: "run_rb", captureId: "cap_rb", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal)).rejects.toThrow("duplicate");
+    const clientSql = sql.filter((q) => q.client).map((q) => q.text);
+    expect(clientSql).toContain("ROLLBACK");
+    expect(clientSql).not.toContain("COMMIT");
+    expect(released()).toBe(1);
+  });
+
+  it("excludes its own capture from the similar-capability lookup", async () => {
+    const { d, sql } = deps("text");
+    await runPipeline(d, { runId: "run_sim", captureId: "cap_sim", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
+    const similar = sql.find((q) => q.text.startsWith("SELECT id, title, tags FROM caphub_v2.capabilities"))!;
+    expect(similar.values[2]).toBe("cap_sim");
+  });
+
+  it("throws CAPTURE_NOT_FOUND with a code when the capture row is missing", async () => {
+    const { d } = deps("text");
+    d.pool = { query: async () => ({ rows: [] }) } as never;
+    await expect(runPipeline(d, { runId: "run_nf", captureId: "cap_nf", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal))
+      .rejects.toMatchObject({ code: "CAPTURE_NOT_FOUND" });
   });
 
   it("skips vision for text", async () => {
@@ -126,6 +164,16 @@ describe("createPipelineDeps", () => {
 
   it("throws a clear error when pipeline is mixed but no Tavily key is configured", () => {
     expect(() => createPipelineDeps(baseConfig as never, {} as never, {} as never, "mixed")).toThrow(/TAVILY_API_KEY/);
+  });
+
+  it("throws a clear error when the MiniMax key is missing", () => {
+    const config = { ...baseConfig, providers: { deepseekApiKey: "ds" } };
+    expect(() => createPipelineDeps(config as never, {} as never, {} as never, "minimax")).toThrow(/MINIMAX_API_KEY/);
+  });
+
+  it("throws a clear error when pipeline is mixed but no DeepSeek key is configured", () => {
+    const config = { ...baseConfig, providers: { minimaxApiKey: "mm", tavilyApiKey: "tv" } };
+    expect(() => createPipelineDeps(config as never, {} as never, {} as never, "mixed")).toThrow(/DEEPSEEK_API_KEY/);
   });
 
   it("builds mixed deps when a Tavily key is present", () => {

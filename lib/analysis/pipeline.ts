@@ -26,17 +26,20 @@ export interface PipelineDeps {
 }
 
 export function createPipelineDeps(config: Config, pool: Pool, objects: ObjectStore, pipeline: Pipeline): PipelineDeps {
-  const minimax = createMiniMaxCall({ apiKey: config.providers.minimaxApiKey });
+  const { minimaxApiKey, deepseekApiKey, tavilyApiKey } = config.providers;
+  if (!minimaxApiKey) throw new Error("MINIMAX_API_KEY is required to run analysis");
+  const minimax = createMiniMaxCall({ apiKey: minimaxApiKey });
   if (pipeline === "mixed") {
-    if (!config.providers.tavilyApiKey) throw new Error("TAVILY_API_KEY is required when pipeline is 'mixed'");
+    if (!tavilyApiKey) throw new Error("TAVILY_API_KEY is required when pipeline is 'mixed'");
+    if (!deepseekApiKey) throw new Error("DEEPSEEK_API_KEY is required when pipeline is 'mixed'");
     return {
       pool, objects, vision: minimax,
-      search: createTavilySearch({ apiKey: config.providers.tavilyApiKey }),
-      reason: createDeepSeekCall({ apiKey: config.providers.deepseekApiKey }),
+      search: createTavilySearch({ apiKey: tavilyApiKey }),
+      reason: createDeepSeekCall({ apiKey: deepseekApiKey }),
       material: {}, threshold: config.verdictAutoThreshold
     };
   }
-  return { pool, objects, vision: minimax, search: createMiniMaxSearch({ apiKey: config.providers.minimaxApiKey }), reason: minimax, material: {}, threshold: config.verdictAutoThreshold };
+  return { pool, objects, vision: minimax, search: createMiniMaxSearch({ apiKey: minimaxApiKey }), reason: minimax, material: {}, threshold: config.verdictAutoThreshold };
 }
 
 async function runSearch(deps: PipelineDeps, runId: string, query: string, budget: RunBudget, signal: AbortSignal) {
@@ -72,7 +75,7 @@ async function runSearch(deps: PipelineDeps, runId: string, query: string, budge
 export async function runPipeline(deps: PipelineDeps, lease: Lease, signal: AbortSignal): Promise<{ capabilityId: string; verdict: string }> {
   const capture = (await deps.pool.query<{ kind: "image" | "text" | "url"; object_key: string | null; mime_type: string | null; text: string | null; url: string | null }>(
     "SELECT kind, object_key, mime_type, text, url FROM caphub_v2.captures WHERE id = $1", [lease.captureId])).rows[0];
-  if (!capture) throw new Error("CAPTURE_NOT_FOUND");
+  if (!capture) throw Object.assign(new Error("CAPTURE_NOT_FOUND"), { code: "CAPTURE_NOT_FOUND" });
   let bytes: Uint8Array | null = null;
   if (capture.kind === "image") {
     // schema CHECK guarantees captures.object_key is set for kind = 'image'.
@@ -97,7 +100,7 @@ export async function runPipeline(deps: PipelineDeps, lease: Lease, signal: Abor
 
   const search = await runSearch(deps, lease.runId, searchQuery(extraction, material), budget, signal);
   const similarSeed = extraction?.what ?? (material.kind === "text" ? material.text : material.kind === "url" ? material.text ?? material.url : "");
-  const [similar, existingTags] = await Promise.all([findSimilar(deps.pool, similarSeed), topTags(deps.pool)]);
+  const [similar, existingTags] = await Promise.all([findSimilar(deps.pool, similarSeed, lease.captureId), topTags(deps.pool)]);
 
   const card = await runStructured({
     pool: deps.pool, runId: lease.runId, step: "reason", call: deps.reason,
@@ -106,8 +109,19 @@ export async function runPipeline(deps: PipelineDeps, lease: Lease, signal: Abor
   });
 
   const decision = decideVerdict(card, deps.threshold);
-  const stored = await upsertCapability(deps.pool, { captureId: lease.captureId, runId: lease.runId, card, verdict: decision.verdict, verdictBy: decision.by });
-  const enteringKeep = stored.verdict === "keep" && stored.previousVerdict !== "keep" && !stored.deleted;
-  if (enteringKeep) await bumpTags(deps.pool, card.tags);
-  return { capabilityId: stored.id, verdict: stored.verdict };
+  // The card and its tag counts are saved atomically: a failing tag bump must not leave a kept card behind.
+  const db = await deps.pool.connect();
+  try {
+    await db.query("BEGIN");
+    const stored = await upsertCapability(db, { captureId: lease.captureId, runId: lease.runId, card, verdict: decision.verdict, verdictBy: decision.by });
+    const enteringKeep = stored.verdict === "keep" && stored.previousVerdict !== "keep" && !stored.deleted;
+    if (enteringKeep) await bumpTags(db, card.tags);
+    await db.query("COMMIT");
+    return { capabilityId: stored.id, verdict: stored.verdict };
+  } catch (error) {
+    await db.query("ROLLBACK");
+    throw error;
+  } finally {
+    db.release();
+  }
 }

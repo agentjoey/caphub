@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { cardSchema } from "./card";
 
 const valid = {
@@ -14,6 +15,14 @@ describe("cardSchema", () => {
   it("lowercases tags and rejects >6", () => {
     expect(cardSchema.parse({ ...valid, tags: ["Testing"] }).tags).toEqual(["testing"]);
     expect(() => cardSchema.parse({ ...valid, tags: ["a","b","c","d","e","f","g"] })).toThrow();
+  });
+  it("trims, lowercases, drops empty and dedupes tags before counting", () => {
+    expect(cardSchema.parse({ ...valid, tags: ["RAG", "rag ", " ", "Agents"] }).tags).toEqual(["rag", "agents"]);
+    expect(cardSchema.parse({ ...valid, tags: ["a", "A", "b", "c", "d", "e", "f"] }).tags).toEqual(["a", "b", "c", "d", "e", "f"]);
+    expect(() => cardSchema.parse({ ...valid, tags: [" ", ""] })).toThrow();
+  });
+  it("stays representable as JSON Schema for providers", () => {
+    expect(z.toJSONSchema(cardSchema).properties?.tags).toMatchObject({ type: "array", minItems: 1, maxItems: 6 });
   });
   it("requires experience playbook for experience type", () => {
     expect(() => cardSchema.parse({ ...valid, type: "experience" })).toThrow(/experience/);
