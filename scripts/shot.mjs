@@ -4,13 +4,25 @@
 // Also checks, per shot, for horizontal overflow and any internal id text
 // (cap_/cab_/run_...) leaking outside a <details> element.
 //
-// usage: node scripts/shot.mjs <baseUrl> <outDir> <path...>
+// usage: node scripts/shot.mjs [--cookie name=value]... <baseUrl> <outDir> <path...>
+//   --cookie sets a cookie on baseUrl before each shot (e.g. --cookie lang=en for the EN UI).
 import { mkdir } from "node:fs/promises";
 import { chromium } from "@playwright/test";
 
-const [baseUrl, outDir, ...paths] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const cookies = [];
+while (args[0] === "--cookie") {
+  const [name, ...rest] = (args[1] ?? "").split("=");
+  if (!name || rest.length === 0) {
+    console.error("--cookie expects name=value");
+    process.exit(1);
+  }
+  cookies.push({ name, value: rest.join("=") });
+  args.splice(0, 2);
+}
+const [baseUrl, outDir, ...paths] = args;
 if (!baseUrl || !outDir || paths.length === 0) {
-  console.error("usage: node scripts/shot.mjs <baseUrl> <outDir> <path...>");
+  console.error("usage: node scripts/shot.mjs [--cookie name=value]... <baseUrl> <outDir> <path...>");
   process.exit(1);
 }
 
@@ -58,6 +70,9 @@ async function main() {
           isMobile: vp.isMobile,
           hasTouch: vp.hasTouch
         });
+        if (cookies.length > 0) {
+          await context.addCookies(cookies.map((c) => ({ ...c, url: baseUrl })));
+        }
         const page = await context.newPage();
         try {
           await page.goto(url, { waitUntil: "networkidle" });

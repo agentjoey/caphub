@@ -107,7 +107,7 @@ export default async function Page({
       </form>
       <LibraryFilters filter={filter} locale={locale} />
       {visibleScenarios.length > 0 && (
-        <div className="filter-row">
+        <div className="filter-row scenario-row">
           {visibleScenarios.map((s) => {
             const active = filter.scenarios?.includes(s.slug) ?? false;
             const nextScenarios = active
@@ -116,18 +116,18 @@ export default async function Page({
             return (
               <Link
                 key={s.slug}
-                className="chip"
+                className="chip chip--scenario"
                 aria-current={active ? "true" : undefined}
                 href={libraryHref(filter, { scenarios: nextScenarios.length > 0 ? nextScenarios : undefined })}
               >
-                {locale === "en" ? s.labelEn : s.labelZh} ({scenarioCountBySlug.get(s.slug) ?? 0})
+                {locale === "en" ? s.labelEn : s.labelZh} <span className="chip__count">{scenarioCountBySlug.get(s.slug) ?? 0}</span>
               </Link>
             );
           })}
         </div>
       )}
       {topTags.length > 0 && (
-        <div className="filter-row">
+        <div className="filter-row tag-row">
           {topTags.map((tag) => {
             const active = filter.tags?.includes(tag.name) ?? false;
             const nextTags = active
@@ -136,11 +136,11 @@ export default async function Page({
             return (
               <Link
                 key={tag.name}
-                className="chip"
+                className="chip chip--tag"
                 aria-current={active ? "true" : undefined}
                 href={libraryHref(filter, { tags: nextTags.length > 0 ? nextTags : undefined })}
               >
-                {tag.name} ({tag.count})
+                {tag.name} <span className="chip__count">{tag.count}</span>
               </Link>
             );
           })}

@@ -29,20 +29,20 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
 
   return (
     <div>
-      <p><Link href="/library">{dict.detail.back}</Link></p>
+      <p className="back-link"><Link href="/library">{dict.detail.back}</Link></p>
       <div className="page-head">
         <div>
           <h1 className="page-title">
             {detail.title}
             {serial && <span className="serial"> {serial}</span>}
           </h1>
-          <p className="page-subtitle">
+          <p className="page-subtitle detail-meta">
             {typeLabel(detail.type, locale)} · {usageLabel(detail.usage, locale)} · <VerdictBadge verdict={detail.verdict} verdictBy={detail.verdictBy} locale={locale} /> · {format(dict.detail.createdAt, { date: formatDateTime(detail.createdAt, locale) })}
           </p>
           {cardScenarios.length > 0 && (
-            <div className="filter-row">
+            <div className="filter-row scenario-row">
               {cardScenarios.map((s) => (
-                <Link key={s.slug} className="chip" href={libraryHref({ page: 1 }, { scenarios: [s.slug] })}>
+                <Link key={s.slug} className="chip chip--scenario" href={libraryHref({ page: 1 }, { scenarios: [s.slug] })}>
                   {locale === "en" ? s.labelEn : s.labelZh}
                 </Link>
               ))}
@@ -53,18 +53,20 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       <div className="detail-grid">
         <div>
           <section className="panel">
-            <h2>{dict.detail.howToUse}</h2>
+            <h2 className="panel-title">{dict.detail.howToUse}</h2>
             <PlaybookView playbook={detail.playbook} type={detail.type} locale={locale} />
-            <p className="card-summary">{detail.summary}</p>
-            {detail.signals.length > 0 && (
-              <ul className="card-signals">
-                {detail.signals.map((signal) => (
-                  <li key={signal}>{signal}</li>
-                ))}
-              </ul>
-            )}
+            <div className="detail-body">
+              <p className="card-summary">{detail.summary}</p>
+              {detail.signals.length > 0 && (
+                <ul className="card-signals">
+                  {detail.signals.map((signal) => (
+                    <li key={signal}>{signal}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
             {detail.sourceUrl && (
-              <p><a href={detail.sourceUrl} target="_blank" rel="noreferrer">{detail.sourceUrl}</a></p>
+              <p className="detail-source"><a href={detail.sourceUrl} target="_blank" rel="noreferrer">{detail.sourceUrl}</a></p>
             )}
           </section>
         </div>
@@ -103,7 +105,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
               )}
             </div>
           )}
-          <p className="page-subtitle">{format(dict.detail.syncedAt, { date: detail.syncedAt ? formatDateTime(detail.syncedAt, locale) : dict.detail.notSynced })}</p>
+          <p className="detail-synced">{format(dict.detail.syncedAt, { date: detail.syncedAt ? formatDateTime(detail.syncedAt, locale) : dict.detail.notSynced })}</p>
         </div>
       </div>
       <AnalysisDetails detail={detail} locale={locale} />

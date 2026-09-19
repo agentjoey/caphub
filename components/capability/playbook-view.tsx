@@ -11,22 +11,26 @@ export function PlaybookView({ playbook, type, locale = "zh" }: { playbook: Play
   const dict = getDict(locale).playbookView;
   if (playbook.kind === "integrate") {
     return (
-      <div>
-        {playbook.install.map((command, index) => (
-          <div key={index}>
-            <pre>{command}</pre>
-            <CopyButton text={command} locale={locale} />
-          </div>
-        ))}
-        {playbook.repo && (
-          <div>
-            <a href={repoUrl(playbook.repo)} target="_blank" rel="noreferrer">{playbook.repo}</a>
+      <div className="playbook">
+        {playbook.install.length > 0 && (
+          <div className="playbook__commands">
+            {playbook.install.map((command, index) => (
+              <div key={index} className="code-block">
+                <pre>{command}</pre>
+                <div className="code-block__copy"><CopyButton text={command} locale={locale} /></div>
+              </div>
+            ))}
           </div>
         )}
+        {playbook.repo && (
+          <p className="playbook__repo">
+            <a href={repoUrl(playbook.repo)} target="_blank" rel="noreferrer">{playbook.repo}</a>
+          </p>
+        )}
         {playbook.prompt_text && (
-          <div>
+          <div className="prompt-block">
+            <div className="code-block__copy"><CopyButton text={playbook.prompt_text} label={dict.copyAll} locale={locale} /></div>
             <pre>{playbook.prompt_text}</pre>
-            <CopyButton text={playbook.prompt_text} label={dict.copyAll} locale={locale} />
           </div>
         )}
       </div>
@@ -34,7 +38,7 @@ export function PlaybookView({ playbook, type, locale = "zh" }: { playbook: Play
   }
   if (playbook.kind === "reference") {
     return (
-      <ol>
+      <ol className="playbook playbook__points">
         {playbook.points.map((point, index) => (
           <li key={index}>{point}</li>
         ))}
@@ -42,9 +46,9 @@ export function PlaybookView({ playbook, type, locale = "zh" }: { playbook: Play
     );
   }
   return (
-    <div>
-      <pre>{playbook.content}</pre>
-      {playbook.when_to_use && <p>{format(dict.whenToUse, { value: playbook.when_to_use })}</p>}
+    <div className="playbook">
+      <div className="prompt-block"><pre>{playbook.content}</pre></div>
+      {playbook.when_to_use && <p className="playbook__when">{format(dict.whenToUse, { value: playbook.when_to_use })}</p>}
     </div>
   );
 }
