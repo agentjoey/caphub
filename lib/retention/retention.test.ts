@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sweepRetention } from "./retention";
+import { purgeDeletedCapabilities, sweepRetention } from "./retention";
 
 describe("sweepRetention", () => {
   it("dry-run reports eligible without deleting", async () => {
@@ -82,5 +82,12 @@ describe("sweepRetention", () => {
     await expect(sweepRetention({ pool, objects: { deleteExact: async () => {} } }, { now: new Date(), dryRun: true, limit: 0 })).rejects.toThrow();
     await expect(sweepRetention({ pool, objects: { deleteExact: async () => {} } }, { now: new Date(), dryRun: true, limit: 26 })).rejects.toThrow();
     await expect(sweepRetention({ pool, objects: { deleteExact: async () => {} } }, { now: new Date(), dryRun: true, limit: 1.5 })).rejects.toThrow();
+  });
+
+  it("hard-deletes capabilities soft-deleted more than 30 days ago", async () => {
+    const calls: string[] = [];
+    const pool = { query: async (t: string) => { calls.push(t); return { rows: [], rowCount: 2 }; } } as never;
+    expect(await purgeDeletedCapabilities(pool, new Date("2026-10-20T00:00:00Z"))).toBe(2);
+    expect(calls[0]).toMatch(/DELETE FROM caphub_v2\.capabilities WHERE deleted_at <= \$1::timestamptz - interval '30 days'/);
   });
 });

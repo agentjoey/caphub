@@ -47,3 +47,15 @@ export async function sweepRetention(
   }
   return out;
 }
+
+/**
+ * Hard-deletes capabilities that were soft-deleted (verdict discard, or an explicit
+ * card delete) more than 30 days ago. Captures remain (still deduplicated by hash)
+ * and runs/steps remain for audit; images continue to be purged by sweepRetention's
+ * own 30-day object rule.
+ */
+export async function purgeDeletedCapabilities(pool: Pick<Pool, "query">, now: Date): Promise<number> {
+  const r = await pool.query(
+    "DELETE FROM caphub_v2.capabilities WHERE deleted_at <= $1::timestamptz - interval '30 days'", [now.toISOString()]);
+  return r.rowCount ?? 0;
+}
