@@ -24,7 +24,7 @@ export interface RunStructuredRequest<T> {
   budget: RunBudget; timeoutMs: number; signal: AbortSignal;
 }
 
-function withTimeout(signal: AbortSignal, ms: number): { signal: AbortSignal; clear(): void; timedOut(): boolean } {
+export function withTimeout(signal: AbortSignal, ms: number): { signal: AbortSignal; clear(): void; timedOut(): boolean } {
   const controller = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; controller.abort(); }, ms);
