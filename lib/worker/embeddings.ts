@@ -27,9 +27,11 @@ interface Candidate {
 /**
  * Picks up to `BATCH_SIZE` capabilities never embedded, or embedded before their last edit
  * (`embedding IS NULL OR embedded_at < updated_at`), embeds them in one batch call, and writes
- * the result back guarded by the `updated_at` read here — a concurrent edit between the read
- * and the write leaves the row stale again for the next tick, rather than overwriting a newer
- * edit's embedding. `updated_at` itself is never touched.
+ * the result back guarded by the `updated_at` read here (via `date_trunc('milliseconds', …)`,
+ * matching the pattern in `lib/library/actions.ts`, since node-postgres reads timestamptz back
+ * at millisecond precision) — a concurrent edit between the read and the write leaves the row
+ * stale again for the next tick, rather than overwriting a newer edit's embedding. `updated_at`
+ * itself is never touched.
  */
 export async function runEmbedTick(deps: EmbedTickDeps, signal: AbortSignal): Promise<"idle" | "embedded" | "error"> {
   const { rows } = await deps.pool.query<Candidate>(
@@ -54,13 +56,28 @@ export async function runEmbedTick(deps: EmbedTickDeps, signal: AbortSignal): Pr
     return "error";
   }
 
+  let written = 0;
+  let skipped = 0;
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
-    await deps.pool.query(
-      "UPDATE caphub_v2.capabilities SET embedding = $2::vector, embedded_at = $3 WHERE id = $1 AND updated_at = $4",
-      [row.id, toVectorLiteral(vectors[i]), row.updated_at, row.updated_at]
-    );
+    try {
+      // node-postgres reads timestamptz back as a millisecond-precision JS Date, so comparing
+      // it straight against the µs-precision column read here would almost never match and the
+      // write would silently no-op forever. date_trunc to milliseconds on both sides instead.
+      // embedded_at is set to the row's own (untruncated) updated_at, not the ms-truncated
+      // parameter, so embedded_at < updated_at reads false immediately after a successful write.
+      const result = await deps.pool.query(
+        `UPDATE caphub_v2.capabilities SET embedding = $2::vector, embedded_at = updated_at
+         WHERE id = $1 AND date_trunc('milliseconds', updated_at) = $3::timestamptz`,
+        [row.id, toVectorLiteral(vectors[i]), row.updated_at]
+      );
+      if (result.rowCount) written += 1;
+      else skipped += 1;
+    } catch (error) {
+      deps.log?.({ embed: "row-failed", capability: row.id, code: runErrorCode(error) });
+      skipped += 1;
+    }
   }
-  deps.log?.({ embed: "done", count: rows.length });
-  return "embedded";
+  deps.log?.({ embed: "done", written, skipped });
+  return written > 0 ? "embedded" : "idle";
 }
