@@ -15,33 +15,43 @@
 Both services build from the same `node:24-slim` base images. Image builds are not verified locally on
 this machine (Docker is not installed here); the Dockerfiles are verified indirectly — `npm ci` and
 `npm run build` succeed from the committed lockfile, and `npx tsx scripts/worker.ts --dry-run` with no
-env vars exits non-zero with a Zod config-validation error (not a crash stack) — and the actual image
+env vars exits non-zero with a config error naming the missing variables (not a crash stack) — and the actual image
 build is verified at the first Railway deploy.
 
 ## Environment variables
 
-Set on both `web` and `worker` services in the Railway dashboard (values are never committed; names
-only, matching `.env.example`):
+Each process validates only the variables it uses (`loadConfig(env, role)` in `lib/config.ts`); a
+missing required variable fails startup with the names listed. Values are never committed; names match
+`.env.example`. An empty value counts as unset.
+
+`web` (Railway, role `web`):
 
 - `DATABASE_URL`
-- `DATABASE_URL_READONLY`
-- `S3_ENDPOINT`
-- `S3_REGION`
-- `S3_ACCESS_KEY_ID`
-- `S3_SECRET_ACCESS_KEY`
-- `S3_BUCKET`
-- `MINIMAX_API_KEY`
-- `DEEPSEEK_API_KEY`
-- `TAVILY_API_KEY`
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_OWNER_CHAT_ID`
-- `CF_ACCESS_AUD`
-- `CF_ACCESS_TEAM_DOMAIN`
-- `PIPELINE`
-- `VERDICT_AUTO_THRESHOLD`
-- `ANALYSIS_ENABLED`
-- `RETENTION_ENABLED`
-- `TELEGRAM_ENABLED`
+- `S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_BUCKET` (default `caphub-objects`)
+- `CF_ACCESS_AUD`, `CF_ACCESS_TEAM_DOMAIN`
+- `PIPELINE` (pipeline new captures are queued for)
+
+Not on `web`: provider keys, Telegram variables.
+
+`worker` (Railway, role `worker`):
+
+- `DATABASE_URL`
+- `S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_BUCKET`
+- `MINIMAX_API_KEY`, `DEEPSEEK_API_KEY`
+- `TAVILY_API_KEY` — required when `PIPELINE=mixed`; if set, the worker can also run `mixed` runs under `PIPELINE=minimax`
+- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_OWNER_CHAT_ID` — required when `TELEGRAM_ENABLED=true`
+- `PIPELINE`, `VERDICT_AUTO_THRESHOLD`, `ANALYSIS_ENABLED`, `RETENTION_ENABLED`, `TELEGRAM_ENABLED`
+
+Not on `worker`: `CF_ACCESS_AUD`, `CF_ACCESS_TEAM_DOMAIN`.
+
+Local scripts (role `script`: `npm run migrate`, `npm run import:v1`, `npm run spike`):
+
+- `DATABASE_URL` (owner connection string for `migrate`)
+- `import:v1` additionally needs `S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`
+- `spike report` optionally reads `SPIKE_PRICE_<PROVIDER>_IN` / `SPIKE_PRICE_<PROVIDER>_OUT` (USD per
+  million tokens, e.g. `SPIKE_PRICE_MINIMAX_IN`); a provider without both shows cost `n/a`
+
+`DATABASE_URL_READONLY` is local-only (vault-sync, sub-project 4) and is never set on Railway.
 
 Planned initial values (per plan): `PIPELINE=minimax`, `ANALYSIS_ENABLED=false` (turned on later for the
 spike), `RETENTION_ENABLED=true`, `TELEGRAM_ENABLED=false`.

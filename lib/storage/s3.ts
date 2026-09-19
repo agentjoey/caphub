@@ -1,5 +1,5 @@
 import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import type { Config } from "../config";
+import type { S3Config } from "../config";
 import { objectRefFor, objectRefSchema, sha256Hex, type ObjectRef } from "./object-ref";
 
 export type ImageMime = "image/png" | "image/jpeg" | "image/webp";
@@ -77,7 +77,7 @@ export class ObjectStore {
   }
 }
 
-export function createObjectStore(s3: Config["s3"], client?: S3Client): ObjectStore {
+export function createObjectStore(s3: S3Config, client?: S3Client): ObjectStore {
   const s3Client = client ?? new S3Client({
     endpoint: s3.endpoint, region: s3.region, forcePathStyle: true,
     credentials: { accessKeyId: s3.accessKeyId, secretAccessKey: s3.secretAccessKey }
