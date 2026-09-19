@@ -444,3 +444,14 @@ body {
 .filter-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .search-form { display: flex; gap: 8px; margin-bottom: 16px; }
 .search-form input { flex: 1; min-width: 0; min-height: 44px; padding: 10px 12px; color: var(--ink); background: var(--paper-raised); border: 1px solid var(--hairline-strong); border-radius: var(--radius-md); font: inherit; font-size: 14px; }
+
+/* Capability detail page (Task 9) */
+.badge--human { background: var(--paper-recessed); border: 1px solid var(--hairline); color: var(--ink-faint); }
+.detail-grid { display: grid; grid-template-columns: 7fr 5fr; gap: 24px; align-items: start; margin-top: 8px; }
+.detail-grid .detail-actions { margin-top: 16px; }
+.detail-actions__buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+.detail-grid .notice, .detail-grid .inline-error, .detail-grid .review-note { margin-top: 14px; }
+.review-note ul { margin-top: 8px; padding-left: 20px; }
+@media (max-width: 900px) {
+  .detail-grid { grid-template-columns: 1fr; }
+}
