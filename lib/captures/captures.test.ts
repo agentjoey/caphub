@@ -31,4 +31,27 @@ describe("submitCapture", () => {
     expect(out).toEqual({ captureId: "cap_existing", runId: null, duplicate: true });
     expect(queries.some((q) => q.text.startsWith("INSERT INTO caphub_v2.analysis_runs"))).toBe(false);
   });
+  it("tracks a new image's object for retention", async () => {
+    const { pool, queries } = fakePool(null);
+    await submitCapture({ pool, objects, pipeline: "minimax" }, { source: "web", kind: "image", bytes: new Uint8Array([1]), mimeType: "image/png" });
+    const r = queries.find((q) => q.text.startsWith("INSERT INTO caphub_v2.retention"))!;
+    expect(r.values).toEqual(["sha256/ab/" + "a".repeat(64)]);
+    expect(r.text).toContain("VALUES ($1, now() + interval '30 days')");
+  });
+  it("resets a purged retention row when the image is re-uploaded, including as a duplicate", async () => {
+    for (const existing of [null, { id: "cap_existing" }]) {
+      const { pool, queries } = fakePool(existing);
+      await submitCapture({ pool, objects, pipeline: "minimax" }, { source: "web", kind: "image", bytes: new Uint8Array([1]), mimeType: "image/png" });
+      const r = queries.find((q) => q.text.startsWith("INSERT INTO caphub_v2.retention"))!;
+      expect(r.text).toContain("ON CONFLICT (object_key) DO UPDATE SET purged_at = NULL, error_code = NULL, eligible_at = excluded.eligible_at");
+      expect(r.text).toContain("WHERE caphub_v2.retention.purged_at IS NOT NULL");
+      const idx = queries.indexOf(r);
+      expect(queries.findIndex((q) => q.text === "COMMIT")).toBeGreaterThan(idx);
+    }
+  });
+  it("does not touch retention for text captures", async () => {
+    const { pool, queries } = fakePool(null);
+    await submitCapture({ pool, objects, pipeline: "minimax" }, { source: "web", kind: "text", text: "hi" });
+    expect(queries.some((q) => q.text.includes("caphub_v2.retention"))).toBe(false);
+  });
 });

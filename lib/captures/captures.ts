@@ -16,6 +16,17 @@ export async function submitCapture(
   try {
     await client.query("BEGIN");
     await client.query("SELECT pg_advisory_xact_lock(hashtext('caphub_v2.capture'), hashtext($1))", [dedupeKey]);
+    if (objectRef) {
+      // putIfAbsent has (re)stored the object. If it had already been purged, restart its
+      // retention window so it is tracked (and purged) again. Runs for duplicates too:
+      // re-uploading the same image after its purge hits the dedupe path below.
+      await client.query(
+        `INSERT INTO caphub_v2.retention (object_key, eligible_at) VALUES ($1, now() + interval '30 days')
+         ON CONFLICT (object_key) DO UPDATE SET purged_at = NULL, error_code = NULL, eligible_at = excluded.eligible_at
+         WHERE caphub_v2.retention.purged_at IS NOT NULL`,
+        [objectRef.key]
+      );
+    }
     const existing = await client.query<{ id: string }>("SELECT id FROM caphub_v2.captures WHERE dedupe_key = $1", [dedupeKey]);
     if (existing.rows[0]) {
       await client.query("COMMIT");
@@ -31,12 +42,6 @@ export async function submitCapture(
         input.kind === "url" ? normalizeUrl(input.url) : null,
         dedupeKey, input.telegram?.chatId ?? null, input.telegram?.messageId ?? null]
     );
-    if (objectRef) {
-      await client.query(
-        "INSERT INTO caphub_v2.retention (object_key, eligible_at) VALUES ($1, now() + interval '30 days') ON CONFLICT DO NOTHING",
-        [objectRef.key]
-      );
-    }
     const runId = newId("run");
     await client.query(
       "INSERT INTO caphub_v2.analysis_runs (id, capture_id, pipeline, state) VALUES ($1, $2, $3, 'queued')",

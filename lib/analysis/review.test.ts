@@ -12,13 +12,15 @@ function makePool(rows: { run_id?: string; card?: unknown; reason_output?: unkno
 }
 
 describe("reviewCapability", () => {
-  it("stores review note without touching verdict", async () => {
+  it("stores review note without touching verdict or the updated_at lock token", async () => {
     const { pool, sql } = makePool({ run_id: "run_1", card: { title: "t" }, reason_output: { title: "t" } });
     const call = { provider: "deepseek", model: "d", invoke: async () => ({ value: { agrees: false, points: ["p"] }, usage: { inputTokens: 1, outputTokens: 1 } }) };
     const note = await reviewCapability({ pool, call }, "cab_1", new AbortController().signal);
     expect(note).toEqual({ agrees: false, points: ["p"] });
     const update = sql.find((q) => q.text.startsWith("UPDATE caphub_v2.capabilities SET review_note"))!;
     expect(update.text).not.toMatch(/verdict/);
+    expect(update.text).not.toMatch(/updated_at/);
+    expect(update.values).toEqual(["cab_1", JSON.stringify({ agrees: false, points: ["p"] })]);
   });
 
   it("throws CAPABILITY_NOT_FOUND when the capability row is missing", async () => {

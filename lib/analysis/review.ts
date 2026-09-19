@@ -31,6 +31,7 @@ export async function reviewCapability(deps: { pool: Pool; call: StructuredCall 
     budget: new RunBudget({ maxCalls: 2, maxTokens: 100_000 }),
     timeoutMs: TIMEOUTS.review, signal
   });
-  await deps.pool.query("UPDATE caphub_v2.capabilities SET review_note = $2, updated_at = now() WHERE id = $1", [capabilityId, JSON.stringify(note)]);
+  // updated_at is the optimistic-lock token for verdict decisions; a review note must not invalidate it.
+  await deps.pool.query("UPDATE caphub_v2.capabilities SET review_note = $2 WHERE id = $1", [capabilityId, JSON.stringify(note)]);
   return note;
 }
