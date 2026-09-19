@@ -7,6 +7,9 @@
 
 ## Services
 
+Config as code: `web` uses `railway.json`; `worker` uses `railway.worker.json` (set as the worker service's config file path). Both pin region `asia-southeast1-eqsg3a` (Singapore), 1 replica.
+
+
 | Service | Dockerfile | Port | Region | Replicas | Sleeping |
 |---|---|---|---|---|---|
 | `web` | `Dockerfile.web` (default `railway.json`, `RAILWAY_DOCKERFILE_PATH` not needed) | `$PORT` (Next.js `start` script binds `-H 0.0.0.0 -p ${PORT:-3000}`) | Singapore (Asia Southeast) | 1 | on (if plan supports app sleeping) |
