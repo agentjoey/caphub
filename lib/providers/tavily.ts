@@ -26,8 +26,7 @@ export function createTavilySearch(opts: { apiKey: string; fetch?: typeof fetch 
       if (!response.ok) throw new ProviderError(failureForHttpStatus(response.status));
       const parsed = tavilySchema.safeParse(await response.json().catch(() => null));
       if (!parsed.success) throw new ProviderError("INVALID_OUTPUT");
-      const result = { value: searchResultSchema.parse({ sources: truncateSources(parsed.data.results) }), usage: { inputTokens: 0, outputTokens: 0 }, provider: "tavily" as const };
-      return result;
+      return { value: searchResultSchema.parse({ sources: truncateSources(parsed.data.results) }), usage: { inputTokens: 0, outputTokens: 0 } };
     }
   };
 }

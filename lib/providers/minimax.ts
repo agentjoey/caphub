@@ -7,7 +7,7 @@ export const MINIMAX_MODEL = "MiniMax-M3";
 
 interface ChatCompletion {
   choices: Array<{ finish_reason: string; message: { content: string | null } }>;
-  usage: { prompt_tokens: number; completion_tokens: number };
+  usage?: { prompt_tokens: number; completion_tokens: number };
 }
 
 function toDataUrl(image: { data: Uint8Array; mediaType: string }): string {
@@ -41,9 +41,12 @@ export function createMiniMaxCall(opts: { apiKey: string; fetch?: typeof fetch }
       try { payload = await response.json() as ChatCompletion; } catch (error) { throw new ProviderError("INVALID_OUTPUT", { cause: error }); }
       const text = payload.choices?.[0]?.message?.content;
       if (typeof text !== "string" || !text.trim()) throw new ProviderError("INVALID_OUTPUT");
+      if (typeof payload.usage?.prompt_tokens !== "number" || typeof payload.usage?.completion_tokens !== "number") {
+        throw new ProviderError("INVALID_OUTPUT");
+      }
       let value: unknown;
       try { value = parseJsonObject(text); } catch (error) { throw new ProviderError("INVALID_OUTPUT", { cause: error }); }
-      return { value, usage: { inputTokens: payload.usage?.prompt_tokens ?? 0, outputTokens: payload.usage?.completion_tokens ?? 0 } };
+      return { value, usage: { inputTokens: payload.usage.prompt_tokens, outputTokens: payload.usage.completion_tokens } };
     }
   };
 }

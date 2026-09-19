@@ -9,7 +9,7 @@ export const DEEPSEEK_MODEL = "deepseek-flash";
 const responseSchema = z.object({
   status: z.string(),
   output: z.array(z.object({ type: z.string(), content: z.array(z.object({ type: z.string(), text: z.string().default("") }).passthrough()).default([]) }).passthrough()).default([]),
-  usage: z.object({ input_tokens: z.number(), output_tokens: z.number() }).optional()
+  usage: z.object({ input_tokens: z.number(), output_tokens: z.number() })
 }).passthrough();
 
 export function createDeepSeekCall(opts: { apiKey: string; fetch?: typeof fetch }): StructuredCall {
@@ -41,7 +41,7 @@ export function createDeepSeekCall(opts: { apiKey: string; fetch?: typeof fetch 
       if (!text) throw new ProviderError("INVALID_OUTPUT");
       let value: unknown;
       try { value = parseJsonObject(text); } catch (error) { throw new ProviderError("INVALID_OUTPUT", { cause: error }); }
-      return { value, usage: { inputTokens: parsed.data.usage?.input_tokens ?? 0, outputTokens: parsed.data.usage?.output_tokens ?? 0 } };
+      return { value, usage: { inputTokens: parsed.data.usage.input_tokens, outputTokens: parsed.data.usage.output_tokens } };
     }
   };
 }
