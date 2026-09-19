@@ -79,6 +79,11 @@ export function DetailActions({
     setState("busy");
     setMessage(null);
     const result = await reviewAction(id);
+    // Intentionally NOT setUpdatedAt(result.updatedAt) on success: requestReview() only sets
+    // review_requested_at/review_error, it never touches capabilities.updated_at, and its
+    // ActionResult.updatedAt is just the server's current time, not a new lock token. Adopting
+    // it as `updatedAt` would desync the optimistic-lock value from the row's real
+    // updated_at, so the very next decide()/saveEdit()/confirmDelete() would always CONFLICT.
     if (result.ok) {
       setReviewPending(true);
       setState("idle");
@@ -94,6 +99,9 @@ export function DetailActions({
     setState("busy");
     setMessage(null);
     const result = await rerunAction(captureId);
+    // Same reasoning as review(): requestRerun() only inserts an analysis_runs row keyed by
+    // captureId, it never touches this capability's updated_at, so its ActionResult.updatedAt
+    // (the server's current time) must not overwrite our optimistic-lock token either.
     if (result.ok) {
       setState("idle");
       router.refresh();
