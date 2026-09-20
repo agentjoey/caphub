@@ -1,4 +1,4 @@
-import { INTERFACE_TAGS, RESERVED_TAGS, type CapabilityType, type Extraction, type SearchResult } from "./card";
+import { INTERFACE_TAGS, RESERVED_TAGS, type Card, type CapabilityType, type DeepSource, type Extraction, type SearchResult } from "./card";
 import type { Material } from "./material";
 import type { Scenario } from "./scenarios";
 import { scenariosPromptList } from "./scenarios";
@@ -100,5 +100,66 @@ export function backfillScorePrompt(input: {
     `已有来源链接：${input.source_url ?? "（无）"}`,
     `score 给这个能力对 Joey 的 AI 价值打 1–5 分整数，${SCORE_RUBRIC}score_reason 用一句不超过 80 字的中文说明打分依据。`,
     "source_facts 是关于来源的客观事实（repo_url、stars、last_update、license、homepage）：因为这里没有联网搜索，只能看到卡片本身的文字，所以只应在「已有来源链接」或 Playbook 里能直接看到仓库地址时才填 repo_url；stars、last_update、license、homepage 除非卡片文字里明确写出，否则一律留空，不要填、不要猜，禁止推测 star 数与更新时间这类你不确定的数字或日期。不要填写 as_of，留空即可。"
+  ].join("\n\n");
+}
+
+// --- Deep analysis (M3.6) ---------------------------------------------------------------
+// See lib/analysis/deep.ts. Design decision 5 (owner): the output must stay short and
+// scannable, never a wall of text -- every prompt below repeats the field length caps so the
+// model doesn't have to infer them from the JSON schema alone.
+
+/** The subset of an existing CapabilityCard a deep-analysis run is triggered against. */
+export interface DeepSubject {
+  title: string; type: CapabilityType; summary: string; tags: string[];
+  source_url: string | null; playbook: Card["playbook"];
+}
+
+function deepSubjectText(subject: DeepSubject): string {
+  return [
+    `标题：${subject.title}`,
+    `类型：${subject.type}`,
+    `摘要：${subject.summary}`,
+    `标签：${subject.tags.join(", ") || "（无）"}`,
+    `已有来源链接：${subject.source_url ?? "（无）"}`,
+    `Playbook：${JSON.stringify(subject.playbook)}`
+  ].join("\n");
+}
+
+/** Prompt for the `plan` step: 4-6 search queries covering docs / repo / word-of-mouth / alternatives. */
+export function deepPlanPrompt(subject: DeepSubject): string {
+  return [
+    "你在为个人 agent 能力库里已经建档的一张卡片做「深度分析」，第一步是规划检索式。",
+    deepSubjectText(subject),
+    "请给出 4–6 条搜索检索式（queries），覆盖以下四个方向，每个方向至少覆盖到（不要求一一对应，但整体要覆盖）：",
+    "1）官方文档/官网/仓库 README；2）代码仓库本身（issues、release、star 数等）；3）讨论区与口碑（Reddit、Hacker News、中文社区、博客评测等）；4）与同类替代方案的对比。",
+    "每条检索式是一句可直接丢进搜索引擎的查询词，不要写成问题，不要重复。"
+  ].join("\n\n");
+}
+
+/** Prompt for the first `synthesize` pass: merge raw search results into grounded facts. */
+export function deepFactsPrompt(subject: DeepSubject, sources: DeepSource[]): string {
+  return [
+    "你在为个人 agent 能力库的一张卡片做深度分析，现在是第一步「事实归并」：把下面的联网检索结果提炼成一条条客观事实，供下一步写成最终结论使用。",
+    deepSubjectText(subject),
+    sources.length
+      ? `联网检索结果（编号从 0 开始，对应下面的下标）：\n${sources.map((s, i) => `[${i}] ${s.title} ${s.url}`).join("\n")}`
+      : "联网检索结果：无（本次所有检索式都没有找到结果）。",
+    "facts 给出最多 40 条事实，每条不超过 300 字；每条事实必须能在上面某个编号的检索结果里找到依据，source 填该结果的下标（从 0 开始的整数）；如果某条是你的合理推断而非直接来自某个检索结果，source 填 null，但不要编造具体的人名、数字、日期、案例这类看似确凿的细节。检索结果为空，或某个方向确实没找到东西，facts 里就不要为那个方向编造事实——宁可少写。"
+  ].join("\n\n");
+}
+
+/** Prompt for the second `synthesize` pass: compose the final, scannable DeepAnalysis card. */
+export function deepSynthesizePrompt(subject: DeepSubject, sources: DeepSource[], facts: string[]): string {
+  return [
+    "你在为个人 agent 能力库的一张卡片做深度分析，现在是第二步「成文」：基于下面已经归并好的事实和原始检索结果，写成一张简短、可扫读的深度分析卡片。绝对不要写成长篇大论，每个字段都有严格的字数上限，超过会被拒绝重写。",
+    deepSubjectText(subject),
+    facts.length ? `已归并的事实：\n${facts.map((f, i) => `${i + 1}. ${f}`).join("\n")}` : "已归并的事实：无。",
+    sources.length
+      ? `原始检索结果（编号从 0 开始）：\n${sources.map((s, i) => `[${i}] ${s.title} ${s.url}`).join("\n")}`
+      : "原始检索结果：无。",
+    "请输出 DeepAnalysis：headline 是不超过 40 字的一句话结论；architecture 是 { summary ≤ 80 字, points：3–5 条，每条 ≤ 40 字 }，说明这个能力大致怎么构建/运作；implementation 同样是 { summary ≤ 80 字, points：3–5 条，每条 ≤ 40 字 }，说明落地/接入的关键步骤；use_cases 给 3–5 条 { title ≤ 20 字, detail ≤ 60 字 } 的具体应用场景；feedback 给 { positive: 0–3 条 ≤ 40 字, negative: 0–3 条 ≤ 40 字 } 的口碑要点，只写检索结果里真实出现过的评价，没有就留空数组。",
+    "risks 给 2–4 条风险/局限，每条 ≤ 50 字。",
+    "sources 是你在上面这些字段里实际引用到的检索结果，按你自己的顺序重新列出 { title, url }（可以是原始检索结果的子集，不要求全部收录，也不要新增没出现过的链接）。",
+    "cases 给 0–4 条 { title ≤ 30 字, detail ≤ 60 字, source } 的具体案例/落地实例；source 必须是上面你自己输出的 sources 数组里的下标（从 0 开始），必须是真实在检索结果里找到的案例，绝不能编造；如果检索结果里确实没有找到任何公开案例，cases 必须是空数组，不要为了凑数编造。"
   ].join("\n\n");
 }

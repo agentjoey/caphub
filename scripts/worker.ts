@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Pool } from "pg";
+import { createDeepAnalysisDeps, runDeepAnalysis } from "../lib/analysis/deep";
 import { runPipeline } from "../lib/analysis/pipeline";
 import { loadConfig, type WorkerConfig } from "../lib/config";
 import { createPool } from "../lib/db/pool";
 import { createDeepSeekCall } from "../lib/providers/deepseek";
 import { createGeminiEmbed } from "../lib/providers/gemini-embed";
 import { purgeDeletedCapabilities, sweepRetention } from "../lib/retention/retention";
+import type { Lease, RunOutcome } from "../lib/queue/runs";
 import { RunQueue } from "../lib/queue/runs";
 import { createObjectStore, type ObjectStore } from "../lib/storage/s3";
 import { createTelegramApi, type TelegramApi } from "../lib/telegram/api";
@@ -134,9 +136,28 @@ async function main() {
     const pipelines = buildWorkerPipelines(config, pool, objects);
     const reviewCall = createDeepSeekCall({ apiKey: config.providers.deepseekApiKey });
     const embedCall = config.providers.geminiApiKey ? createGeminiEmbed({ apiKey: config.providers.geminiApiKey }) : undefined;
+    // Deep analysis (M3.6) needs both a DeepSeek key (always required for this role, see
+    // WorkerConfig) and a Tavily key (optional, same requirement mixed/minimax_tavily pipelines
+    // have) -- without the latter it's simply left unavailable, same treatment those get.
+    const deepDeps = createDeepAnalysisDeps(config, pool);
     if (!config.analysisEnabled) log({ analysis: "disabled" });
     if (!embedCall) log({ embeddings: "disabled" });
+    if (!deepDeps) log({ deepAnalysis: "disabled", reason: "TAVILY_API_KEY not configured" });
     const embedBackoff = new EmbedBackoff();
+    // RunQueue's claim/heartbeat take a `kind` to scope themselves to one run kind's rows and
+    // lease duration (analysis: 2 min, deep: 6 min -- see lib/queue/runs.ts); runTick's TickDeps
+    // just wants `claim`/`heartbeat`/`finish` with `Lease`'s existing shape, so these two thin
+    // adapters are all that's needed to drive the same runTick for both kinds.
+    const analysisQueue = {
+      claim: (token: string, now: Date) => queue.claim(token, now, "analysis"),
+      heartbeat: (lease: Lease, now: Date) => queue.heartbeat(lease, now, "analysis"),
+      finish: (lease: Lease, outcome: RunOutcome, now: Date) => queue.finish(lease, outcome, now)
+    };
+    const deepQueue = {
+      claim: (token: string, now: Date) => queue.claim(token, now, "deep"),
+      heartbeat: (lease: Lease, now: Date) => queue.heartbeat(lease, now, "deep"),
+      finish: (lease: Lease, outcome: RunOutcome, now: Date) => queue.finish(lease, outcome, now)
+    };
 
     // Telegram only runs in --daemon (its poll loop is a background task for the life of the
     // process, unlike the one-shot queue tick above); --dry-run/--once behave exactly as before.
@@ -172,7 +193,7 @@ async function main() {
       if (config.analysisEnabled) {
         try {
           const state = await runTick({
-            queue,
+            queue: analysisQueue,
             run: (lease, signal) => {
               const deps = selectPipelineDeps(pipelines, lease.pipeline);
               if (!deps) throw Object.assign(new Error(`no pipeline deps available for '${lease.pipeline}'`), { code: "PIPELINE_UNAVAILABLE" });
@@ -184,12 +205,35 @@ async function main() {
           }, controller.signal);
           if (state !== "idle") log({ tick: state });
           if (state === "idle") {
+            // Deep analysis (M3.6) is tried next, before review/embed: same priority order as
+            // the normal analysis tick above, just a different `kind` of run on the same
+            // queue/lease machinery. A deep-analysis failure (a thrown error from runTick's own
+            // `run` callback is always caught inside runTick itself and recorded as the run's
+            // failure, never rethrown) must never end this loop -- the try/catch here only
+            // guards against runTick's surrounding plumbing (e.g. queue.claim itself failing).
+            let deepState: "idle" | "processed" = "idle";
+            if (deepDeps) {
+              try {
+                deepState = await runTick({
+                  queue: deepQueue,
+                  run: (lease, signal) => runDeepAnalysis(deepDeps, lease, signal),
+                  clock: () => new Date(),
+                  ownerToken: randomUUID,
+                  log
+                }, controller.signal);
+                if (deepState !== "idle") log({ deepTick: deepState });
+              } catch (e) {
+                log({ deepTickError: e instanceof Error ? e.message : String(e) });
+              }
+            }
             let reviewState: "idle" | "processed" = "idle";
-            try {
-              reviewState = await runReviewTick({ pool, call: reviewCall, log }, controller.signal);
-              if (reviewState !== "idle") log({ reviewTick: reviewState });
-            } catch (e) {
-              log({ reviewTickError: e instanceof Error ? e.message : String(e) });
+            if (deepState === "idle") {
+              try {
+                reviewState = await runReviewTick({ pool, call: reviewCall, log }, controller.signal);
+                if (reviewState !== "idle") log({ reviewTick: reviewState });
+              } catch (e) {
+                log({ reviewTickError: e instanceof Error ? e.message : String(e) });
+              }
             }
             if (reviewState === "idle" && embedCall) {
               if (embedBackoff.shouldSkip()) {

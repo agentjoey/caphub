@@ -1,7 +1,9 @@
 import type { Pool } from "pg";
 import { jsonStringifyStripNul, stripNul } from "../text/sanitize";
 
-export type StepName = "vision" | "search" | "reason" | "review";
+// "plan" and "synthesize" are the deep-analysis pipeline's steps (lib/analysis/deep.ts);
+// the analysis_steps.step CHECK was widened to allow them by migration 010.
+export type StepName = "vision" | "search" | "reason" | "review" | "plan" | "synthesize";
 
 export interface StepRow {
   runId: string; step: StepName; provider: string; model: string; attempt: number;

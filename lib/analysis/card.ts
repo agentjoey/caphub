@@ -202,3 +202,60 @@ export function finalizeSourceFacts(facts: SourceFacts, now: Date = new Date()):
 
 export const reviewNoteSchema = z.object({ agrees: z.boolean(), points: z.array(z.string().max(300)).max(8) });
 export type ReviewNote = z.infer<typeof reviewNoteSchema>;
+
+// --- Deep analysis (M3.6) ---------------------------------------------------------------
+// See lib/analysis/deep.ts. Owner's design decision 5: deep analysis must not produce a wall
+// of text, so every field below is capped short and scannable instead of free prose.
+
+/** Deep analysis' `plan` step output: 4-6 search queries covering docs / repo / word-of-mouth / alternatives. */
+export const deepPlanSchema = z.object({
+  queries: z.array(z.string().min(1).max(200)).min(4).max(6)
+});
+export type DeepPlan = z.infer<typeof deepPlanSchema>;
+
+export const deepSourceSchema = z.object({ title: z.string().max(300), url: z.string().url() });
+export type DeepSource = z.infer<typeof deepSourceSchema>;
+
+/**
+ * First `synthesize` pass: merges the raw search results into a flat list of grounded facts
+ * before the second pass composes the final card from them. `source` indexes into the raw
+ * merged sources list passed into the facts prompt (see deep.ts), or is `null` when nothing
+ * relevant was found for that fact (never a guess).
+ */
+export const deepFactsSchema = z.object({
+  facts: z.array(z.object({
+    text: z.string().min(1).max(300),
+    source: z.number().int().min(0).nullable()
+  })).max(40)
+});
+export type DeepFacts = z.infer<typeof deepFactsSchema>;
+
+const deepBullet = (max: number) => z.string().min(1).max(max);
+
+/**
+ * Second `synthesize` pass' output, stored as `capabilities.deep_analysis`. Grounding rule
+ * (owner ruling): every `cases` entry must cite a real retrieved source by index into this
+ * same output's `sources`; when nothing was found, `cases` must be an empty array rather than
+ * invented material -- enforced here (an out-of-range index fails validation) and in the
+ * prompt (deep.ts's synthesize prompt spells out the same rule).
+ */
+export const deepAnalysisSchema = z.object({
+  headline: deepBullet(40),
+  architecture: z.object({ summary: deepBullet(80), points: z.array(deepBullet(40)).min(3).max(5) }),
+  implementation: z.object({ summary: deepBullet(80), points: z.array(deepBullet(40)).min(3).max(5) }),
+  use_cases: z.array(z.object({ title: deepBullet(20), detail: deepBullet(60) })).min(3).max(5),
+  cases: z.array(z.object({ title: deepBullet(30), detail: deepBullet(60), source: z.number().int().min(0) })).max(4),
+  feedback: z.object({
+    positive: z.array(deepBullet(40)).max(3),
+    negative: z.array(deepBullet(40)).max(3)
+  }),
+  risks: z.array(deepBullet(50)).min(2).max(4),
+  sources: z.array(deepSourceSchema)
+}).superRefine((value, ctx) => {
+  value.cases.forEach((c, i) => {
+    if (c.source >= value.sources.length) {
+      ctx.addIssue({ code: "custom", path: ["cases", i, "source"], message: `cases[${i}].source (${c.source}) is out of range for sources (length ${value.sources.length})` });
+    }
+  });
+});
+export type DeepAnalysis = z.infer<typeof deepAnalysisSchema>;

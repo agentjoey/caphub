@@ -43,7 +43,10 @@ export function spikePricesFromEnv(env: Readonly<Record<string, string | undefin
   return prices;
 }
 
-type ReportedStep = Exclude<StepName, "review">;
+// Deliberately not derived from StepName (Exclude<StepName, "review">) any more: StepName was
+// widened by M3.6's deep-analysis pipeline to also include "plan"/"synthesize" (lib/analysis/
+// deep.ts), which never occur for this normal-pipeline (vision/search/reason) spike report.
+type ReportedStep = "vision" | "search" | "reason";
 const PIPELINES: Pipeline[] = ["minimax", "mixed", "minimax_tavily"];
 // review is a manual, per-capability action outside the A/B runs, so it never has spike data.
 const STEPS: ReportedStep[] = ["vision", "search", "reason"];
@@ -191,7 +194,9 @@ export async function buildSpikeReport(pool: Pick<Pool, "query">, prices: SpikeP
     byPipeline[r.pipeline] = { ...byPipeline[r.pipeline], runs: +r.runs, done: +r.done, failed: +r.failed, avgDurationMs: Math.round(+(r.avg_ms ?? 0)) };
   }
   for (const s of steps) {
-    if (s.step !== "review") byPipeline[s.pipeline].stepAvg[s.step] = { durationMs: Math.round(+s.avg_ms), tokens: Math.round(+s.avg_tokens) };
+    if (s.step === "vision" || s.step === "search" || s.step === "reason") {
+      byPipeline[s.pipeline].stepAvg[s.step] = { durationMs: Math.round(+s.avg_ms), tokens: Math.round(+s.avg_tokens) };
+    }
   }
   for (const p of PIPELINES) {
     const x = byPipeline[p];
