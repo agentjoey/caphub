@@ -1,5 +1,7 @@
 import { isIP } from "node:net";
 import { lookup as defaultDnsLookup } from "node:dns/promises";
+
+export { defaultDnsLookup };
 import { stripNul } from "../../text/sanitize";
 
 export const MAX_URL_BODY_BYTES = 20_480;
@@ -105,8 +107,13 @@ function isDisallowedHostname(hostname: string): boolean {
   return [".localhost", ".internal", ".local"].some((suffix) => host.endsWith(suffix));
 }
 
-async function isSafeUrl(url: URL, dnsLookup: DnsLookup): Promise<boolean> {
-  if (url.protocol !== "https:") return false;
+/**
+ * Host/credential/IP-range safety check shared by every caller that fetches an
+ * externally-supplied URL, independent of scheme. Rejects embedded credentials,
+ * localhost-ish hostnames, and hosts that are (or resolve to) a loopback,
+ * private, link-local or CGNAT address -- guarding against SSRF and DNS rebinding.
+ */
+export async function isSafeHost(url: URL, dnsLookup: DnsLookup): Promise<boolean> {
   if (url.username || url.password) return false;
   const hostname = url.hostname.replace(/^\[|\]$/g, "");
   if (isDisallowedHostname(hostname)) return false;
@@ -119,6 +126,11 @@ async function isSafeUrl(url: URL, dnsLookup: DnsLookup): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function isSafeUrl(url: URL, dnsLookup: DnsLookup): Promise<boolean> {
+  if (url.protocol !== "https:") return false;
+  return isSafeHost(url, dnsLookup);
 }
 
 export async function fetchUrlText(
