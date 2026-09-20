@@ -122,11 +122,22 @@ CREATE UNIQUE INDEX analysis_runs_one_active_deep
 - [ ] `/help` 与命令说明同步更新。
 - [ ] 测试：触发的合法性与冲突、UI 三态渲染、Telegram 按钮与推送文案、深度分析结果为空字段时的降级渲染。
 
-### Task 5: 验证与上线
+### Task 5: 存量重复清理（Human 2026-09-20 追加）
+
+**Files:** `scripts/find-duplicates.ts`(+test)
+
+- [ ] 先在 SQL 里用已存的向量算两两余弦相似度（不花钱），只把高于阈值（初始 0.80，常量，可用 `--threshold` 覆盖）的卡对交给模型；14 张卡共 91 对，预计只有个位数需要判断。
+- [ ] 每对一次 DeepSeek 结构化调用，输入两张卡的编号 / 标题 / 摘要 / 类型 / 标签，输出 `{relation, keep, reason}`：`relation` 同卡片 schema（duplicate / upgrade / complement / none），`keep` 指出建议保留哪一张（编号），`reason` ≤ 80 字。
+- [ ] dry-run 默认，打印一张「A · B · 相似度 · 关系 · 建议保留 · 理由」的表；`--apply` **只写较弱那张卡的 `overlap` 字段**（relation + target + reason），**绝不改 status**——按设计决定 2，置为失效必须由 Human 确认。
+- [ ] 沿用 scripts/reclassify-types.ts 的骨架（import.meta.url gate、逐行 try/catch、失败计数、AbortSignal.timeout、全失败非零退出、stripNul）。
+- [ ] 测试：阈值过滤只挑出该挑的对、relation=none 不写、写入只含 overlap 列、模型失败只跳过该对。
+
+### Task 6: 验证与上线
 
 - [ ] 临时 Neon branch：应用 010，对 2–3 张真实卡跑深度分析（真实调用，需授权），走查比对提示、确认流程、状态筛选、深度分析三态与 Telegram 推送；1440/390 截图存 `.agent/screens/m3_6/`。
 - [ ] 生产：迁移 010 → 推送 → Human 真机走查 → 记录 `docs/m3_6-verification.md`。
 - [ ] 观察一轮成本：记录深度分析单次实际调用数与 token 数，写进验证文档。
+- [ ] 跑一次存量重复扫描（dry-run），把结果表交 Human 确认后再 `--apply`，并记录确认了哪些。
 
 ## Self-review
 
