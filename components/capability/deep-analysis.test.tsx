@@ -20,7 +20,7 @@ const analysis: DeepAnalysis = {
     { title: "截图留档", detail: "定期存档页面" }
   ],
   cases: [{ title: "某电商", detail: "日抓百万页", source: 1 }],
-  feedback: { positive: ["上手快"], negative: ["文档薄"] },
+  feedback: { positive: [{ text: "上手快", source: 0 }], negative: [{ text: "文档薄", source: null }] },
   risks: ["依赖上游浏览器版本", "并发高时内存吃紧"],
   sources: [
     { title: "官方文档", url: "https://example.com/docs" },
@@ -113,6 +113,25 @@ describe("DeepAnalysisSection — the result", () => {
     expect(container.querySelectorAll(".deep-points li").length).toBeGreaterThan(10);
   });
 
+  it("cites a feedback point that names a source, and leaves a general impression (source: null) uncited", () => {
+    const { container } = renderSection({ analysis });
+    const feedback = [...container.querySelectorAll(".deep-section")].find((s) => s.querySelector(".deep-section__title")!.textContent === "口碑与争议")!;
+    const [praise, criticism] = [...feedback.querySelectorAll(".deep-points li")];
+    expect(praise.textContent).toBe("上手快[1]");
+    expect(praise.querySelector(".deep-ref")!.getAttribute("href")).toBe("#deep-source-1");
+    expect(criticism.textContent).toBe("文档薄");
+    expect(criticism.querySelector(".deep-ref")).toBeNull();
+  });
+
+  it("leaves a feedback point whose citation points outside the source list uncited rather than dead-linking", () => {
+    const { container } = renderSection({
+      analysis: { ...analysis, feedback: { positive: [{ text: "上手快", source: 9 }], negative: [] } }
+    });
+    expect(container.textContent).toContain("上手快");
+    const feedback = [...container.querySelectorAll(".deep-section")].find((s) => s.querySelector(".deep-section__title")!.textContent === "口碑与争议")!;
+    expect(feedback.querySelector(".deep-ref")).toBeNull();
+  });
+
   it("cites each case with a [n] superscript pointing at the collapsed source list, and shows 标题 · 域名", () => {
     const { container } = renderSection({ analysis });
     const ref = container.querySelector(".deep-ref")!;
@@ -145,8 +164,17 @@ describe("DeepAnalysisSection — the result", () => {
 
   it("drops a case whose citation points outside the source list instead of rendering a dead link", () => {
     const { container } = renderSection({ analysis: { ...analysis, cases: [{ title: "某电商", detail: "日抓百万页", source: 9 }] } });
-    expect(container.textContent).toContain("某电商");
-    expect(container.querySelector(".deep-ref")).toBeNull();
+    const cases = [...container.querySelectorAll(".deep-section")].find((s) => s.querySelector(".deep-section__title")!.textContent === "案例")!;
+    expect(cases.textContent).toContain("某电商");
+    expect(cases.querySelector(".deep-ref")).toBeNull();
+  });
+
+  it("still renders a pre-grounding blob whose feedback points are bare strings", () => {
+    const legacy = { ...analysis, feedback: { positive: ["上手快"], negative: [] } } as unknown as DeepAnalysis;
+    const { container } = renderSection({ analysis: legacy });
+    const feedback = [...container.querySelectorAll(".deep-section")].find((s) => s.querySelector(".deep-section__title")!.textContent === "口碑与争议")!;
+    expect(feedback.querySelector(".deep-points li")!.textContent).toBe("上手快");
+    expect(feedback.querySelector(".deep-ref")).toBeNull();
   });
 
   it("closes the summary with the card version the analysis was based on", () => {

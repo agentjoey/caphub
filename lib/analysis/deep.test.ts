@@ -22,7 +22,7 @@ const analysisValue = {
   implementation: { summary: "s2", points: ["p1", "p2", "p3"] },
   use_cases: [{ title: "u1", detail: "d1" }, { title: "u2", detail: "d2" }, { title: "u3", detail: "d3" }],
   cases: [{ title: "c1", detail: "d1", source: 0 }],
-  feedback: { positive: ["pos1"], negative: [] },
+  feedback: { positive: [{ text: "pos1", source: 0 }], negative: [{ text: "neg1", source: null }] },
   risks: ["r1", "r2"],
   sources: [{ title: "Docs", url: "https://a.example/1" }]
 };
@@ -175,6 +175,25 @@ describe("runDeepAnalysis", () => {
     const budgetedCalls = calls.filter((c) => c === "plan" || c === "facts" || c === "synthesize-final" || c.startsWith("search:")).length;
     expect(budgetedCalls).toBe(9);
     expect(budgetedCalls).toBeLessThanOrEqual(DEEP_BUDGET_LIMITS.maxCalls);
+  });
+
+  // Controller ruling (fix round 1): 口碑与争议 is grounded exactly like 案例 — an out-of-range
+  // feedback citation is invalid output and takes the same retry path, while `source: null`
+  // ("a general impression") is valid and must not be retried.
+  it("retries the final synthesize pass when a feedback point cites a source index outside the sources array", async () => {
+    const badAnalysis = { ...analysisValue, feedback: { positive: [{ text: "pos1", source: 5 }], negative: [] } };
+    const { d, calls } = deps({ analysisValues: [badAnalysis, analysisValue] });
+    const out = await runDeepAnalysis(d, lease, new AbortController().signal);
+    expect(out).toEqual({ capabilityId: "cab_1" });
+    expect(calls.filter((c) => c === "synthesize-final")).toHaveLength(2);
+  });
+
+  it("accepts feedback points with no source at all (source: null) without a retry", async () => {
+    const uncited = { ...analysisValue, feedback: { positive: [{ text: "pos1", source: null }], negative: [{ text: "neg1", source: null }] } };
+    const { d, calls, updates } = deps({ analysisValues: [uncited] });
+    await runDeepAnalysis(d, lease, new AbortController().signal);
+    expect(calls.filter((c) => c === "synthesize-final")).toHaveLength(1);
+    expect(JSON.parse(updates[0].values[1] as string).feedback.positive[0]).toEqual({ text: "pos1", source: null });
   });
 
   it("fails the run (invalid output, retried twice) when every synthesize attempt keeps citing an out-of-range source", async () => {

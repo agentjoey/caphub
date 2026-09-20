@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { INTERFACE_TAGS, RESERVED_TAGS } from "./card";
-import { CAPABILITY_TYPE_DEFINITIONS, backfillScorePrompt, reasonPrompt } from "./prompts";
+import { CAPABILITY_TYPE_DEFINITIONS, backfillScorePrompt, deepSynthesizePrompt, reasonPrompt } from "./prompts";
 
 const material = { kind: "text" as const, text: "hello" };
 const scenarios = [
@@ -164,5 +164,34 @@ describe("backfillScorePrompt", () => {
   it("handles a card with no source_url, empty signals and tags", () => {
     const prompt = backfillScorePrompt({ ...cardInput, source_url: null, signals: [], tags: [] });
     expect(prompt).toContain("（无）");
+  });
+});
+
+describe("deepSynthesizePrompt", () => {
+  const subject = {
+    title: "Scrapling", type: "tool" as const, summary: "抓取框架",
+    tags: ["web-scraping"], source_url: "https://example.com", playbook: { kind: "reference" as const, points: ["p"] }
+  };
+  const sources = [{ title: "Docs", url: "https://a.example/1" }, { title: "Reddit", url: "https://b.example/2" }];
+
+  it("numbers the retrieved sources from 0 so both cases and feedback can index into them", () => {
+    const prompt = deepSynthesizePrompt(subject, sources, ["fact one"]);
+    expect(prompt).toContain("[0] Docs https://a.example/1");
+    expect(prompt).toContain("[1] Reddit https://b.example/2");
+  });
+
+  it("asks feedback points for a source index, with null as the honest escape hatch rather than a guessed index", () => {
+    const prompt = deepSynthesizePrompt(subject, sources, ["fact one"]);
+    // The point itself is capped and shaped as { text, source } …
+    expect(prompt).toMatch(/feedback[^\n]*text ≤ 40 字, source/);
+    // … and the grounding rule spells out both branches, including the no-guessing instruction.
+    expect(prompt).toMatch(/说不出具体出处时，必须填 null/);
+    expect(prompt).toMatch(/绝不能为了把 source 填上就随便挑一个下标/);
+  });
+
+  it("still forbids invented cases when nothing was retrieved", () => {
+    const prompt = deepSynthesizePrompt(subject, [], []);
+    expect(prompt).toContain("原始检索结果：无。");
+    expect(prompt).toMatch(/cases 必须是空数组/);
   });
 });

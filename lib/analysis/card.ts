@@ -238,11 +238,26 @@ export type DeepFacts = z.infer<typeof deepFactsSchema>;
 const deepBullet = (max: number) => z.string().min(1).max(max);
 
 /**
+ * One 口碑与争议 point: a short line plus, when it came from a specific retrieved source, that
+ * source's index into the same output's `sources`. `null` means "a general impression, not
+ * traceable to one source" -- the escape hatch that keeps the model from inventing an index just
+ * to fill the field (controller ruling, fix round 1: 口碑与争议 is exactly the section a reader
+ * needs to be able to check, so it is grounded the same way `cases` is).
+ */
+export const deepFeedbackPointSchema = z.object({
+  text: deepBullet(40),
+  source: z.number().int().min(0).nullable()
+});
+export type DeepFeedbackPoint = z.infer<typeof deepFeedbackPointSchema>;
+
+/**
  * Second `synthesize` pass' output, stored as `capabilities.deep_analysis`. Grounding rule
  * (owner ruling): every `cases` entry must cite a real retrieved source by index into this
  * same output's `sources`; when nothing was found, `cases` must be an empty array rather than
  * invented material -- enforced here (an out-of-range index fails validation) and in the
- * prompt (deep.ts's synthesize prompt spells out the same rule).
+ * prompt (deep.ts's synthesize prompt spells out the same rule). Every `feedback` point is
+ * grounded the same way, except that it may cite `null` (see {@link deepFeedbackPointSchema});
+ * a non-null index is range-checked exactly like a case's.
  */
 export const deepAnalysisSchema = z.object({
   headline: deepBullet(40),
@@ -251,8 +266,8 @@ export const deepAnalysisSchema = z.object({
   use_cases: z.array(z.object({ title: deepBullet(20), detail: deepBullet(60) })).min(3).max(5),
   cases: z.array(z.object({ title: deepBullet(30), detail: deepBullet(60), source: z.number().int().min(0) })).max(4),
   feedback: z.object({
-    positive: z.array(deepBullet(40)).max(3),
-    negative: z.array(deepBullet(40)).max(3)
+    positive: z.array(deepFeedbackPointSchema).max(3),
+    negative: z.array(deepFeedbackPointSchema).max(3)
   }),
   risks: z.array(deepBullet(50)).min(2).max(4),
   sources: z.array(deepSourceSchema)
@@ -262,5 +277,12 @@ export const deepAnalysisSchema = z.object({
       ctx.addIssue({ code: "custom", path: ["cases", i, "source"], message: `cases[${i}].source (${c.source}) is out of range for sources (length ${value.sources.length})` });
     }
   });
+  for (const tone of ["positive", "negative"] as const) {
+    value.feedback[tone].forEach((point, i) => {
+      if (point.source !== null && point.source >= value.sources.length) {
+        ctx.addIssue({ code: "custom", path: ["feedback", tone, i, "source"], message: `feedback.${tone}[${i}].source (${point.source}) is out of range for sources (length ${value.sources.length})` });
+      }
+    });
+  }
 });
 export type DeepAnalysis = z.infer<typeof deepAnalysisSchema>;

@@ -3,7 +3,7 @@
 import { useState, useSyncExternalStore, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { deepAnalysisAction } from "../../app/actions";
-import type { DeepAnalysis } from "../../lib/analysis/card";
+import type { DeepAnalysis, DeepFeedbackPoint } from "../../lib/analysis/card";
 import { formatDateTime } from "../../lib/library/format";
 import { errorLabel } from "../../lib/library/labels";
 import { safeHttpUrl } from "../../lib/library/safe-url";
@@ -146,6 +146,24 @@ export function DeepAnalysisSection({
   const count = (n: number) => format(dict.itemCount, { count: n });
   const toggle = (key: string) => (next: boolean) => setOpen((prev) => ({ ...prev, [key]: next }));
 
+  /**
+   * A 口碑与争议 point, cited like a case when it names a source — `source: null` (a general
+   * impression the model could not trace to one result) simply renders uncited, and so does an
+   * out-of-range index, rather than a dead link. A bare string is the pre-grounding shape of this
+   * field (see deepFeedbackPointSchema) and still renders, just without a citation.
+   */
+  const feedbackItem = (raw: DeepFeedbackPoint | string, i: number) => {
+    const item: DeepFeedbackPoint = typeof raw === "string" ? { text: raw, source: null } : raw;
+    return (
+    <li key={i}>
+      {item.text}
+      {item.source !== null && item.source < sources.length && (
+        <SourceRef index={item.source} label={format(dict.sourceRefAria, { n: item.source + 1 })} />
+      )}
+    </li>
+    );
+  };
+
   return (
     <section className="panel deep-analysis" id="deep-analysis">
       <h2 className="panel-title">{dict.title}</h2>
@@ -234,13 +252,13 @@ export function DeepAnalysisSection({
               {positive.length > 0 && (
                 <>
                   <p className="deep-section__label">{dict.feedbackPositive}</p>
-                  <ul className="deep-points">{positive.map((item, i) => <li key={i}>{item}</li>)}</ul>
+                  <ul className="deep-points">{positive.map(feedbackItem)}</ul>
                 </>
               )}
               {negative.length > 0 && (
                 <>
                   <p className="deep-section__label">{dict.feedbackNegative}</p>
-                  <ul className="deep-points">{negative.map((item, i) => <li key={i}>{item}</li>)}</ul>
+                  <ul className="deep-points">{negative.map(feedbackItem)}</ul>
                 </>
               )}
             </Section>

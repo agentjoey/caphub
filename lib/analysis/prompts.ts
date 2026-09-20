@@ -157,7 +157,8 @@ export function deepSynthesizePrompt(subject: DeepSubject, sources: DeepSource[]
     sources.length
       ? `原始检索结果（编号从 0 开始）：\n${sources.map((s, i) => `[${i}] ${s.title} ${s.url}`).join("\n")}`
       : "原始检索结果：无。",
-    "请输出 DeepAnalysis：headline 是不超过 40 字的一句话结论；architecture 是 { summary ≤ 80 字, points：3–5 条，每条 ≤ 40 字 }，说明这个能力大致怎么构建/运作；implementation 同样是 { summary ≤ 80 字, points：3–5 条，每条 ≤ 40 字 }，说明落地/接入的关键步骤；use_cases 给 3–5 条 { title ≤ 20 字, detail ≤ 60 字 } 的具体应用场景；feedback 给 { positive: 0–3 条 ≤ 40 字, negative: 0–3 条 ≤ 40 字 } 的口碑要点，只写检索结果里真实出现过的评价，没有就留空数组。",
+    "请输出 DeepAnalysis：headline 是不超过 40 字的一句话结论；architecture 是 { summary ≤ 80 字, points：3–5 条，每条 ≤ 40 字 }，说明这个能力大致怎么构建/运作；implementation 同样是 { summary ≤ 80 字, points：3–5 条，每条 ≤ 40 字 }，说明落地/接入的关键步骤；use_cases 给 3–5 条 { title ≤ 20 字, detail ≤ 60 字 } 的具体应用场景；feedback 给 { positive: 0–3 条, negative: 0–3 条 } 的口碑要点，每条是 { text ≤ 40 字, source }，只写检索结果里真实出现过的评价，没有就留空数组。",
+    "feedback 每条的 source：这条评价来自某个具体检索结果时，填你自己输出的 sources 数组里的下标（从 0 开始）；只是综合印象、说不出具体出处时，必须填 null。绝不能为了把 source 填上就随便挑一个下标——宁可填 null。",
     "risks 给 2–4 条风险/局限，每条 ≤ 50 字。",
     "sources 是你在上面这些字段里实际引用到的检索结果，按你自己的顺序重新列出 { title, url }（可以是原始检索结果的子集，不要求全部收录，也不要新增没出现过的链接）。",
     "cases 给 0–4 条 { title ≤ 30 字, detail ≤ 60 字, source } 的具体案例/落地实例；source 必须是上面你自己输出的 sources 数组里的下标（从 0 开始），必须是真实在检索结果里找到的案例，绝不能编造；如果检索结果里确实没有找到任何公开案例，cases 必须是空数组，不要为了凑数编造。"

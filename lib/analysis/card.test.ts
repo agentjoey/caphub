@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { cardSchema, finalizeSourceFacts, isValidTag, scoreResultSchema } from "./card";
+import { cardSchema, deepAnalysisSchema, finalizeSourceFacts, isValidTag, scoreResultSchema } from "./card";
 
 const valid = {
   title: "用 Playwright 生成 axe 可访问性报告", type: "skill", summary: "一段摘要",
@@ -232,5 +232,41 @@ describe("finalizeSourceFacts", () => {
   it("preserves the other fields unchanged", () => {
     const result = finalizeSourceFacts({ repo_url: "https://x", stars: 5, license: "MIT" }, now);
     expect(result).toEqual({ repo_url: "https://x", stars: 5, license: "MIT", as_of: "2026-09-20" });
+  });
+});
+
+describe("deepAnalysisSchema grounding", () => {
+  const base = {
+    headline: "h",
+    architecture: { summary: "s1", points: ["p1", "p2", "p3"] },
+    implementation: { summary: "s2", points: ["p1", "p2", "p3"] },
+    use_cases: [{ title: "u1", detail: "d1" }, { title: "u2", detail: "d2" }, { title: "u3", detail: "d3" }],
+    cases: [],
+    feedback: { positive: [], negative: [] },
+    risks: ["r1", "r2"],
+    sources: [{ title: "Docs", url: "https://a.example/1" }]
+  };
+
+  it("accepts a feedback point citing a real source, and one citing none at all", () => {
+    const parsed = deepAnalysisSchema.parse({
+      ...base,
+      feedback: { positive: [{ text: "上手快", source: 0 }], negative: [{ text: "文档薄", source: null }] }
+    });
+    expect(parsed.feedback.positive[0]).toEqual({ text: "上手快", source: 0 });
+    expect(parsed.feedback.negative[0].source).toBeNull();
+  });
+
+  it("rejects a feedback point citing a source index outside the sources array, naming the offending path", () => {
+    const result = deepAnalysisSchema.safeParse({
+      ...base,
+      feedback: { positive: [], negative: [{ text: "文档薄", source: 3 }] }
+    });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0].path).toEqual(["feedback", "negative", 0, "source"]);
+  });
+
+  it("still rejects an out-of-range case citation, and a bare-string feedback point", () => {
+    expect(deepAnalysisSchema.safeParse({ ...base, cases: [{ title: "c", detail: "d", source: 9 }] }).success).toBe(false);
+    expect(deepAnalysisSchema.safeParse({ ...base, feedback: { positive: ["上手快"], negative: [] } }).success).toBe(false);
   });
 });
