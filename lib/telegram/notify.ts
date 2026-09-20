@@ -3,7 +3,7 @@ import type { CapabilityType } from "../analysis/card";
 import { loadScenarios } from "../analysis/scenarios";
 import type { InlineKeyboardMarkup, TelegramApi } from "./api";
 import { TelegramError } from "./errors";
-import { formatResult, type ResultStatus } from "./format";
+import { formatResult, type DecidedCardInput, type FailedCardInput, type FormatCardInput } from "./format";
 
 const BATCH_SIZE = 10;
 
@@ -38,9 +38,39 @@ function isTransient(error: unknown): boolean {
   return error instanceof TelegramError && (error.code === 0 || error.code === 429);
 }
 
-function statusOf(candidate: Candidate): ResultStatus {
-  if (candidate.runState === "failed") return "failed";
-  return candidate.verdict;
+/** Postgres error code (e.g. '23505'), when the thrown value carries one — never the error message, which may embed row content. */
+function dbErrorCode(error: unknown): string | undefined {
+  return error && typeof error === "object" && "code" in error && typeof (error as { code: unknown }).code === "string"
+    ? (error as { code: string }).code
+    : undefined;
+}
+
+/**
+ * Builds `formatResult`'s input for one candidate. A failed latest run only ever needs the
+ * narrow {@link FailedCardInput} shape (see format.ts) — the capability's other columns may be
+ * stale (from an earlier successful run) or, for a future failed-run-with-no-capability
+ * selection branch, simply absent.
+ */
+function buildFormatInput(candidate: Candidate, scenarioLabel: Map<string, string>): FormatCardInput {
+  if (candidate.runState === "failed") {
+    const input: FailedCardInput = { status: "failed", id: candidate.id, updatedAt: candidate.updatedAt.toISOString(), errorCode: candidate.errorCode };
+    return input;
+  }
+  const input: DecidedCardInput = {
+    status: candidate.verdict,
+    id: candidate.id,
+    title: candidate.title,
+    type: candidate.type,
+    usage: candidate.usage,
+    suggestedVerdict: candidate.suggestedVerdict,
+    suggestedReason: candidate.suggestedReason,
+    summary: candidate.summary,
+    tags: candidate.tags,
+    scenarioLabels: candidate.scenarios.map((slug) => scenarioLabel.get(slug) ?? slug),
+    serial: candidate.serial,
+    updatedAt: candidate.updatedAt.toISOString()
+  };
+  return input;
 }
 
 /**
@@ -115,12 +145,9 @@ async function deliver(
     }
   }
 
+  let sent;
   try {
-    const sent = await deps.api.sendMessage({ chatId, text: rendered.text, replyMarkup: rendered.replyMarkup });
-    if (sent && typeof sent === "object" && typeof sent.message_id === "number") {
-      await recordMessageId(deps.pool, candidate.id, sent.message_id);
-    }
-    return "notified";
+    sent = await deps.api.sendMessage({ chatId, text: rendered.text, replyMarkup: rendered.replyMarkup });
   } catch (error) {
     if (isTransient(error)) {
       deps.log?.({ notify: "send-failed-transient", capability: candidate.id });
@@ -129,14 +156,29 @@ async function deliver(
     deps.log?.({ notify: "send-failed", capability: candidate.id });
     return "skipped";
   }
+
+  if (sent && typeof sent === "object" && typeof sent.message_id === "number") {
+    try {
+      await recordMessageId(deps.pool, candidate.id, sent.message_id);
+    } catch (error) {
+      // The push itself already succeeded — but without this write, a later re-push (e.g.
+      // after a rerun) would blindly re-send instead of editing. Treat the candidate as failed
+      // for this tick (skip markNotified below) rather than risk losing track of the message.
+      deps.log?.({ notify: "record-message-id-failed", capability: candidate.id, code: dbErrorCode(error) });
+      return "error";
+    }
+  }
+  return "notified";
 }
 
 /**
  * Pushes decided/failed Telegram-sourced cards to the owner chat, one tick at a time (see
- * {@link selectCandidates}). A card whose formatting throws is logged and skipped — never
- * allowed to abort the rest of the tick. Returns "notified" if at least one card was pushed
- * this tick (even if others were skipped or errored), "error" if a transient Telegram failure
- * occurred and no card was pushed, or "idle" when there was nothing to do.
+ * {@link selectCandidates}). A card whose formatting throws, or whose `markNotified`/
+ * `recordMessageId` write throws, is logged and skipped — never allowed to abort the rest of
+ * the tick. Returns "error" if any candidate hit a transient Telegram failure (429/network) or
+ * a DB write failure (so the caller backs off, even if other candidates in the same batch were
+ * pushed successfully), "notified" if the tick was otherwise clean and at least one card was
+ * pushed, or "idle" when there was nothing to do.
  */
 export async function runNotifyTick(deps: NotifyTickDeps, signal: AbortSignal): Promise<"idle" | "notified" | "error"> {
   if (signal.aborted) return "idle";
@@ -153,21 +195,7 @@ export async function runNotifyTick(deps: NotifyTickDeps, signal: AbortSignal): 
     if (signal.aborted) break;
     let rendered;
     try {
-      rendered = formatResult({
-        status: statusOf(candidate),
-        id: candidate.id,
-        title: candidate.title,
-        type: candidate.type,
-        usage: candidate.usage,
-        suggestedVerdict: candidate.suggestedVerdict,
-        suggestedReason: candidate.suggestedReason,
-        summary: candidate.summary,
-        tags: candidate.tags,
-        scenarioLabels: candidate.scenarios.map((slug) => scenarioLabel.get(slug) ?? slug),
-        serial: candidate.serial,
-        updatedAt: candidate.updatedAt.toISOString(),
-        errorCode: candidate.errorCode
-      });
+      rendered = formatResult(buildFormatInput(candidate, scenarioLabel));
     } catch (error) {
       deps.log?.({ notify: "format-failed", capability: candidate.id, error: error instanceof Error ? error.message : String(error) });
       continue;
@@ -175,15 +203,27 @@ export async function runNotifyTick(deps: NotifyTickDeps, signal: AbortSignal): 
 
     const outcome = await deliver(deps, candidate, rendered);
     if (outcome === "notified") {
-      await markNotified(deps.pool, candidate.id);
-      notified += 1;
+      try {
+        await markNotified(deps.pool, candidate.id);
+        notified += 1;
+      } catch (error) {
+        // The push already succeeded, but a transient pool error here must not throw out of
+        // the tick (it would abort the rest of the batch) and must not be treated as a success
+        // (that would leave notified_at NULL, causing a duplicate push next tick — reported and
+        // instead surfaced as this tick's "error" so the caller can back off).
+        deps.log?.({ notify: "mark-notified-failed", capability: candidate.id, code: dbErrorCode(error) });
+        sawError = true;
+      }
     } else if (outcome === "error") {
       sawError = true;
     }
   }
 
   deps.log?.({ notify: "done", notified, total: candidates.length });
-  if (notified > 0) return "notified";
+  // A transient/DB error anywhere in the batch means the caller should back off, even if other
+  // candidates in the same batch were pushed successfully — "notified" is reserved for a
+  // fully-clean tick.
   if (sawError) return "error";
+  if (notified > 0) return "notified";
   return "idle";
 }

@@ -19,10 +19,13 @@ function candidateRow(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-function fakePool(candidateRows: Array<Record<string, unknown>>) {
+function fakePool(candidateRows: Array<Record<string, unknown>>, opts: { throwOn?: (text: string) => boolean } = {}) {
   const calls: Array<{ text: string; values: unknown[] }> = [];
   const query = async (text: string, values: unknown[] = []) => {
     calls.push({ text, values });
+    if (opts.throwOn?.(text)) {
+      throw Object.assign(new Error("connection terminated"), { code: "57P01" });
+    }
     if (text.includes("FROM caphub_v2.capabilities cb")) return { rows: candidateRows };
     if (text.includes("FROM caphub_v2.scenarios")) return { rows: SCENARIO_ROWS };
     if (text.includes("UPDATE caphub_v2.capabilities SET notified_at")) return { rows: [], rowCount: 1 };
@@ -117,6 +120,40 @@ describe("runNotifyTick", () => {
     const result = await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
     expect(result).toBe("error");
     expect(calls.some((c) => c.text.includes("UPDATE caphub_v2.capabilities SET notified_at"))).toBe(false);
+  });
+
+  it("keeps processing the rest of the batch when markNotified throws for one candidate, and reports 'error'", async () => {
+    const rows = [candidateRow({ id: "cab_bad" }), candidateRow({ id: "cab_good" })];
+    let calls = 0;
+    const { pool, calls: queries } = fakePool(rows, {
+      throwOn: (text) => {
+        if (!text.includes("UPDATE caphub_v2.capabilities SET notified_at")) return false;
+        calls += 1;
+        return calls === 1; // only the first candidate's write fails
+      }
+    });
+    const api = fakeApi();
+    const result = await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
+    expect(result).toBe("error");
+    // Both cards were still pushed to Telegram even though marking the first as notified failed.
+    expect(api.edited).toHaveLength(2);
+    const notifyUpdates = queries.filter((c) => c.text.includes("UPDATE caphub_v2.capabilities SET notified_at"));
+    expect(notifyUpdates.map((c) => c.values)).toEqual([["cab_bad"], ["cab_good"]]);
+  });
+
+  it("keeps processing the rest of the batch when recordMessageId throws for one candidate, and reports 'error'", async () => {
+    const rows = [candidateRow({ id: "cab_bad", telegramMessageId: null }), candidateRow({ id: "cab_good" })];
+    const { pool, calls: queries } = fakePool(rows, {
+      throwOn: (text) => text.includes("UPDATE caphub_v2.captures SET telegram_message_id")
+    });
+    const api = fakeApi();
+    const result = await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
+    expect(result).toBe("error");
+    // cab_bad: sendMessage succeeded but recording its message id failed, so it must not be marked notified.
+    expect(api.sent).toHaveLength(1);
+    expect(api.edited).toHaveLength(1); // cab_good, which has a stored receipt, still went through
+    const notifyUpdates = queries.filter((c) => c.text.includes("UPDATE caphub_v2.capabilities SET notified_at"));
+    expect(notifyUpdates.map((c) => c.values)).toEqual([["cab_good"]]);
   });
 
   it("keeps processing the rest of the batch after one card's formatting throws", async () => {

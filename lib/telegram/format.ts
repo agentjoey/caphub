@@ -11,12 +11,13 @@ export const PENDING_SUMMARY_MAX_LEN = 300;
 export type ResultStatus = "keep" | "discard" | "pending" | "failed";
 
 /**
- * Input to {@link formatResult}. `status` is decided by the caller (`notify.ts`) from the
- * capability's verdict plus the capture's latest analysis run state — this module only
- * renders, it never queries or interprets DB state.
+ * Input to `formatResult` for a card with a decided verdict (`keep`/`discard`) or awaiting
+ * one (`pending`). `status` is decided by the caller (`notify.ts`) from the capability's
+ * verdict plus the capture's latest analysis run state — this module only renders, it never
+ * queries or interprets DB state.
  */
-export interface FormatCardInput {
-  status: ResultStatus;
+export interface DecidedCardInput {
+  status: "keep" | "discard" | "pending";
   id: string;
   title: string;
   type: CapabilityType;
@@ -31,9 +32,24 @@ export interface FormatCardInput {
   serial: number | null;
   /** The capability's `updated_at`, ISO — used to encode the optimistic-lock token in button callback_data. */
   updatedAt: string;
-  /** Only meaningful when `status === "failed"`: the failed run's `error_code`. */
+}
+
+/**
+ * Input to `formatResult` for a failed analysis run. Deliberately narrow — a failed run may
+ * never have produced a capability (no title/summary/tags/etc. to show), so this only carries
+ * what the failed card actually needs: an id to build the rerun button and the web link, the
+ * error code, and the `updated_at` to encode into the rerun callback's optimistic-lock token.
+ * This keeps `format.ts` ready for a future second selection branch (a failed run with no
+ * capability row) without widening the other three formatters' required fields.
+ */
+export interface FailedCardInput {
+  status: "failed";
+  id: string;
+  updatedAt: string;
   errorCode: string | null;
 }
+
+export type FormatCardInput = DecidedCardInput | FailedCardInput;
 
 export interface FormattedMessage {
   text: string;
@@ -50,7 +66,7 @@ function libraryLink(id: string): string {
   return `${publicBaseUrl()}/library/${id}`;
 }
 
-function metaLine(card: FormatCardInput): string {
+function metaLine(card: DecidedCardInput): string {
   return `类型：${escapeHtml(typeLabel(card.type, "zh"))} · 用法：${escapeHtml(usageLabel(card.usage, "zh"))}`;
 }
 
@@ -62,7 +78,7 @@ function tagsLine(tags: string[]): string {
   return `标签：${tags.map(escapeHtml).join("、") || "无"}`;
 }
 
-function formatKeep(card: FormatCardInput): FormattedMessage {
+function formatKeep(card: DecidedCardInput): FormattedMessage {
   const serial = formatSerial(card.type, card.serial);
   const header = serial ? `✅ 已保留 · ${escapeHtml(serial)}` : "✅ 已保留";
   const lines = [
@@ -76,7 +92,7 @@ function formatKeep(card: FormatCardInput): FormattedMessage {
   return { text: lines.join("\n") };
 }
 
-function formatDiscard(card: FormatCardInput): FormattedMessage {
+function formatDiscard(card: DecidedCardInput): FormattedMessage {
   const lines = [
     "🗑 已丢弃",
     `<b>${escapeHtml(card.title)}</b>`,
@@ -90,7 +106,7 @@ function suggestedVerdictLabel(v: "keep" | "discard"): string {
   return v === "keep" ? "保留" : "丢弃";
 }
 
-function formatPending(card: FormatCardInput): FormattedMessage {
+function formatPending(card: DecidedCardInput): FormattedMessage {
   const summary = truncate(card.summary, PENDING_SUMMARY_MAX_LEN);
   const lines = [
     `<b>${escapeHtml(card.title)}</b>`,
@@ -115,7 +131,7 @@ function formatPending(card: FormatCardInput): FormattedMessage {
   return { text: lines.join("\n"), replyMarkup };
 }
 
-function formatFailed(card: FormatCardInput): FormattedMessage {
+function formatFailed(card: FailedCardInput): FormattedMessage {
   const reason = errorLabel(card.errorCode, "zh");
   const text = `❌ 分析失败 · ${escapeHtml(reason)}`;
   const replyMarkup: InlineKeyboardMarkup = {

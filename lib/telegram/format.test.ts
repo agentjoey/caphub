@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { decodeDecision } from "./router";
-import { formatResult, type FormatCardInput } from "./format";
+import { formatResult, type DecidedCardInput, type FailedCardInput } from "./format";
 
-const base: FormatCardInput = {
+const base: DecidedCardInput = {
   status: "keep",
   id: "cab_deadbeefcafef00d",
   title: "示例标题",
@@ -14,6 +14,12 @@ const base: FormatCardInput = {
   tags: ["rag", "web-scraping"],
   scenarioLabels: ["编程", "自动化"],
   serial: 7,
+  updatedAt: "2026-09-20T00:00:00.000Z"
+};
+
+const failedBase: FailedCardInput = {
+  status: "failed",
+  id: "cab_deadbeefcafef00d",
   updatedAt: "2026-09-20T00:00:00.000Z",
   errorCode: null
 };
@@ -98,18 +104,18 @@ describe("formatResult — pending", () => {
 });
 
 describe("formatResult — failed", () => {
-  it("renders a Chinese failure reason and a single rerun button", () => {
-    const out = formatResult({ ...base, status: "failed", errorCode: "TIMEOUT" });
+  it("renders a Chinese failure reason and a single rerun button, from only id/errorCode/updatedAt", () => {
+    const out = formatResult({ ...failedBase, errorCode: "TIMEOUT" });
     expect(out.text).toBe("❌ 分析失败 · 模型响应超时");
     const kb = out.replyMarkup?.inline_keyboard;
     expect(kb).toHaveLength(1);
     expect(kb?.[0]).toHaveLength(1);
     expect(kb?.[0]?.[0]?.text).toBe("重跑");
-    expect(decodeDecision(kb![0]![0]!.callback_data!)).toEqual({ action: "rerun", capabilityId: base.id, updatedAt: base.updatedAt });
+    expect(decodeDecision(kb![0]![0]!.callback_data!)).toEqual({ action: "rerun", capabilityId: failedBase.id, updatedAt: failedBase.updatedAt });
   });
 
   it("falls back to a generic message for an unrecognised error code", () => {
-    const out = formatResult({ ...base, status: "failed", errorCode: "SOMETHING_WEIRD" });
+    const out = formatResult({ ...failedBase, errorCode: "SOMETHING_WEIRD" });
     expect(out.text).toBe("❌ 分析失败 · 分析失败（SOMETHING_WEIRD）");
   });
 });
