@@ -7,8 +7,9 @@ import { formatResult, type DecidedCardInput, type FailedCardInput, type FormatC
 
 const BATCH_SIZE = 10;
 
-interface Candidate {
+export interface Candidate {
   id: string;
+  captureId: string;
   title: string;
   type: CapabilityType;
   usage: "integrate" | "reference";
@@ -51,7 +52,7 @@ function dbErrorCode(error: unknown): string | undefined {
  * stale (from an earlier successful run) or, for a future failed-run-with-no-capability
  * selection branch, simply absent.
  */
-function buildFormatInput(candidate: Candidate, scenarioLabel: Map<string, string>): FormatCardInput {
+export function buildFormatInput(candidate: Candidate, scenarioLabel: Map<string, string>): FormatCardInput {
   if (candidate.runState === "failed") {
     const input: FailedCardInput = { status: "failed", id: candidate.id, updatedAt: candidate.updatedAt.toISOString(), errorCode: candidate.errorCode };
     return input;
@@ -74,6 +75,25 @@ function buildFormatInput(candidate: Candidate, scenarioLabel: Map<string, strin
 }
 
 /**
+ * Column list + join shared by every query that loads a `Candidate` row, so
+ * {@link selectCandidates} (batch, unnotified) and {@link loadCandidateById} (single row, by id,
+ * regardless of notified state — used by decide.ts to render a card back into a Telegram
+ * message) stay in lockstep instead of drifting into two shapes for the same data.
+ */
+const CANDIDATE_COLUMNS = `cb.id, cb.capture_id AS "captureId", cb.title, cb.type, cb.usage,
+            cb.suggested_verdict AS "suggestedVerdict", cb.suggested_reason AS "suggestedReason",
+            cb.summary, cb.tags, cb.scenarios, cb.serial, cb.verdict, cb.updated_at AS "updatedAt",
+            c.telegram_chat_id AS "telegramChatId", c.telegram_message_id AS "telegramMessageId",
+            lr.state AS "runState", lr.error_code AS "errorCode"`;
+
+const CANDIDATE_FROM = `FROM caphub_v2.capabilities cb
+     JOIN caphub_v2.captures c ON c.id = cb.capture_id
+     JOIN LATERAL (
+       SELECT state, error_code FROM caphub_v2.analysis_runs
+       WHERE capture_id = cb.capture_id ORDER BY created_at DESC LIMIT 1
+     ) lr ON true`;
+
+/**
  * Selects up to {@link BATCH_SIZE} Telegram-sourced capabilities that need a push (an already
  * -decided verdict, or a failed latest run) and haven't been pushed yet. The "latest run" is
  * looked up by `capture_id` (not `capabilities.run_id`, which points at the run that produced
@@ -84,23 +104,31 @@ function buildFormatInput(candidate: Candidate, scenarioLabel: Map<string, strin
  */
 async function selectCandidates(pool: Pool): Promise<Candidate[]> {
   const { rows } = await pool.query<Candidate>(
-    `SELECT cb.id, cb.title, cb.type, cb.usage,
-            cb.suggested_verdict AS "suggestedVerdict", cb.suggested_reason AS "suggestedReason",
-            cb.summary, cb.tags, cb.scenarios, cb.serial, cb.verdict, cb.updated_at AS "updatedAt",
-            c.telegram_chat_id AS "telegramChatId", c.telegram_message_id AS "telegramMessageId",
-            lr.state AS "runState", lr.error_code AS "errorCode"
-     FROM caphub_v2.capabilities cb
-     JOIN caphub_v2.captures c ON c.id = cb.capture_id
-     JOIN LATERAL (
-       SELECT state, error_code FROM caphub_v2.analysis_runs
-       WHERE capture_id = cb.capture_id ORDER BY created_at DESC LIMIT 1
-     ) lr ON true
+    `SELECT ${CANDIDATE_COLUMNS}
+     ${CANDIDATE_FROM}
      WHERE cb.notified_at IS NULL AND cb.deleted_at IS NULL AND c.source = 'telegram'
        AND lr.state IN ('done', 'failed')
      ORDER BY cb.updated_at
      LIMIT ${BATCH_SIZE}`
   );
   return rows;
+}
+
+/**
+ * Loads one candidate by capability id, regardless of `notified_at` (unlike
+ * {@link selectCandidates}) — used by decide.ts to re-render a card's current state (e.g. after
+ * a decision, or when a Telegram button turns out stale). Returns `null` for a missing or
+ * soft-deleted capability, or one with no analysis run yet (shouldn't happen for a card that was
+ * ever pushed).
+ */
+export async function loadCandidateById(pool: Pool, id: string): Promise<Candidate | null> {
+  const { rows } = await pool.query<Candidate>(
+    `SELECT ${CANDIDATE_COLUMNS}
+     ${CANDIDATE_FROM}
+     WHERE cb.id = $1 AND cb.deleted_at IS NULL`,
+    [id]
+  );
+  return rows[0] ?? null;
 }
 
 async function markNotified(pool: Pool, id: string): Promise<void> {

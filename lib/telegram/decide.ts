@@ -1,0 +1,168 @@
+import type { Pool } from "pg";
+import { loadScenarios } from "../analysis/scenarios";
+import type { Pipeline } from "../config";
+import { getDict } from "../i18n";
+import { decide, requestRerun } from "../library/actions";
+import type { TelegramApi } from "./api";
+import { buildFormatInput, loadCandidateById, type Candidate } from "./notify";
+import { formatResult } from "./format";
+import type { ClassifiedUpdate, DecisionAction } from "./router";
+
+/** The `{kind: "callback", ...}` branch of {@link ClassifiedUpdate} — what `handleCallback` acts on. */
+export type CallbackDecoded = Extract<ClassifiedUpdate, { kind: "callback" }>;
+
+export interface HandleCallbackDeps {
+  pool: Pool;
+  api: Pick<TelegramApi, "answerCallbackQuery" | "editMessageText">;
+  ownerChatId: number | string;
+  /** Pipeline a rerun is queued under (`config.pipeline`) — `requestRerun` needs it, `decide` does not. */
+  pipeline: Pipeline;
+  log?: (o: Record<string, unknown>) => void;
+}
+
+export type CallbackOutcome =
+  | { outcome: "decided"; action: DecisionAction; capabilityId: string }
+  | { outcome: "conflict"; capabilityId: string }
+  | { outcome: "rejected"; reason: "not-owner" | "not-found" | "object-gone" | "already-queued" | "invalid" | "unknown-action"; capabilityId?: string }
+  | { outcome: "failed"; reason: string; capabilityId?: string };
+
+const dict = getDict("zh").actions;
+
+const TOAST = {
+  keep: "已保留",
+  discard: "已丢弃",
+  rerun: "已重新排队",
+  notOwner: "无权操作"
+} as const;
+
+const REQUEUE_TEXT = "已重新排队，分析中…";
+
+async function loadScenarioLabels(pool: Pool): Promise<Map<string, string>> {
+  const scenarios = await loadScenarios(pool);
+  return new Map(scenarios.map((s) => [s.slug, s.labelZh]));
+}
+
+/** Edits the Telegram message to a candidate's current rendered state, with buttons stripped (buttons are simply never re-sent). */
+async function editToCurrentState(deps: HandleCallbackDeps, cb: CallbackDecoded, candidate: Candidate, signal?: AbortSignal): Promise<void> {
+  const scenarioLabel = await loadScenarioLabels(deps.pool);
+  const rendered = formatResult(buildFormatInput(candidate, scenarioLabel));
+  await deps.api.editMessageText({ chatId: cb.chatId, messageId: cb.messageId, text: rendered.text, signal });
+}
+
+async function clearNotifiedAt(pool: Pool, capabilityId: string): Promise<void> {
+  await pool.query("UPDATE caphub_v2.capabilities SET notified_at = NULL WHERE id = $1", [capabilityId]);
+}
+
+/**
+ * Runs a post-decision side effect (re-render the message, clear `notified_at`) that must
+ * never turn a successful decision into a "failed" outcome or trigger a second
+ * `answerCallbackQuery` call — the toast was already sent by the time this runs.
+ */
+async function runSideEffect(deps: HandleCallbackDeps, cb: CallbackDecoded, label: string, fn: () => Promise<void>): Promise<void> {
+  try {
+    await fn();
+  } catch (error) {
+    deps.log?.({ decide: label, capabilityId: cb.capabilityId, error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+/**
+ * Handles one decoded callback query (保留/丢弃/重跑分析 button press): applies the decision via
+ * the shared `decide`/`requestRerun` actions, answers the Telegram callback with a short toast,
+ * and edits the original message to match. Never throws — this runs in the worker's poll loop,
+ * where an uncaught error would otherwise abort the whole tick.
+ */
+export async function handleCallback(deps: HandleCallbackDeps, cb: CallbackDecoded, signal?: AbortSignal): Promise<CallbackOutcome> {
+  try {
+    if (String(cb.chatId) !== String(deps.ownerChatId)) {
+      await safeAnswer(deps, cb, TOAST.notOwner, signal);
+      return { outcome: "rejected", reason: "not-owner" };
+    }
+
+    const candidate = await loadCandidateById(deps.pool, cb.capabilityId);
+    if (!candidate) {
+      await safeAnswer(deps, cb, dict.cardNotFound, signal);
+      return { outcome: "rejected", reason: "not-found", capabilityId: cb.capabilityId };
+    }
+
+    if (candidate.updatedAt.toISOString() !== cb.updatedAt) {
+      await safeAnswer(deps, cb, dict.conflict, signal);
+      await runSideEffect(deps, cb, "render-stale-conflict-failed", () => editToCurrentState(deps, cb, candidate, signal));
+      return { outcome: "conflict", capabilityId: cb.capabilityId };
+    }
+
+    switch (cb.action) {
+      case "keep":
+      case "discard":
+        return await handleDecide(deps, cb, signal);
+      case "rerun":
+        return await handleRerun(deps, cb, candidate, signal);
+      default: {
+        // Unreachable given DecisionAction's type, but decodeDecision's output isn't
+        // re-validated here — kept as a defensive, total branch.
+        await safeAnswer(deps, cb, "未知操作", signal);
+        return { outcome: "rejected", reason: "unknown-action", capabilityId: cb.capabilityId };
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    deps.log?.({ decide: "handle-callback-failed", capabilityId: cb.capabilityId, error: message });
+    await safeAnswer(deps, cb, undefined, signal);
+    return { outcome: "failed", reason: message, capabilityId: cb.capabilityId };
+  }
+}
+
+/** `answerCallbackQuery` best-effort: a failure here must not throw out of `handleCallback`. */
+async function safeAnswer(deps: HandleCallbackDeps, cb: CallbackDecoded, text: string | undefined, signal?: AbortSignal): Promise<void> {
+  try {
+    await deps.api.answerCallbackQuery({ callbackQueryId: cb.callbackId, ...(text !== undefined ? { text } : {}), signal });
+  } catch (error) {
+    deps.log?.({ decide: "answer-callback-failed", capabilityId: cb.capabilityId, error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+async function handleDecide(deps: HandleCallbackDeps, cb: CallbackDecoded, signal?: AbortSignal): Promise<CallbackOutcome> {
+  const verdict = cb.action as "keep" | "discard";
+  const result = await decide(deps.pool, { id: cb.capabilityId, expectedUpdatedAt: cb.updatedAt, verdict }, "zh");
+
+  if (result.ok) {
+    await safeAnswer(deps, cb, TOAST[verdict], signal);
+    await runSideEffect(deps, cb, "render-decided-failed", async () => {
+      const fresh = await loadCandidateById(deps.pool, cb.capabilityId);
+      if (fresh) await editToCurrentState(deps, cb, fresh, signal);
+    });
+    return { outcome: "decided", action: verdict, capabilityId: cb.capabilityId };
+  }
+
+  await safeAnswer(deps, cb, result.message, signal);
+  if (result.reason === "CONFLICT") {
+    await runSideEffect(deps, cb, "render-conflict-failed", async () => {
+      const current = await loadCandidateById(deps.pool, cb.capabilityId);
+      if (current) await editToCurrentState(deps, cb, current, signal);
+    });
+    return { outcome: "conflict", capabilityId: cb.capabilityId };
+  }
+  if (result.reason === "NOT_FOUND") {
+    return { outcome: "rejected", reason: "not-found", capabilityId: cb.capabilityId };
+  }
+  return { outcome: "rejected", reason: "invalid", capabilityId: cb.capabilityId };
+}
+
+async function handleRerun(deps: HandleCallbackDeps, cb: CallbackDecoded, candidate: Candidate, signal?: AbortSignal): Promise<CallbackOutcome> {
+  const result = await requestRerun(deps.pool, { captureId: candidate.captureId, pipeline: deps.pipeline }, "zh");
+
+  if (result.ok) {
+    await safeAnswer(deps, cb, TOAST.rerun, signal);
+    await runSideEffect(deps, cb, "requeue-edit-failed", () =>
+      deps.api.editMessageText({ chatId: cb.chatId, messageId: cb.messageId, text: REQUEUE_TEXT, signal }).then(() => undefined)
+    );
+    await runSideEffect(deps, cb, "clear-notified-at-failed", () => clearNotifiedAt(deps.pool, cb.capabilityId));
+    return { outcome: "decided", action: "rerun", capabilityId: cb.capabilityId };
+  }
+
+  await safeAnswer(deps, cb, result.message, signal);
+  if (result.reason === "OBJECT_GONE") return { outcome: "rejected", reason: "object-gone", capabilityId: cb.capabilityId };
+  if (result.reason === "CONFLICT") return { outcome: "rejected", reason: "already-queued", capabilityId: cb.capabilityId };
+  if (result.reason === "NOT_FOUND") return { outcome: "rejected", reason: "not-found", capabilityId: cb.capabilityId };
+  return { outcome: "rejected", reason: "invalid", capabilityId: cb.capabilityId };
+}
