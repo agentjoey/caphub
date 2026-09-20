@@ -189,27 +189,33 @@ describe("runDeepAnalysis", () => {
     await expect(runDeepAnalysis(d, lease, new AbortController().signal, { runTimeoutMs: 5 })).rejects.toMatchObject({ code: "TIMEOUT" });
   });
 
-  it("retries the final synthesize pass (and then succeeds) when a case cites a source index outside the sources array, still fitting the budget on a worst-case 5-query plan", async () => {
+  // Review fix round 2 (production incident: two full runs lost 7 successful calls each to a
+  // last-step validation failure): an out-of-range source index on a `cases` or `feedback`
+  // item is coerced to `null` by deepAnalysisSchema instead of failing validation, so a single
+  // synthesize attempt now succeeds without a retry.
+  it("succeeds on the first synthesize attempt, coercing an out-of-range case citation to null, and fits the budget on a worst-case 5-query plan", async () => {
     const badAnalysis = { ...analysisValue, cases: [{ title: "c1", detail: "d1", source: 5 }] };
-    const { d, calls } = deps({ analysisValues: [badAnalysis, analysisValue] });
+    const { d, calls, updates } = deps({ analysisValues: [badAnalysis] });
     const out = await runDeepAnalysis(d, lease, new AbortController().signal);
     expect(out).toEqual({ capabilityId: "cab_1" });
-    expect(calls.filter((c) => c === "synthesize-final")).toHaveLength(2);
-    // 1 plan + 5 search + 1 facts + 2 synthesize attempts = 9 calls, within the 10-call budget.
+    expect(calls.filter((c) => c === "synthesize-final")).toHaveLength(1);
+    expect(JSON.parse(updates[0].values[1] as string).cases[0].source).toBeNull();
+    // 1 plan + 5 search + 1 facts + 1 synthesize attempt = 8 calls, within the 10-call budget.
     const budgetedCalls = calls.filter((c) => c === "plan" || c === "facts" || c === "synthesize-final" || c.startsWith("search:")).length;
-    expect(budgetedCalls).toBe(9);
+    expect(budgetedCalls).toBe(8);
     expect(budgetedCalls).toBeLessThanOrEqual(DEEP_BUDGET_LIMITS.maxCalls);
   });
 
-  // Controller ruling (fix round 1): 口碑与争议 is grounded exactly like 案例 — an out-of-range
-  // feedback citation is invalid output and takes the same retry path, while `source: null`
-  // ("a general impression") is valid and must not be retried.
-  it("retries the final synthesize pass when a feedback point cites a source index outside the sources array", async () => {
+  // Controller ruling (fix round 1, revised in fix round 2): 口碑与争议 is grounded exactly like
+  // 案例 — an out-of-range feedback citation is coerced to `source: null` ("a general
+  // impression") rather than retried, the same as a genuinely uncited point.
+  it("succeeds on the first synthesize attempt, coercing an out-of-range feedback citation to null", async () => {
     const badAnalysis = { ...analysisValue, feedback: { positive: [{ text: "pos1", source: 5 }], negative: [] } };
-    const { d, calls } = deps({ analysisValues: [badAnalysis, analysisValue] });
+    const { d, calls, updates } = deps({ analysisValues: [badAnalysis] });
     const out = await runDeepAnalysis(d, lease, new AbortController().signal);
     expect(out).toEqual({ capabilityId: "cab_1" });
-    expect(calls.filter((c) => c === "synthesize-final")).toHaveLength(2);
+    expect(calls.filter((c) => c === "synthesize-final")).toHaveLength(1);
+    expect(JSON.parse(updates[0].values[1] as string).feedback.positive[0]).toEqual({ text: "pos1", source: null });
   });
 
   it("accepts feedback points with no source at all (source: null) without a retry", async () => {
@@ -218,13 +224,6 @@ describe("runDeepAnalysis", () => {
     await runDeepAnalysis(d, lease, new AbortController().signal);
     expect(calls.filter((c) => c === "synthesize-final")).toHaveLength(1);
     expect(JSON.parse(updates[0].values[1] as string).feedback.positive[0]).toEqual({ text: "pos1", source: null });
-  });
-
-  it("fails the run (invalid output, retried twice) when every synthesize attempt keeps citing an out-of-range source", async () => {
-    const badAnalysis = { ...analysisValue, cases: [{ title: "c1", detail: "d1", source: 5 }] };
-    const { d, calls } = deps({ analysisValues: [badAnalysis, badAnalysis] });
-    await expect(runDeepAnalysis(d, lease, new AbortController().signal)).rejects.toMatchObject({ code: "INVALID_OUTPUT" });
-    expect(calls.filter((c) => c === "synthesize-final")).toHaveLength(2);
   });
 
   it("includes the capability's summary_points in the subject text sent to every reasoning call, not just the ~120-char summary lead (M3.8: most of a card's substance now lives in summary_points)", async () => {

@@ -253,7 +253,7 @@ export function DeepAnalysisSection({
                 {cases.map((item, i) => (
                   <li key={i}>
                     <b>{item.title}</b>　{item.detail}
-                    {item.source < sources.length && (
+                    {item.source !== null && item.source < sources.length && (
                       <SourceRef index={item.source} label={format(dict.sourceRefAria, { n: item.source + 1 })} onOpenSources={openSources} />
                     )}
                   </li>

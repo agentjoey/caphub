@@ -353,17 +353,48 @@ describe("deepAnalysisSchema grounding", () => {
     expect(parsed.feedback.negative[0].source).toBeNull();
   });
 
-  it("rejects a feedback point citing a source index outside the sources array, naming the offending path", () => {
-    const result = deepAnalysisSchema.safeParse({
+  it("coerces a feedback point's out-of-range source index to null instead of failing", () => {
+    const result = deepAnalysisSchema.parse({
       ...base,
       feedback: { positive: [], negative: [{ text: "文档薄", source: 3 }] }
     });
-    expect(result.success).toBe(false);
-    expect(result.error!.issues[0].path).toEqual(["feedback", "negative", 0, "source"]);
+    expect(result.feedback.negative[0]).toEqual({ text: "文档薄", source: null });
   });
 
-  it("still rejects an out-of-range case citation, and a bare-string feedback point", () => {
-    expect(deepAnalysisSchema.safeParse({ ...base, cases: [{ title: "c", detail: "d", source: 9 }] }).success).toBe(false);
+  it("coerces an out-of-range case citation to null, and still rejects a bare-string feedback point", () => {
+    const result = deepAnalysisSchema.parse({ ...base, cases: [{ title: "c", detail: "d", source: 9 }] });
+    expect(result.cases[0].source).toBeNull();
     expect(deepAnalysisSchema.safeParse({ ...base, feedback: { positive: ["上手快"], negative: [] } }).success).toBe(false);
+  });
+
+  it("rejects a negative or non-integer source index rather than coercing it", () => {
+    expect(deepAnalysisSchema.safeParse({ ...base, cases: [{ title: "c", detail: "d", source: -1 }] }).success).toBe(false);
+    expect(deepAnalysisSchema.safeParse({ ...base, cases: [{ title: "c", detail: "d", source: 1.5 }] }).success).toBe(false);
+    expect(deepAnalysisSchema.safeParse({
+      ...base,
+      feedback: { positive: [{ text: "上手快", source: -1 }], negative: [] }
+    }).success).toBe(false);
+  });
+
+  it("accepts a card whose every field sits well over the prompt's shaping targets but within the schema's caps", () => {
+    const over = (n: number) => "字".repeat(n);
+    const result = deepAnalysisSchema.safeParse({
+      headline: over(52), // prompt target 40, ~1.3x
+      architecture: { summary: over(104), points: [over(52), over(52), over(52)] }, // targets 80 / 40
+      implementation: { summary: over(104), points: [over(52), over(52), over(52)] },
+      use_cases: [
+        { title: over(26), detail: over(78) }, // targets 20 / 60
+        { title: over(26), detail: over(78) },
+        { title: over(26), detail: over(78) }
+      ],
+      cases: [{ title: over(39), detail: over(78), source: 0 }], // targets 30 / 60
+      feedback: {
+        positive: [{ text: over(52), source: 0 }], // target 40
+        negative: []
+      },
+      risks: [over(65), over(65)], // target 50
+      sources: [{ title: "Docs", url: "https://a.example/1" }]
+    });
+    expect(result.success).toBe(true);
   });
 });

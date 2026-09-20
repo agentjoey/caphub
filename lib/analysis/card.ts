@@ -300,44 +300,57 @@ const deepBullet = (max: number) => z.string().min(1).max(max);
  * needs to be able to check, so it is grounded the same way `cases` is).
  */
 export const deepFeedbackPointSchema = z.object({
-  text: deepBullet(40),
+  text: deepBullet(60),
   source: z.number().int().min(0).nullable()
 });
 export type DeepFeedbackPoint = z.infer<typeof deepFeedbackPointSchema>;
 
 /**
  * Second `synthesize` pass' output, stored as `capabilities.deep_analysis`. Grounding rule
- * (owner ruling): every `cases` entry must cite a real retrieved source by index into this
+ * (owner ruling): every `cases` entry should cite a real retrieved source by index into this
  * same output's `sources`; when nothing was found, `cases` must be an empty array rather than
- * invented material -- enforced here (an out-of-range index fails validation) and in the
- * prompt (deep.ts's synthesize prompt spells out the same rule). Every `feedback` point is
- * grounded the same way, except that it may cite `null` (see {@link deepFeedbackPointSchema});
- * a non-null index is range-checked exactly like a case's.
+ * invented material -- enforced in the prompt (deep.ts's synthesize prompt spells out the same
+ * rule). Every `feedback` point is grounded the same way, except that it may cite `null` (see
+ * {@link deepFeedbackPointSchema}).
+ *
+ * Review fix round 2 (production incident: two full deep-analysis runs -- 1 plan + 5 search + 1
+ * facts synthesize, all successful -- lost at the final synthesize step to `INVALID_OUTPUT`/
+ * `INVALID_JSON` with only two `runStructured` attempts): a `source` index that is merely
+ * out of range for `sources` is no longer a validation failure -- it's coerced to `null`
+ * ("no specific source") by the `.transform` below, so one bad citation doesn't discard seven
+ * successful calls. A `source` that isn't a non-negative integer still fails validation (the
+ * per-field `z.number().int().min(0)` above), since that's a shape error, not a range slip.
+ *
+ * The character caps below (headline/summary/points/use_cases/cases/feedback/risks) are
+ * deliberately looser than what the prompt asks the model to aim for (deep.ts's plan/synthesize
+ * prompts) -- same review-fix rationale as `summaryPointSchema` above: models count CJK
+ * characters unreliably, and the schema only needs to reject genuine paragraph-dumping, not a
+ * model that slightly overshot the prompt's shaping target. Array-length bounds (3-5 points,
+ * 3-5 use_cases, 0-4 cases, 0-3 feedback items each, 2-4 risks) stay strict -- those counts are
+ * what keep the card scannable, not the source of the length-cap failures being fixed here.
  */
 export const deepAnalysisSchema = z.object({
-  headline: deepBullet(40),
-  architecture: z.object({ summary: deepBullet(80), points: z.array(deepBullet(40)).min(3).max(5) }),
-  implementation: z.object({ summary: deepBullet(80), points: z.array(deepBullet(40)).min(3).max(5) }),
-  use_cases: z.array(z.object({ title: deepBullet(20), detail: deepBullet(60) })).min(3).max(5),
-  cases: z.array(z.object({ title: deepBullet(30), detail: deepBullet(60), source: z.number().int().min(0) })).max(4),
+  headline: deepBullet(60),
+  architecture: z.object({ summary: deepBullet(120), points: z.array(deepBullet(60)).min(3).max(5) }),
+  implementation: z.object({ summary: deepBullet(120), points: z.array(deepBullet(60)).min(3).max(5) }),
+  use_cases: z.array(z.object({ title: deepBullet(30), detail: deepBullet(90) })).min(3).max(5),
+  cases: z.array(z.object({ title: deepBullet(45), detail: deepBullet(90), source: z.number().int().min(0).nullable() })).max(4),
   feedback: z.object({
     positive: z.array(deepFeedbackPointSchema).max(3),
     negative: z.array(deepFeedbackPointSchema).max(3)
   }),
-  risks: z.array(deepBullet(50)).min(2).max(4),
+  risks: z.array(deepBullet(75)).min(2).max(4),
   sources: z.array(deepSourceSchema)
-}).superRefine((value, ctx) => {
-  value.cases.forEach((c, i) => {
-    if (c.source >= value.sources.length) {
-      ctx.addIssue({ code: "custom", path: ["cases", i, "source"], message: `cases[${i}].source (${c.source}) is out of range for sources (length ${value.sources.length})` });
+}).transform((value) => {
+  const clampSource = (source: number | null): number | null =>
+    source !== null && source >= value.sources.length ? null : source;
+  return {
+    ...value,
+    cases: value.cases.map((c) => ({ ...c, source: clampSource(c.source) })),
+    feedback: {
+      positive: value.feedback.positive.map((p) => ({ ...p, source: clampSource(p.source) })),
+      negative: value.feedback.negative.map((p) => ({ ...p, source: clampSource(p.source) }))
     }
-  });
-  for (const tone of ["positive", "negative"] as const) {
-    value.feedback[tone].forEach((point, i) => {
-      if (point.source !== null && point.source >= value.sources.length) {
-        ctx.addIssue({ code: "custom", path: ["feedback", tone, i, "source"], message: `feedback.${tone}[${i}].source (${point.source}) is out of range for sources (length ${value.sources.length})` });
-      }
-    });
-  }
+  };
 });
 export type DeepAnalysis = z.infer<typeof deepAnalysisSchema>;
