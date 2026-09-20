@@ -150,7 +150,7 @@ export async function handleCapture(deps: CaptureDeps, update: CaptureUpdate): P
     if (result.duplicate) {
       const card = await findDuplicateCard(deps.pool, result.captureId);
       const text = card
-        ? `这条之前投过：${escapeHtml(card.title)}\n${escapeHtml(libraryLink(card.id))}`
+        ? `这条之前投过：<a href="${escapeHtml(libraryLink(card.id))}">${escapeHtml(card.title)}</a>`
         : "这条之前投过，分析结果还在生成中";
       await reply(deps, update, text);
       return { kind: "duplicate", captureId: result.captureId, capabilityId: card?.id ?? null, title: card?.title ?? null };

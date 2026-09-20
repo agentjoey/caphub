@@ -149,8 +149,8 @@ describe("handleCapture — duplicates", () => {
     const sent = sentOf(api);
     expect(sent).toHaveLength(1);
     expect(sent[0]!.text).toContain("这条之前投过");
-    expect(sent[0]!.text).toContain("Some capability");
-    expect(sent[0]!.text).toContain(`${publicBaseUrl()}/library/cab_1`);
+    // The title links to the card's library page as an HTML anchor, not a visible raw URL.
+    expect(sent[0]!.text).toBe(`这条之前投过：<a href="${publicBaseUrl()}/library/cab_1">Some capability</a>`);
     expect(sent[0]!.text).not.toContain("cap_existing");
     expect(queries.some((q) => q.text.startsWith("UPDATE caphub_v2.captures SET telegram_chat_id"))).toBe(false);
   });

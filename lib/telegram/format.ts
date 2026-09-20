@@ -10,11 +10,13 @@ import type { DecisionAction } from "./router";
 export const PENDING_SUMMARY_MAX_LEN = 300;
 
 /**
- * Telegram's hard limit on a message's text length. `formatResult` truncates its final rendered
- * text to this defensively — `PENDING_SUMMARY_MAX_LEN` already bounds the summary, but an
- * unbounded title, tags list, or scenarios set could otherwise still push the total past
- * Telegram's limit and make the card unsendable (a 400 that would then, without this cap, retire
- * the card via notify.ts's permanent-error handling instead of ever being seen).
+ * Telegram's hard limit on a message's text length. `PENDING_SUMMARY_MAX_LEN` already bounds the
+ * summary, but an unbounded title, tags list, or scenarios set could otherwise still push a
+ * card's rendered text past this. Every formatter shrinks its own over-budget fields (see
+ * {@link shrinkUntilFits}) *before* escaping/assembly, so the resulting HTML is always
+ * well-formed — cutting the already-assembled HTML by raw codepoint (as an earlier version of
+ * this cap did) can sever a tag or an escaped entity mid-way, which Telegram then rejects
+ * outright with a 400 "can't parse entities" instead of sending a shorter-but-valid message.
  */
 export const TELEGRAM_MESSAGE_MAX_LEN = 4096;
 
@@ -91,6 +93,69 @@ function libraryLinkHtml(id: string, label: string): string {
   return `<a href="${escapeHtml(libraryLink(id))}">${escapeHtml(label)}</a>`;
 }
 
+function withinMessageLimit(text: string): boolean {
+  return Array.from(text).length <= TELEGRAM_MESSAGE_MAX_LEN;
+}
+
+/** Card-derived plain-text (pre-escape) fields a formatter may need to shrink to fit {@link TELEGRAM_MESSAGE_MAX_LEN}. `body` is whichever free-text field the formatter has (the pending card's summary, or the discard card's suggested reason) — shrunk first, ahead of tags/scenarios/title. */
+interface ShrinkableFields {
+  title: string;
+  tags: string[];
+  scenarioLabels: string[];
+  body?: string;
+}
+
+/** Truncates a plain-text field in decreasing steps, stopping as soon as `build` fits — tried before falling back to the next, lower-priority field. */
+function shrinkString(build: (value: string) => boolean, value: string): string {
+  for (const len of [200, 100, 50, 20, 0]) {
+    if (Array.from(value).length <= len) continue;
+    const shrunk = truncate(value, len);
+    if (build(shrunk)) return shrunk;
+    value = shrunk;
+  }
+  return value;
+}
+
+/** Drops list items from the end (largest-to-smallest halving) until `build` fits, or the list is empty. */
+function shrinkList<T>(build: (value: T[]) => boolean, value: T[]): T[] {
+  let count = value.length;
+  while (count > 0) {
+    count = Math.floor(count / 2);
+    if (build(value.slice(0, count))) return value.slice(0, count);
+  }
+  return [];
+}
+
+/**
+ * Progressively shrinks a card's over-budget plain-text fields — in priority order `body`
+ * (summary/reason), then `tags`, then `scenarioLabels`, then `title` — until `build`'s fully
+ * assembled+escaped HTML fits {@link TELEGRAM_MESSAGE_MAX_LEN}. Every shrink happens on the raw,
+ * pre-escape value, so the reassembled markup is always well-formed: a cut can never land inside
+ * a tag or an escaped HTML entity, unlike truncating the finished HTML string.
+ */
+function shrinkUntilFits(build: (f: ShrinkableFields) => string, initial: ShrinkableFields): string {
+  const f: ShrinkableFields = { ...initial, tags: [...initial.tags], scenarioLabels: [...initial.scenarioLabels] };
+  let text = build(f);
+  if (withinMessageLimit(text)) return text;
+
+  if (f.body !== undefined) {
+    f.body = shrinkString((v) => withinMessageLimit(build({ ...f, body: v })), f.body);
+    text = build(f);
+    if (withinMessageLimit(text)) return text;
+  }
+
+  f.tags = shrinkList((v) => withinMessageLimit(build({ ...f, tags: v })), f.tags);
+  text = build(f);
+  if (withinMessageLimit(text)) return text;
+
+  f.scenarioLabels = shrinkList((v) => withinMessageLimit(build({ ...f, scenarioLabels: v })), f.scenarioLabels);
+  text = build(f);
+  if (withinMessageLimit(text)) return text;
+
+  f.title = shrinkString((v) => withinMessageLimit(build({ ...f, title: v })), f.title);
+  return build(f);
+}
+
 function metaLine(card: DecidedCardInput): string {
   return `类型：${escapeHtml(typeLabel(card.type, "zh"))} · 用法：${escapeHtml(usageLabel(card.usage, "zh"))}`;
 }
@@ -106,25 +171,24 @@ function tagsLine(tags: string[]): string {
 function formatKeep(card: DecidedCardInput): FormattedMessage {
   const serial = formatSerial(card.type, card.serial);
   const header = serial ? `✅ 已保留 · ${escapeHtml(serial)}` : "✅ 已保留";
-  const lines = [
-    header,
-    `<b>${escapeHtml(card.title)}</b>`,
-    metaLine(card),
-    scenariosLine(card.scenarioLabels),
-    tagsLine(card.tags),
-    libraryLinkHtml(card.id, "详情")
-  ];
-  return { text: lines.join("\n") };
+  const build = (f: ShrinkableFields) =>
+    [
+      header,
+      `<b>${escapeHtml(f.title)}</b>`,
+      metaLine(card),
+      scenariosLine(f.scenarioLabels),
+      tagsLine(f.tags),
+      libraryLinkHtml(card.id, "详情")
+    ].join("\n");
+  const text = shrinkUntilFits(build, { title: card.title, tags: card.tags, scenarioLabels: card.scenarioLabels });
+  return { text };
 }
 
 function formatDiscard(card: DecidedCardInput): FormattedMessage {
-  const lines = [
-    "🗑 已丢弃",
-    `<b>${escapeHtml(card.title)}</b>`,
-    escapeHtml(card.suggestedReason),
-    libraryLinkHtml(card.id, "详情")
-  ];
-  return { text: lines.join("\n") };
+  const build = (f: ShrinkableFields) =>
+    ["🗑 已丢弃", `<b>${escapeHtml(f.title)}</b>`, escapeHtml(f.body ?? ""), libraryLinkHtml(card.id, "详情")].join("\n");
+  const text = shrinkUntilFits(build, { title: card.title, tags: [], scenarioLabels: [], body: card.suggestedReason });
+  return { text };
 }
 
 function suggestedVerdictLabel(v: "keep" | "discard"): string {
@@ -133,14 +197,16 @@ function suggestedVerdictLabel(v: "keep" | "discard"): string {
 
 function formatPending(card: DecidedCardInput): FormattedMessage {
   const summary = truncate(card.summary, PENDING_SUMMARY_MAX_LEN);
-  const lines = [
-    `<b>${escapeHtml(card.title)}</b>`,
-    `建议：${suggestedVerdictLabel(card.suggestedVerdict)} · ${escapeHtml(card.suggestedReason)}`,
-    escapeHtml(summary),
-    metaLine(card),
-    scenariosLine(card.scenarioLabels),
-    tagsLine(card.tags)
-  ];
+  const build = (f: ShrinkableFields) =>
+    [
+      `<b>${escapeHtml(f.title)}</b>`,
+      `建议：${suggestedVerdictLabel(card.suggestedVerdict)} · ${escapeHtml(card.suggestedReason)}`,
+      escapeHtml(f.body ?? ""),
+      metaLine(card),
+      scenariosLine(f.scenarioLabels),
+      tagsLine(f.tags)
+    ].join("\n");
+  const text = shrinkUntilFits(build, { title: card.title, tags: card.tags, scenarioLabels: card.scenarioLabels, body: summary });
   const replyMarkup: InlineKeyboardMarkup = {
     inline_keyboard: [
       [
@@ -153,7 +219,7 @@ function formatPending(card: DecidedCardInput): FormattedMessage {
       ]
     ]
   };
-  return { text: lines.join("\n"), replyMarkup };
+  return { text, replyMarkup };
 }
 
 function formatFailed(card: FailedCardInput): FormattedMessage {
@@ -180,8 +246,19 @@ export function formatResult(card: FormatCardInput): FormattedMessage {
       case "failed": return formatFailed(card);
     }
   })();
-  // Defensive cap (see TELEGRAM_MESSAGE_MAX_LEN) — every formatter above already bounds its own
-  // inputs, but an unbounded tags/scenarios set (or a very long title) must never produce a
-  // message Telegram outright rejects as too long.
-  return { ...rendered, text: truncate(rendered.text, TELEGRAM_MESSAGE_MAX_LEN) };
+  return { ...rendered, text: capMessageSafely(rendered.text) };
+}
+
+/**
+ * Last-resort defensive net after each formatter's own field-level shrinking (see
+ * {@link shrinkUntilFits}) — should never actually trigger in practice. Drops whole trailing
+ * lines (a safe cut point: this module never wraps markup across a line break) instead of
+ * cutting the assembled HTML by raw codepoint, which could sever a tag or an escaped entity and
+ * make Telegram reject the message outright with a 400 "can't parse entities".
+ */
+function capMessageSafely(text: string): string {
+  if (withinMessageLimit(text)) return text;
+  const lines = text.split("\n");
+  while (lines.length > 1 && !withinMessageLimit(lines.join("\n"))) lines.pop();
+  return lines.join("\n");
 }

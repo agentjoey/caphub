@@ -142,4 +142,44 @@ describe("formatResult — defensive message-length cap", () => {
     const out = formatResult(base);
     expect(Array.from(out.text).length).toBeLessThan(TELEGRAM_MESSAGE_MAX_LEN);
   });
+
+  /**
+   * Regression for the bug an earlier version of this cap introduced: truncating the *already
+   * assembled* HTML by raw codepoint could land mid-tag or mid-entity, producing text Telegram
+   * rejects outright with a 400 "can't parse entities" — which notify.ts's permanent-4xx
+   * handling would then have silently retired as delivered. Fields are now shrunk before
+   * escaping/assembly instead, so the result must always stay both within the limit AND
+   * well-formed (the anchor and bold tags fully intact, every `<` matched by a `>`).
+   */
+  it("stays within the limit AND keeps well-formed HTML (anchor intact, tags balanced) with a huge tags/scenarios set and a very long title — keep card", () => {
+    const manyTags = Array.from({ length: 5000 }, (_, i) => `标签${i}`);
+    const manyScenarios = Array.from({ length: 2000 }, (_, i) => `场景${i}`);
+    const hugeTitle = "长".repeat(5000);
+    const out = formatResult({ ...base, title: hugeTitle, tags: manyTags, scenarioLabels: manyScenarios });
+    expect(Array.from(out.text).length).toBeLessThanOrEqual(TELEGRAM_MESSAGE_MAX_LEN);
+    expect(out.text).toContain('<a href="https://caphub.agentjoey.ai/library/cab_deadbeefcafef00d">详情</a>');
+    expect((out.text.match(/</g) ?? []).length).toBe((out.text.match(/>/g) ?? []).length);
+  });
+
+  it("stays within the limit and well-formed for a pending card with a huge summary, tags, scenarios and title", () => {
+    const out = formatResult({
+      ...base,
+      status: "pending",
+      title: "标".repeat(3000),
+      summary: "字".repeat(50000),
+      tags: Array.from({ length: 3000 }, (_, i) => `tag${i}`),
+      scenarioLabels: Array.from({ length: 1000 }, (_, i) => `场景${i}`)
+    });
+    expect(Array.from(out.text).length).toBeLessThanOrEqual(TELEGRAM_MESSAGE_MAX_LEN);
+    expect((out.text.match(/</g) ?? []).length).toBe((out.text.match(/>/g) ?? []).length);
+    // The keep/discard/rerun buttons (fixed, id-based callback_data) are unaffected by shrinking.
+    expect(out.replyMarkup?.inline_keyboard).toHaveLength(2);
+  });
+
+  it("stays within the limit and well-formed for a discard card with a huge reason and title", () => {
+    const out = formatResult({ ...base, status: "discard", title: "题".repeat(4000), suggestedReason: "由".repeat(4000) });
+    expect(Array.from(out.text).length).toBeLessThanOrEqual(TELEGRAM_MESSAGE_MAX_LEN);
+    expect(out.text).toContain('<a href="https://caphub.agentjoey.ai/library/cab_deadbeefcafef00d">详情</a>');
+    expect((out.text.match(/</g) ?? []).length).toBe((out.text.match(/>/g) ?? []).length);
+  });
 });

@@ -178,6 +178,43 @@ describe("runNotifyTick", () => {
     expect(notifyUpdate?.values).toEqual(["cab_1"]);
   });
 
+  it("treats a 400 'can't parse entities' as a formatting bug, not a delivery failure — leaves notified_at NULL so it's retried instead of silently marked delivered", async () => {
+    const { pool, calls } = fakePool([candidateRow({ telegramMessageId: null })]);
+    const logs: Record<string, unknown>[] = [];
+    const api = fakeApi({ sendMessage: async () => { throw new TelegramError(400, "Bad Request: can't parse entities: Unsupported start tag \"a\" at byte offset 12"); } });
+    const result = await runNotifyTick({ pool, api, ownerChatId: 1000, log: (o) => logs.push(o) }, new AbortController().signal);
+    expect(result).toBe("idle");
+    expect(calls.some((c) => c.text.includes("UPDATE caphub_v2.capabilities SET notified_at"))).toBe(false);
+    expect(logs.some((l) => l.notify === "send-failed-parse-error" && l.capability === "cab_1" && l.code === 400)).toBe(true);
+  });
+
+  it("treats a 401 (invalid/revoked bot token) as a tick-level error, not a per-card retirement", async () => {
+    const { pool, calls } = fakePool([candidateRow({ telegramMessageId: null })]);
+    const logs: Record<string, unknown>[] = [];
+    const api = fakeApi({ sendMessage: async () => { throw new TelegramError(401, "Unauthorized"); } });
+    const result = await runNotifyTick({ pool, api, ownerChatId: 1000, log: (o) => logs.push(o) }, new AbortController().signal);
+    expect(result).toBe("error");
+    expect(calls.some((c) => c.text.includes("UPDATE caphub_v2.capabilities SET notified_at"))).toBe(false);
+    expect(logs.some((l) => l.notify === "send-failed-auth" && l.code === 401)).toBe(true);
+  });
+
+  it("treats a 403 that isn't 'blocked by the user' as a tick-level auth error too, not a retirement", async () => {
+    const { pool, calls } = fakePool([candidateRow({ telegramMessageId: null })]);
+    const api = fakeApi({ sendMessage: async () => { throw new TelegramError(403, "Forbidden: bot is not a member of the chat"); } });
+    const result = await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
+    expect(result).toBe("error");
+    expect(calls.some((c) => c.text.includes("UPDATE caphub_v2.capabilities SET notified_at"))).toBe(false);
+  });
+
+  it("still retires (does not treat as a global auth failure) a 403 'blocked by the user' — a per-chat, card-local failure", async () => {
+    const { pool, calls } = fakePool([candidateRow({ telegramMessageId: null })]);
+    const api = fakeApi({ sendMessage: async () => { throw new TelegramError(403, "Forbidden: bot was blocked by the user"); } });
+    const result = await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
+    expect(result).toBe("idle");
+    const notifyUpdate = calls.find((c) => c.text.includes("UPDATE caphub_v2.capabilities SET notified_at"));
+    expect(notifyUpdate?.values).toEqual(["cab_1"]);
+  });
+
   it("keeps processing the rest of the batch when markNotified throws for one candidate, and reports 'error'", async () => {
     const rows = [candidateRow({ id: "cab_bad" }), candidateRow({ id: "cab_good" })];
     let calls = 0;

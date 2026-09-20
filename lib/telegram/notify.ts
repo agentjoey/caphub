@@ -44,7 +44,9 @@ function isTransient(error: unknown): boolean {
 /**
  * True for a non-transient 4xx (e.g. 403 "bot was blocked by the user", 400 "chat not found",
  * or 400 for a message over Telegram's length limit) — a permanent, card-local failure that will
- * never succeed on retry, so the card must be retired rather than re-selected forever.
+ * never succeed on retry, so the card must be retired rather than re-selected forever. Checked
+ * only after {@link isGlobalAuthFailure} and {@link isEntityParseError} have ruled themselves
+ * out — both are also non-transient 4xx codes, but neither is a card-local failure.
  */
 function isPermanentClientError(error: unknown): error is TelegramError {
   return error instanceof TelegramError && error.code >= 400 && error.code < 500 && error.code !== 429;
@@ -53,6 +55,35 @@ function isPermanentClientError(error: unknown): error is TelegramError {
 /** Telegram returns 400 "Bad Request: message is not modified" when an edit is byte-identical to the current message — this is a success (the message already reflects the intended state), not evidence the stored receipt is gone. */
 function isMessageNotModified(error: unknown): boolean {
   return error instanceof TelegramError && error.code === 400 && error.description.toLowerCase().includes("message is not modified");
+}
+
+/**
+ * True for a 400 Telegram rejects as malformed HTML (e.g. "Bad Request: can't parse entities:
+ * Unsupported start tag …") — a formatting bug in *our* rendering, not evidence the chat/message
+ * is gone. This must never be treated as {@link isPermanentClientError} (which would retire the
+ * card as if it had been delivered): the card should stay pending and get a fresh chance once
+ * the formatting bug producing it is fixed, or once `format.ts`'s own shrinking (which should
+ * make this unreachable in practice) avoids it entirely.
+ */
+function isEntityParseError(error: unknown): error is TelegramError {
+  if (!(error instanceof TelegramError) || error.code !== 400) return false;
+  const d = error.description.toLowerCase();
+  return d.includes("parse") || d.includes("entit");
+}
+
+/**
+ * True for an auth failure that isn't scoped to one chat: a 401 (invalid/revoked bot token)
+ * always, or a 403 that isn't the well-known "bot was blocked by the user" per-chat message
+ * (e.g. a generic "Forbidden" surfaced by a bad token or removed integration). Unlike a
+ * card-local permanent failure, this affects every push in the batch — retiring candidates one
+ * by one here would silently hide a global misconfiguration behind a slow trickle of retired
+ * cards instead of surfacing it as the tick-level error it actually is.
+ */
+function isGlobalAuthFailure(error: unknown): error is TelegramError {
+  if (!(error instanceof TelegramError)) return false;
+  if (error.code === 401) return true;
+  if (error.code === 403) return !error.description.toLowerCase().includes("blocked by the user");
+  return false;
 }
 
 /** Postgres error code (e.g. '23505'), when the thrown value carries one — never the error message, which may embed row content. */
@@ -278,6 +309,21 @@ async function deliver(
     if (isTransient(error)) {
       deps.log?.({ notify: "send-failed-transient", capability: target.id });
       return "error";
+    }
+    if (isGlobalAuthFailure(error)) {
+      // A revoked/invalid bot token (or an otherwise non-chat-scoped Forbidden) breaks every
+      // push, not just this one — surfaced loudly as a tick-level error (triggers the caller's
+      // backoff) instead of quietly retiring every candidate in the batch one by one, which
+      // would hide a global misconfiguration behind a trickle of individually "handled" cards.
+      deps.log?.({ notify: "send-failed-auth", capability: target.id, code: error.code, description: error.description });
+      return "error";
+    }
+    if (isEntityParseError(error)) {
+      // A formatting bug in our own rendering (malformed HTML), not evidence the card is
+      // undeliverable — must never be retired (that would silently mark it delivered when it
+      // never was). Left unnotified so it's retried once the bug is fixed.
+      deps.log?.({ notify: "send-failed-parse-error", capability: target.id, code: error.code, description: error.description });
+      return "skipped";
     }
     if (isPermanentClientError(error)) {
       // Non-transient, non-429 4xx (owner blocked the bot, chat not found, message too long,
