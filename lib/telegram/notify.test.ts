@@ -99,6 +99,22 @@ describe("runNotifyTick", () => {
     expect(failed.replyMarkup?.inline_keyboard.length).toBeGreaterThan(0);
   });
 
+  // Regression (M3.5 walkthrough): this push EDITS the card's stored Telegram message, which for
+  // a self-build card may be the `/todo` card the owner is looking at. A failed rerun must not
+  // replace it with the bare 分析失败 card — the 进度 line and the progress buttons have to stay.
+  it("keeps a self-build card (kept, reference, in progress) as a todo card when its latest run failed, with a failure note", async () => {
+    const { pool } = fakePool([
+      candidateRow({ id: "cab_todo", verdict: "keep", usage: "reference", progress: "building", runState: "failed", errorCode: "TIMEOUT" })
+    ]);
+    const api = fakeApi();
+    await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
+    const [edit] = api.edited as Array<{ text: string; replyMarkup?: { inline_keyboard: Array<Array<{ text?: string }>> } }>;
+    expect(edit.text).not.toContain("❌ 分析失败");
+    expect(edit.text).toContain("进度：自研中");
+    expect(edit.text).toContain("上次分析失败：模型响应超时");
+    expect(edit.replyMarkup?.inline_keyboard[0]?.map((b) => b.text)).toEqual(["🔨 开始自研", "✅ 已完成"]);
+  });
+
   it("falls back to sendMessage when there is no stored receipt message id, and records the new id", async () => {
     const { pool, calls } = fakePool([candidateRow({ telegramMessageId: null })]);
     const api = fakeApi();

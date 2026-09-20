@@ -2,7 +2,7 @@ import type { CapabilityType } from "../analysis/card";
 import { loadScenarios } from "../analysis/scenarios";
 import { recordTelegramReceipt } from "../captures/captures";
 import { typeLabel } from "../library/labels";
-import { listPending, listTodoCapabilities, libraryStats, type CapabilityRow } from "../library/queries";
+import { listPending, listTodoCapabilities, libraryStats, type CapabilityRow, type TodoCapabilityRow } from "../library/queries";
 import { escapeHtml, type BotCommand, type TelegramApi } from "./api";
 import { publicBaseUrl } from "./capture";
 import { formatResult, type DecidedCardInput, type TodoCardInput } from "./format";
@@ -89,9 +89,16 @@ function toDecidedCardInput(row: CapabilityRow, scenarioLabel: Map<string, strin
   };
 }
 
-function toTodoCardInput(row: CapabilityRow, scenarioLabel: Map<string, string>): TodoCardInput {
+/**
+ * A `/todo` row always renders as a self-build card — never as the 「分析失败」 card — even when
+ * the capture's latest analysis run failed: `/todo`'s job is to list self-build candidates, and
+ * dropping the 进度 line and the progress buttons would leave the owner nothing to act on. A
+ * failed latest run only adds a muted note (see format.ts's `formatTodo`).
+ */
+function toTodoCardInput(row: TodoCapabilityRow, scenarioLabel: Map<string, string>): TodoCardInput {
   return {
     status: "todo",
+    lastRunError: row.lastRunState === "failed" ? row.lastRunErrorCode : undefined,
     id: row.id,
     title: row.title,
     type: row.type,

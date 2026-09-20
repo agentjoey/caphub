@@ -6,6 +6,7 @@ import { decideAction, editSuggestionAction, rerunAction, reviewAction, softDele
 import type { CapabilityType } from "../../../lib/analysis/card";
 import { getDict, type Locale } from "../../../lib/i18n";
 import { SuggestionEditor } from "../../../components/review/suggestion-editor";
+import { useLockToken } from "../../../components/capability/use-lock-token";
 
 type State = "idle" | "busy" | "stale";
 
@@ -33,7 +34,7 @@ export function DetailActions({
   const dict = getDict(locale).detailActions;
   const router = useRouter();
   const [state, setState] = useState<State>("idle");
-  const [updatedAt, setUpdatedAt] = useState(initialUpdatedAt);
+  const [updatedAt, setUpdatedAt] = useLockToken(initialUpdatedAt);
   const [reviewPending, setReviewPending] = useState(initialReviewPending);
   const [message, setMessage] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);

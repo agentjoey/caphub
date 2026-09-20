@@ -103,14 +103,13 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           />
           <SourceFacts facts={detail.sourceFacts} locale={locale} />
           {detail.usage === "reference" && (
-            // key={detail.updatedAt}: this and DetailActions each seed the optimistic-lock token
-            // into their own useState on mount. They're independent panels that can each bump
-            // capabilities.updated_at (progress save vs. decide/edit/delete), so a router.refresh()
-            // that only changes this prop must remount the component to re-seed fresh state —
-            // otherwise the *other* panel keeps stale-comparing against the token it first mounted
-            // with and spuriously CONFLICTs on its next action.
+            // No `key` here (nor on DetailActions): these are two siblings of the same children
+            // list, so keying both on detail.updatedAt gave them the SAME key and React rendered
+            // the panels twice after a refresh ("Encountered two children with the same key").
+            // Both panels still need a fresh optimistic-lock token after the *other* one saves
+            // and calls router.refresh() — they get it from this updatedAt prop, which each one
+            // re-seeds its internal token state from when it changes (no remount required).
             <ProgressControl
-              key={detail.updatedAt}
               id={detail.id}
               updatedAt={detail.updatedAt}
               progress={detail.progress}
@@ -119,7 +118,6 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             />
           )}
           <DetailActions
-            key={detail.updatedAt}
             id={detail.id}
             captureId={detail.captureId}
             updatedAt={detail.updatedAt}

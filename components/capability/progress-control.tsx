@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { setProgressAction } from "../../app/actions";
 import { getDict, type Locale } from "../../lib/i18n";
 import { PROGRESS_VALUES, progressLabel, type Progress } from "../../lib/library/labels";
+import { useLockToken } from "./use-lock-token";
 
 type State = "idle" | "busy" | "stale";
 
@@ -30,7 +31,7 @@ export function ProgressControl({
   const dict = getDict(locale).progressControl;
   const router = useRouter();
   const [state, setState] = useState<State>("idle");
-  const [updatedAt, setUpdatedAt] = useState(initialUpdatedAt);
+  const [updatedAt, setUpdatedAt] = useLockToken(initialUpdatedAt);
   const [progress, setProgress] = useState<Progress>(initialProgress);
   const [link, setLink] = useState(progressLink ?? "");
   const [message, setMessage] = useState<string | null>(null);

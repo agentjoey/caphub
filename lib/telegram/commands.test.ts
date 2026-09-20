@@ -198,6 +198,39 @@ describe("handleCommand", () => {
     });
   });
 
+  // Regression (M3.5 walkthrough): a kept reference card whose latest analysis run FAILED was
+  // rendered as the bare 「❌ 分析失败」 card with a lone 重跑分析 button, losing its 进度 line and
+  // its progress buttons. /todo lists self-build candidates — a failed run is a footnote on the
+  // card, never a replacement for it.
+  it("/todo still renders a self-build card whose latest run failed, with a muted failure note", async () => {
+    const { pool } = fakePool({
+      todo: [pendingCard({ verdict: "keep", progress: "building", lastRunState: "failed", lastRunErrorCode: "INVALID_OUTPUT" })]
+    });
+    const { api, sent } = fakeApi();
+    const outcome = await handleCommand({ pool, api, config }, { ...base, name: "todo", arg: "" });
+    expect(outcome).toEqual({ kind: "todo", shown: 1, total: 1 });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text).not.toContain("❌ 分析失败");
+    expect(sent[0]!.text).toContain("进度：自研中");
+    expect(sent[0]!.text).toContain("<i>上次分析失败：");
+    expect(sent[0]!.replyMarkup).toMatchObject({
+      inline_keyboard: [
+        [{ text: "🔨 开始自研" }, { text: "✅ 已完成" }],
+        [{ text: "🚫 放弃" }, { text: "🔗 去 web" }]
+      ]
+    });
+  });
+
+  it("/todo adds no failure note when the latest run succeeded", async () => {
+    const { pool } = fakePool({
+      todo: [pendingCard({ verdict: "keep", progress: "building", lastRunState: "done", lastRunErrorCode: null })]
+    });
+    const { api, sent } = fakeApi();
+    await handleCommand({ pool, api, config }, { ...base, name: "todo", arg: "" });
+    expect(sent[0]!.text).toContain("进度：自研中");
+    expect(sent[0]!.text).not.toContain("上次分析失败");
+  });
+
   it("/todo with none due replies with a plain empty-state message", async () => {
     const { pool } = fakePool({ todo: [] });
     const { api, sent } = fakeApi();

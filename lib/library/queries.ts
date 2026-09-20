@@ -45,11 +45,20 @@ function toIso<T extends object>(row: T): T {
   return out as unknown as T;
 }
 
-async function paged(pool: Q, where: string, values: unknown[], page: number, orderBy = "cb.created_at DESC") {
+/**
+ * `extra` bolts additional columns (and the join they come from) onto the shared card select for
+ * one caller — see {@link listTodoCapabilities}, which also needs each row's latest analysis run.
+ */
+async function paged<T extends CapabilityRow>(
+  pool: Q, where: string, values: unknown[], page: number,
+  orderBy = "cb.created_at DESC", extra?: { columns: string; join: string }
+) {
   const p = Math.max(1, Math.floor(page) || 1);
   const n = values.length;
-  const items = (await pool.query<CapabilityRow>(
-    `SELECT ${CARD_COLUMNS} FROM caphub_v2.capabilities cb JOIN caphub_v2.captures c ON c.id = cb.capture_id
+  const items = (await pool.query<T>(
+    `SELECT ${CARD_COLUMNS}${extra ? `, ${extra.columns}` : ""}
+     FROM caphub_v2.capabilities cb JOIN caphub_v2.captures c ON c.id = cb.capture_id
+     ${extra?.join ?? ""}
      WHERE ${where} ORDER BY ${orderBy} LIMIT $${n + 1} OFFSET $${n + 2}`,
     [...values, PAGE_SIZE, (p - 1) * PAGE_SIZE])).rows.map(toIso);
   const total = Number((await pool.query<{ total: string }>(
@@ -64,13 +73,31 @@ export function listPending(pool: Q, opts: { page: number }) {
 /** Self-build progress states shown by the Telegram `/todo` command — kept, reference-only cards not yet finished or abandoned. */
 export const TODO_PROGRESS: Progress[] = ["todo", "planned", "building"];
 
+/**
+ * A `/todo` row: a card plus the state of its capture's latest analysis run. That run may have
+ * failed (a failed *rerun* of an already-decided card leaves the card's own columns holding the
+ * previous, successful run's data), which `/todo` notes on the card — see commands.ts.
+ */
+export interface TodoCapabilityRow extends CapabilityRow {
+  lastRunState: string | null;
+  lastRunErrorCode: string | null;
+}
+
 /** Kept `usage='reference'` cards still awaiting/undergoing self-build — backs the Telegram `/todo` command (commands.ts). */
 export function listTodoCapabilities(pool: Q, opts: { page: number }) {
-  return paged(
+  return paged<TodoCapabilityRow>(
     pool,
     "cb.verdict = 'keep' AND cb.deleted_at IS NULL AND cb.usage = 'reference' AND cb.progress = ANY($1)",
     [TODO_PROGRESS],
-    opts.page
+    opts.page,
+    undefined,
+    {
+      columns: `lr.state AS "lastRunState", lr.error_code AS "lastRunErrorCode"`,
+      join: `LEFT JOIN LATERAL (
+       SELECT state, error_code FROM caphub_v2.analysis_runs
+       WHERE capture_id = cb.capture_id ORDER BY created_at DESC LIMIT 1
+     ) lr ON true`
+    }
   );
 }
 

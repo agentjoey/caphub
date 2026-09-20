@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 vi.mock("next/navigation", () => ({
   notFound: () => { throw new Error("NOT_FOUND"); },
@@ -15,9 +15,11 @@ vi.mock("../../../lib/analysis/scenarios", () => ({
 }));
 vi.mock("../../../lib/runtime", () => ({ getRuntime: () => ({ pool: {} }) }));
 vi.mock("../../../lib/i18n/locale", () => ({ getLocale: async () => "zh" }));
+const setProgressAction = vi.fn();
 vi.mock("../../actions", () => ({
   decideAction: vi.fn(), editSuggestionAction: vi.fn(), rerunAction: vi.fn(),
-  reviewAction: vi.fn(), softDeleteAction: vi.fn(), setProgressAction: vi.fn()
+  reviewAction: vi.fn(), softDeleteAction: vi.fn(),
+  setProgressAction: (...args: unknown[]) => setProgressAction(...args)
 }));
 
 const baseDetail = {
@@ -40,10 +42,35 @@ async function renderDetail(overrides: Record<string, unknown> = {}) {
   return render(await Page({ params: Promise.resolve({ id: "cab_1" }) }));
 }
 
-beforeEach(() => getCapabilityDetail.mockReset());
+beforeEach(() => { getCapabilityDetail.mockReset(); setProgressAction.mockReset(); });
 afterEach(() => { cleanup(); vi.resetModules(); });
 
 describe("library detail page sections", () => {
+  // Regression (M3.5 walkthrough): saving self-build progress left TWO 自研进度 panels on the
+  // page. ProgressControl and DetailActions were both keyed on detail.updatedAt — two siblings
+  // of the same children list sharing one key — so the router.refresh() that follows a save
+  // re-rendered the page with duplicated children.
+  it("still shows exactly one 自研进度 panel after a progress save and the refresh that follows", async () => {
+    const stale = "2026-09-19T00:00:00.000Z";
+    const fresh = "2026-09-19T00:00:05.000Z";
+    setProgressAction.mockResolvedValue({ ok: true, updatedAt: fresh });
+    const { default: Page } = await import("./page");
+
+    getCapabilityDetail.mockResolvedValueOnce({ ...baseDetail, usage: "reference", progress: "todo", updatedAt: stale });
+    const { container, rerender } = render(await Page({ params: Promise.resolve({ id: "cab_1" }) }));
+    expect(container.querySelectorAll(".progress-control")).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "自研中" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存进度" }));
+    await waitFor(() => expect(setProgressAction).toHaveBeenCalledWith("cab_1", stale, "building", ""));
+
+    // router.refresh(): the same page re-renders from the server with the newer token.
+    getCapabilityDetail.mockResolvedValueOnce({ ...baseDetail, usage: "reference", progress: "building", updatedAt: fresh });
+    rerender(await Page({ params: Promise.resolve({ id: "cab_1" }) }));
+    expect(container.querySelectorAll(".progress-control")).toHaveLength(1);
+    expect(screen.getAllByRole("heading", { name: "自研进度" })).toHaveLength(1);
+  });
+
   it("orders the sections 总结 → 场景/用法/评分 → 价值信号 → 怎么用 → 来源事实 → 详情", async () => {
     const { container } = await renderDetail();
     const text = container.textContent ?? "";

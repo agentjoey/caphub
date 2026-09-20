@@ -54,11 +54,12 @@ describe("library detail page", () => {
   });
 
   // Regression for the spurious-CONFLICT bug: ProgressControl and DetailActions each seed the
-  // optimistic-lock token into their own useState on mount, and a router.refresh() after either
-  // one saves re-renders this page with a newer detail.updatedAt but does NOT by itself remount
-  // either child. Without key={detail.updatedAt} on both, the panel that didn't just save keeps
-  // comparing against the token it first mounted with, and its next action always CONFLICTs.
-  it("keys both ProgressControl and DetailActions on detail.updatedAt so a refresh with a newer token remounts them with the fresh value, not a stale one", async () => {
+  // optimistic-lock token into their own useState, and a router.refresh() after either one saves
+  // re-renders this page with a newer detail.updatedAt. Both panels must be handed that fresh
+  // token as a plain prop (each re-seeds from it — see useLockToken), and NEITHER may carry a
+  // `key`: keying both on detail.updatedAt made two siblings share one key, which made React
+  // render both panels twice after a refresh (the duplicated 自研进度 panel the owner saw).
+  it("hands both ProgressControl and DetailActions the fresh detail.updatedAt, with no shared key on either", async () => {
     function findByType(node: unknown, typeName: string): { key: unknown; props: Record<string, unknown> } | null {
       if (node === null || typeof node !== "object") return null;
       const el = node as { type?: unknown; props?: Record<string, unknown>; key?: unknown };
@@ -84,8 +85,11 @@ describe("library detail page", () => {
     const before = await Page({ params: Promise.resolve({ id: "cab_1" }) });
     const progressBefore = findByType(before, "ProgressControl");
     const actionsBefore = findByType(before, "DetailActions");
-    expect(progressBefore?.key).toBe(staleToken);
-    expect(actionsBefore?.key).toBe(staleToken);
+    expect(progressBefore?.props.updatedAt).toBe(staleToken);
+    expect(actionsBefore?.props.updatedAt).toBe(staleToken);
+    // Two siblings of the same children list may not share a key — null (no key) for both.
+    expect(progressBefore?.key).toBeNull();
+    expect(actionsBefore?.key).toBeNull();
 
     // Simulate the progress-save -> router.refresh() cycle: the row's updated_at moved on.
     const freshToken = "2026-09-19T00:00:05.000Z";
@@ -94,18 +98,10 @@ describe("library detail page", () => {
       progress: "building", progressLink: null, updatedAt: freshToken
     });
     const after = await Page({ params: Promise.resolve({ id: "cab_1" }) });
-    const progressAfter = findByType(after, "ProgressControl");
-    const actionsAfter = findByType(after, "DetailActions");
-
-    // The panel that did NOT just save (DetailActions) must be given the NEW token as both its
-    // key (forcing a remount that re-seeds its internal lock-token state) and its updatedAt prop
-    // — never the stale one it was first mounted with.
-    expect(actionsAfter?.key).toBe(freshToken);
-    expect(actionsAfter?.props.updatedAt).toBe(freshToken);
-    expect(actionsAfter?.key).not.toBe(staleToken);
-    // And ProgressControl itself also gets remounted on the fresh token.
-    expect(progressAfter?.key).toBe(freshToken);
-    expect(progressAfter?.props.updatedAt).toBe(freshToken);
+    // The panel that did NOT just save (DetailActions) must be given the NEW token — never the
+    // stale one it was first rendered with — so its next action doesn't spuriously CONFLICT.
+    expect(findByType(after, "DetailActions")?.props.updatedAt).toBe(freshToken);
+    expect(findByType(after, "ProgressControl")?.props.updatedAt).toBe(freshToken);
   });
 
   // Regression: detail.sourceUrl is model-supplied (analysis's source_url) and the zod schema

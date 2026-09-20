@@ -2,6 +2,7 @@ import type { Pool } from "pg";
 import type { CapabilityType } from "../analysis/card";
 import { loadScenarios } from "../analysis/scenarios";
 import type { Progress } from "../library/labels";
+import { TODO_PROGRESS } from "../library/queries";
 import type { InlineKeyboardMarkup, TelegramApi } from "./api";
 import { TelegramError } from "./errors";
 import { formatResult, type DecidedCardInput, type FailedCardInput, type FormatCardInput, type TodoCardInput } from "./format";
@@ -107,6 +108,12 @@ function dbErrorCode(error: unknown): string | undefined {
  */
 export function buildFormatInput(candidate: Candidate, scenarioLabel: Map<string, string>): FormatCardInput {
   if (candidate.runState === "failed") {
+    // ...unless the card is a self-build candidate (the same rows `/todo` lists). Replacing one
+    // of those with the bare 「分析失败」 card drops its 进度 line and its progress buttons — and
+    // because this push EDITS the card's stored Telegram message, it would also overwrite a
+    // `/todo` card the owner is looking at. Such a card keeps its self-build rendering and only
+    // gains a muted note about the failed run.
+    if (isSelfBuildCard(candidate)) return buildTodoFormatInput(candidate, scenarioLabel);
     const input: FailedCardInput = { status: "failed", id: candidate.id, updatedAt: candidate.updatedAt.toISOString(), errorCode: candidate.errorCode };
     return input;
   }
@@ -139,6 +146,7 @@ export function buildFormatInput(candidate: Candidate, scenarioLabel: Map<string
 export function buildTodoFormatInput(candidate: Candidate, scenarioLabel: Map<string, string>): TodoCardInput {
   return {
     status: "todo",
+    lastRunError: candidate.runState === "failed" ? candidate.errorCode : undefined,
     id: candidate.id,
     title: candidate.title,
     type: candidate.type,
@@ -151,6 +159,11 @@ export function buildTodoFormatInput(candidate: Candidate, scenarioLabel: Map<st
     progress: candidate.progress,
     updatedAt: candidate.updatedAt.toISOString()
   };
+}
+
+/** True for a card `/todo` would list: kept, `usage='reference'`, and still awaiting/undergoing self-build. */
+function isSelfBuildCard(candidate: Candidate): boolean {
+  return candidate.verdict === "keep" && candidate.usage === "reference" && TODO_PROGRESS.includes(candidate.progress);
 }
 
 /**

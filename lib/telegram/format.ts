@@ -70,6 +70,14 @@ export interface TodoCardInput {
   score?: number | null;
   scoreReason?: string | null;
   progress: Progress;
+  /**
+   * Set (to the run's error code, or null when it has none) only when the capture's latest
+   * analysis run FAILED — a failed rerun of an already-decided card; left `undefined` otherwise.
+   * A self-build card is still a self-build card when its last rerun failed, so it keeps its
+   * progress buttons and just carries a muted note — it is never replaced by the
+   * {@link FailedCardInput} rendering.
+   */
+  lastRunError?: string | null;
   /** The capability's `updated_at`, ISO — used to encode the optimistic-lock token in button callback_data. */
   updatedAt: string;
 }
@@ -297,6 +305,12 @@ function formatTodo(card: TodoCardInput): FormattedMessage {
     ];
     const score = scoreLine(card.score, card.scoreReason);
     if (score) paragraphs.push(score);
+    // A failed latest run is a footnote on a self-build card, not a different card: the buttons
+    // below stay, so the owner can still move the card's progress along.
+    if (card.lastRunError !== undefined) {
+      const reason = errorLabel(card.lastRunError, "zh");
+      paragraphs.push(`<i>上次分析失败${reason ? `：${escapeHtml(reason)}` : ""}</i>`);
+    }
     return paragraphs.join("\n\n");
   };
   const text = shrinkUntilFits(build, { title: card.title, tags: card.tags, scenarioLabels: card.scenarioLabels, body: card.summary });
