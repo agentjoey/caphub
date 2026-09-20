@@ -34,7 +34,8 @@ const baseDetail = {
   score: 4, scoreReason: "成熟且好装", sourceFacts: { repo_url: "https://github.com/a/b", stars: 12, as_of: "2026-09-20" },
   progress: "todo", progressLink: null, progressAt: null,
   steps: [], sources: [], runPipeline: "mixed", runState: "done", runId: "run_1",
-  deepAnalysis: null, deepAnalysisOf: null, deepRunState: null, deepRunErrorCode: null
+  deepAnalysis: null, deepAnalysisOf: null, deepRunState: null, deepRunErrorCode: null,
+  openQuestions: [], enrichedAt: null
 };
 
 const DEEP = {
@@ -158,6 +159,58 @@ describe("library detail page sections", () => {
     const withDeep = await renderDetail({ deepAnalysis: DEEP, deepAnalysisOf: "2026-09-19T00:00:00.000Z" });
     expect(withDeep.container.querySelector(".page-title .badge--deep")!.textContent).toBe("🔬 已深挖");
     expect(withDeep.container.querySelector(".deep-strip__headline")!.textContent).toBe("自托管的浏览器自动化框架");
+  });
+
+  it("collapses the capture preview behind a closed-by-default 原始投递 <details>", async () => {
+    const { container } = await renderDetail();
+    const details = container.querySelector("details.capture-collapse") as HTMLDetailsElement;
+    expect(details).toBeTruthy();
+    expect(details.open).toBe(false);
+    expect(details.querySelector("summary")?.textContent).toBe("原始投递");
+  });
+
+  it("omits the 待核实 section when open_questions is empty", async () => {
+    const { container } = await renderDetail({ openQuestions: [] });
+    expect(container.textContent).not.toContain("待核实");
+  });
+
+  it("shows a 待核实 list, positioned after 价值信号 and before 怎么用, when open_questions is non-empty", async () => {
+    const { container } = await renderDetail({ openQuestions: ["是否需要登录才能用", "免费额度上限是多少"] });
+    const text = container.textContent ?? "";
+    const at = (needle: string) => {
+      const i = text.indexOf(needle);
+      expect(i, `missing: ${needle}`).toBeGreaterThan(-1);
+      return i;
+    };
+    expect(at("价值信号")).toBeLessThan(at("待核实"));
+    expect(at("待核实")).toBeLessThan(at("怎么用"));
+    expect(screen.getByText("是否需要登录才能用")).toBeTruthy();
+    expect(screen.getByText("免费额度上限是多少")).toBeTruthy();
+  });
+
+  it("shows a lighter 已补充调研 marker next to the title only when enrichedAt is set", async () => {
+    const without = await renderDetail({ enrichedAt: null });
+    expect(without.container.querySelector(".page-title .badge--enriched")).toBeNull();
+    cleanup();
+    vi.resetModules();
+
+    const withEnriched = await renderDetail({ enrichedAt: "2026-09-20T01:00:00.000Z" });
+    const badge = withEnriched.container.querySelector(".page-title .badge--enriched");
+    expect(badge).toBeTruthy();
+    expect(badge!.textContent).toContain("已补充调研");
+  });
+
+  it("keeps 深度分析 promoted to the top when both a deep analysis and enrichment marker are present", async () => {
+    const { container } = await renderDetail({
+      deepAnalysis: DEEP, deepAnalysisOf: "2026-09-19T00:00:00.000Z", enrichedAt: "2026-09-20T01:00:00.000Z"
+    });
+    const text = container.textContent ?? "";
+    const at = (needle: string) => {
+      const i = text.indexOf(needle);
+      expect(i, `missing: ${needle}`).toBeGreaterThan(-1);
+      return i;
+    };
+    expect(at("深度分析")).toBeLessThan(at("一句话总结"));
   });
 
   it("shows the progress control only for reference cards", async () => {

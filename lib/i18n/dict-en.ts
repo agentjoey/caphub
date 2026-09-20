@@ -117,6 +117,7 @@ export const dictEn: Dict = {
     createdAt: "Created {date}",
     summary: "Summary",
     signals: "Value signals",
+    openQuestions: "To verify",
     howToUse: "How to use",
     sourceFacts: "Source facts",
     repoUrl: "Repository",
@@ -130,7 +131,9 @@ export const dictEn: Dict = {
     reviewNoteAgree: "Review note: agrees",
     reviewNoteDisagree: "Review note: disagrees",
     syncedAt: "Last synced to Obsidian: {date}",
-    notSynced: "Not synced yet"
+    notSynced: "Not synced yet",
+    enrichedBadge: "Enriched · {date}",
+    enrichedBadgeAria: "Second-pass enrichment completed {date}"
   },
   scoreBadge: {
     label: "★ {score}/5",
@@ -239,6 +242,7 @@ export const dictEn: Dict = {
     runLabel: "Analysis run"
   },
   capturePreview: {
+    originalLabel: "Original submission",
     thumbAlt: "Submitted screenshot (thumbnail)",
     purgeNote: "Original purged on {date}; only the thumbnail remains",
     noImage: "No image",

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { CapturePreview, type CapturePreviewData } from "./capture-preview";
+import { CapturePreview, CollapsedCapturePreview, type CapturePreviewData } from "./capture-preview";
 import { formatDateTime } from "../../lib/library/format";
 
 afterEach(cleanup);
@@ -55,5 +55,25 @@ describe("CapturePreview (full size)", () => {
     render(<CapturePreview capture={{ kind: "image", objectKey: null, thumbKey: null, text: null, url: null }} size="full" />);
     expect(screen.queryByRole("img")).toBeNull();
     expect(screen.getByText("无图")).toBeTruthy();
+  });
+});
+
+describe("CollapsedCapturePreview", () => {
+  it("renders a <details> titled 原始投递, closed by default", () => {
+    const { container } = render(<CollapsedCapturePreview capture={baseImage} />);
+    const details = container.querySelector("details.capture-collapse") as HTMLDetailsElement;
+    expect(details).toBeTruthy();
+    expect(details.open).toBe(false);
+    expect(details.querySelector("summary")?.textContent).toBe("原始投递");
+  });
+
+  it("still renders the purged-original fallback (thumbnail + purge note) inside the collapsed block", () => {
+    render(
+      <CollapsedCapturePreview
+        capture={{ ...baseImage, retentionEligibleAt: "2026-09-20T08:00:00.000Z", retentionPurgedAt: "2026-09-20T08:00:00.000Z" }}
+      />
+    );
+    expect(screen.getByRole("img").getAttribute("src")).toBe(`/api/objects/${baseImage.thumbKey}`);
+    expect(screen.getByText(`原图已于 ${formatDateTime("2026-09-20T08:00:00.000Z")} 清除，仅保留缩略图`)).toBeTruthy();
   });
 });

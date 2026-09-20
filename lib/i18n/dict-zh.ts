@@ -122,6 +122,7 @@ export const dictZh = {
     createdAt: "创建于 {date}",
     summary: "一句话总结",
     signals: "价值信号",
+    openQuestions: "待核实",
     howToUse: "怎么用",
     sourceFacts: "来源事实",
     repoUrl: "仓库地址",
@@ -135,7 +136,9 @@ export const dictZh = {
     reviewNoteAgree: "复核意见：同意",
     reviewNoteDisagree: "复核意见：不同意",
     syncedAt: "最后同步到 Obsidian：{date}",
-    notSynced: "尚未同步"
+    notSynced: "尚未同步",
+    enrichedBadge: "已补充调研 · {date}",
+    enrichedBadgeAria: "第二轮补充调研于 {date} 完成"
   },
   scoreBadge: {
     label: "★ {score}/5",
@@ -244,6 +247,7 @@ export const dictZh = {
     runLabel: "分析运行"
   },
   capturePreview: {
+    originalLabel: "原始投递",
     thumbAlt: "投递的截图（缩略图）",
     purgeNote: "原图已于 {date} 清除，仅保留缩略图",
     noImage: "无图",

@@ -262,15 +262,20 @@ export interface CapabilityDetail extends CapabilityRow {
   /** State/error of this capture's most recent `kind='deep'` run, for the detail page's queued/running/failed states. Null when no deep run was ever queued. */
   deepRunState: string | null;
   deepRunErrorCode: string | null;
+  /** First pass's ≤3 unresolved "couldn't tell, needs checking" items (M3.7) — the detail page's 待核实 list; whatever the enrich pass (if it ran) still couldn't resolve. */
+  openQuestions: string[];
+  /** When the M3.7 enrich pass last rewrote this card, or null if it never has. */
+  enrichedAt: string | null;
 }
 
 export async function getCapabilityDetail(pool: Q, id: string): Promise<CapabilityDetail | null> {
-  const row = (await pool.query<CapabilityRow & { runPipeline: string; runState: string; runId: string; retentionEligibleAt: string | null; retentionPurgedAt: string | null; supersededByType: CapabilityType | null; supersededBySerialNum: number | null; deepAnalysis: DeepAnalysis | null; deepAnalysisOf: string | null; deepRunState: string | null; deepRunErrorCode: string | null }>(
+  const row = (await pool.query<CapabilityRow & { runPipeline: string; runState: string; runId: string; retentionEligibleAt: string | null; retentionPurgedAt: string | null; supersededByType: CapabilityType | null; supersededBySerialNum: number | null; deepAnalysis: DeepAnalysis | null; deepAnalysisOf: string | null; deepRunState: string | null; deepRunErrorCode: string | null; openQuestions: string[]; enrichedAt: string | null }>(
     `SELECT ${CARD_COLUMNS}, r.pipeline AS "runPipeline", r.state AS "runState", r.id AS "runId",
             ret.eligible_at AS "retentionEligibleAt", ret.purged_at AS "retentionPurgedAt",
             sup.type AS "supersededByType", sup.serial AS "supersededBySerialNum",
             cb.deep_analysis AS "deepAnalysis", cb.deep_analysis_of AS "deepAnalysisOf",
-            dr.state AS "deepRunState", dr.error_code AS "deepRunErrorCode"
+            dr.state AS "deepRunState", dr.error_code AS "deepRunErrorCode",
+            cb.open_questions AS "openQuestions", cb.enriched_at AS "enrichedAt"
      FROM caphub_v2.capabilities cb JOIN caphub_v2.captures c ON c.id = cb.capture_id
      JOIN caphub_v2.analysis_runs r ON r.id = cb.run_id
      LEFT JOIN caphub_v2.retention ret ON ret.object_key = c.object_key

@@ -205,6 +205,18 @@ describe("library queries", () => {
     expect(detail?.retentionEligibleAt).toBe("2026-10-01T00:00:00.000Z");
     expect(detail?.retentionPurgedAt).toBe("2026-10-02T00:00:00.000Z");
   });
+  it("getCapabilityDetail selects open_questions and enriched_at (M3.7)", async () => {
+    const { pool, calls } = recorder([
+      [{ id: "cab_1", runId: "run_1", capture: { kind: "text", objectKey: null, thumbKey: null, text: "x", url: null },
+        openQuestions: ["是否需要登录"], enrichedAt: new Date("2026-09-20T01:00:00.000Z") }],
+      []
+    ]);
+    const detail = await getCapabilityDetail(pool, "cab_1");
+    expect(calls[0].text).toMatch(/cb\.open_questions AS "openQuestions"/);
+    expect(calls[0].text).toMatch(/cb\.enriched_at AS "enrichedAt"/);
+    expect(detail?.openQuestions).toEqual(["是否需要登录"]);
+    expect(detail?.enrichedAt).toBe("2026-09-20T01:00:00.000Z");
+  });
   it("getCapabilityDetail resolves supersededBy to a formatted serial via a self-join", async () => {
     const { pool, calls } = recorder([
       [{ id: "cab_1", runId: "run_1", status: "superseded", supersededBy: "cab_2",

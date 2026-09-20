@@ -503,6 +503,20 @@ a.stat--accent:hover { background: #fcebcc; border-color: var(--amber-border); }
 .card-signals li::marker { color: var(--ink-faint); }
 .card-signals li + li { margin-top: 2px; }
 .review-card .tag-list { margin-top: var(--space-3); }
+
+/* 待核实 (M3.7): a short muted list of unresolved questions, lighter than 价值信号's own list. */
+.open-questions { max-width: var(--measure); margin-top: var(--space-2); padding-left: 1.2em; list-style: disc; color: var(--ink-faint); font-size: var(--text-xs); line-height: var(--leading-body); }
+.open-questions li::marker { color: var(--ink-faint); }
+.open-questions li + li { margin-top: 2px; }
+
+/* Collapsed capture preview (M3.7): the screenshot is now a provenance artifact behind a
+   closed-by-default disclosure, not the headline it was pre-enrichment. */
+.capture-collapse { margin-bottom: var(--space-5); }
+.capture-collapse > summary { padding: 6px 0; color: var(--ink-muted); font-size: var(--text-sm); font-weight: 600; cursor: pointer; list-style: none; }
+.capture-collapse > summary::-webkit-details-marker { display: none; }
+.capture-collapse > summary::before { content: "▸"; display: inline-block; width: 14px; color: var(--ink-faint); font-size: var(--text-xs); }
+.capture-collapse[open] > summary::before { content: "▾"; }
+.capture-collapse[open] > summary { margin-bottom: var(--space-3); }
 @media (max-width: 600px) {
   .review-card { grid-template-columns: minmax(0, 1fr); gap: var(--space-3); }
   .review-card .thumb { width: 56px; height: 56px; }
@@ -686,6 +700,9 @@ a.stat--accent:hover { background: #fcebcc; border-color: var(--amber-border); }
    bullets — never a wall of prose. Sections stack full-width under the detail grid. */
 .badge--deep { background: var(--paper-recessed); border: 1px solid var(--hairline-strong); color: var(--ink-muted); white-space: nowrap; }
 .page-title .badge--deep { margin-left: var(--space-3); font-size: var(--text-sm); vertical-align: middle; }
+/* Lighter than badge--deep (M3.7): no fill, faint border/text — a secondary marker, not a headline badge. */
+.badge--enriched { background: transparent; border: 1px solid var(--hairline); color: var(--ink-faint); font-weight: 400; white-space: nowrap; }
+.page-title .badge--enriched { margin-left: var(--space-3); font-size: var(--text-sm); vertical-align: middle; }
 .deep-analysis { margin-top: var(--space-6); }
 .deep-strip { padding-bottom: var(--space-3); border-bottom: 1px solid var(--hairline); }
 .deep-strip__headline { max-width: var(--measure); font-size: var(--text-md); font-weight: 600; line-height: var(--leading-heading); }

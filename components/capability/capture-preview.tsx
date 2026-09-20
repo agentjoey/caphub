@@ -79,6 +79,21 @@ export function CapturePreview({ capture, size = "thumb", locale = "zh" }: { cap
   return <blockquote className="capture-text">{truncated}</blockquote>;
 }
 
+/**
+ * The detail page's right-column capture block (M3.7 task 4): the screenshot is now a
+ * provenance artifact, not the headline, so it sits behind a `<details>` closed by default —
+ * the library list row's own thumbnail (size="thumb") is untouched by this wrapper.
+ */
+export function CollapsedCapturePreview({ capture, locale = "zh" }: { capture: CapturePreviewData; locale?: Locale }) {
+  const dict = getDict(locale).capturePreview;
+  return (
+    <details className="capture-collapse">
+      <summary>{dict.originalLabel}</summary>
+      <CapturePreview capture={capture} size="full" locale={locale} />
+    </details>
+  );
+}
+
 /** Excerpt (≤140 chars) of a text capture, for inline display alongside a card's title. */
 export function captureTextExcerpt(text: string): string {
   return text.length > TEXT_PREVIEW_LIMIT ? `${text.slice(0, TEXT_PREVIEW_LIMIT)}…` : text;

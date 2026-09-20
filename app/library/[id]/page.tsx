@@ -3,8 +3,9 @@ import { notFound, redirect } from "next/navigation";
 import { NO_OVERLAP } from "../../../lib/analysis/card";
 import { loadScenarios } from "../../../lib/analysis/scenarios";
 import { AnalysisDetails } from "../../../components/capability/analysis-details";
-import { CapturePreview } from "../../../components/capability/capture-preview";
+import { CollapsedCapturePreview } from "../../../components/capability/capture-preview";
 import { DeepAnalysisSection } from "../../../components/capability/deep-analysis";
+import { OpenQuestions } from "../../../components/capability/open-questions";
 import { OverlapNotice } from "../../../components/capability/overlap-notice";
 import { PlaybookView } from "../../../components/capability/playbook-view";
 import { ProgressControl } from "../../../components/capability/progress-control";
@@ -63,6 +64,9 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   // narrow screens, which keeps that same reading order on one column. When a deep analysis is
   // present, it is promoted to the top of the main column, ahead of 一句话总结 (walkthrough
   // decision on the two live-analyzed cards); absent, it stays at the foot of the page as today.
+  // M3.7 task 4: 待核实 (open_questions) slots in right after value signals, before 怎么用; the
+  // right column's screenshot is now collapsed behind a closed-by-default <details> since it's a
+  // provenance artifact, not the headline.
   return (
     <div>
       <p className="back-link"><Link href="/library">{dict.detail.back}</Link></p>
@@ -74,6 +78,11 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             <ScoreBadge score={detail.score} reason={detail.scoreReason} locale={locale} />
             {detail.deepAnalysis && (
               <span className="badge badge--deep" title={dict.deepAnalysis.badgeAria}>{dict.deepAnalysis.badge}</span>
+            )}
+            {detail.enrichedAt && (
+              <span className="badge badge--enriched" title={format(dict.detail.enrichedBadgeAria, { date: formatDateTime(detail.enrichedAt, locale) })}>
+                {format(dict.detail.enrichedBadge, { date: formatDateTime(detail.enrichedAt, locale) })}
+              </span>
             )}
             {detail.status === "deprecated" && (
               <span className="badge badge--status-deprecated">{dict.statusBadge.deprecated}</span>
@@ -118,6 +127,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
               </ul>
             </section>
           )}
+          <OpenQuestions questions={detail.openQuestions} locale={locale} />
           <section className="panel">
             <h2 className="panel-title">{dict.detail.howToUse}</h2>
             <PlaybookView playbook={detail.playbook} type={detail.type} locale={locale} />
@@ -136,9 +146,8 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           </section>
         </div>
         <div>
-          <CapturePreview
+          <CollapsedCapturePreview
             capture={{ ...detail.capture, retentionEligibleAt: detail.retentionEligibleAt, retentionPurgedAt: detail.retentionPurgedAt }}
-            size="full"
             locale={locale}
           />
           <SourceFacts facts={detail.sourceFacts} locale={locale} />
