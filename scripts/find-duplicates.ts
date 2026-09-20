@@ -8,8 +8,11 @@
  * among the existing, already-kept cards.
  *
  * Pair selection is pure SQL over already-stored embeddings -- no model call. A self-join over
- * non-deleted, `verdict = 'keep'`, `status = 'active'` cards with an embedding, one row per
- * unordered pair (`a.id < b.id`), keeps only pairs whose cosine similarity
+ * non-deleted, `verdict = 'keep'`, `status = 'active'` cards that already have a serial (a
+ * serial-less card can't be named in `overlap.target`, which only ever holds a serial code that
+ * parseSerialQuery() can resolve -- see label()'s title fallback, which exists for *display* only
+ * and must never leak into a written overlap.target) with an embedding, one row per unordered
+ * pair (`a.id < b.id`), keeps only pairs whose cosine similarity
  * (`1 - (a.embedding <=> b.embedding)`) clears a threshold (default 0.80, `--threshold` overrides),
  * ordered by similarity desc. With 14 cards in the library today that's at most 91 pairs, and the
  * threshold is expected to leave only a handful needing a model call.
@@ -90,6 +93,7 @@ export async function findCandidatePairs(pool: Pick<Pool, "query">, threshold: n
      WHERE a.deleted_at IS NULL AND b.deleted_at IS NULL
        AND a.verdict = 'keep' AND b.verdict = 'keep'
        AND a.status = 'active' AND b.status = 'active'
+       AND a.serial IS NOT NULL AND b.serial IS NOT NULL
        AND a.embedding IS NOT NULL AND b.embedding IS NOT NULL
        AND (1 - (a.embedding <=> b.embedding)) >= $1
      ORDER BY similarity DESC`,

@@ -44,11 +44,16 @@ export function StatusControl({
     if (disabled) return;
     setState("busy");
     setMessage(null);
+    // Restoring to 'active' clears the old deprecated/superseded note rather than re-persisting
+    // it -- an 有效 card carries no lifecycle note, so a subsequent re-deprecation starts blank
+    // instead of silently resurrecting whatever reason was typed the last time it was retired.
+    const nextNote = nextStatus === "active" ? null : (note.trim() ? note.trim() : null);
     try {
-      const result = await setStatusAction(id, updatedAt, nextStatus, supersededBy, note.trim() ? note.trim() : null);
+      const result = await setStatusAction(id, updatedAt, nextStatus, supersededBy, nextNote);
       if (result.ok) {
         setUpdatedAt(result.updatedAt);
         setStatus(nextStatus);
+        if (nextStatus === "active") setNote("");
         setState("idle");
         router.refresh();
         return;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { listLibrary, listPending, listTodoCapabilities, libraryStats, scenarioStats, getCapabilityDetail, PAGE_SIZE, SEMANTIC_MIN, TO_BUILD_PROGRESS, TODO_PROGRESS } from "./queries";
+import { listLibrary, listPending, listTodoCapabilities, libraryStats, scenarioStats, allTags, getCapabilityDetail, PAGE_SIZE, SEMANTIC_MIN, TO_BUILD_PROGRESS, TODO_PROGRESS } from "./queries";
 
 function recorder(rows: unknown[][]) {
   const calls: Array<{ text: string; values: unknown[] }> = [];
@@ -28,6 +28,10 @@ describe("library queries", () => {
     // The card's "last run" is its ANALYSIS run — a failed deep dive must not add a
     // 上次分析失败 note to a /todo card (M3.6 fix round 2).
     expect(calls[0].text).toMatch(/WHERE capture_id = cb\.capture_id AND kind = 'analysis'/);
+    // A deprecated/superseded reference card must not show up in /todo -- the 待自研 tile
+    // (libraryStats' toBuild) is already scoped to status='active', so without this the tile
+    // and the Telegram list would disagree (M3.6 final-review fix).
+    expect(calls[0].text).toMatch(/cb\.status = 'active'/);
   });
   it("listLibrary defaults to keep and applies search/type/tag/usage filters as parameters", async () => {
     const { pool, calls } = recorder([[], [{ total: "0" }]]);
@@ -120,6 +124,19 @@ describe("library queries", () => {
     const { pool, calls } = recorder([[]]);
     await scenarioStats(pool, { discarded: true });
     expect(calls[0].values).toEqual(["discard"]);
+  });
+  it("scenarioStats is scoped to status='active', like the other facet counts", async () => {
+    const { pool, calls } = recorder([[]]);
+    await scenarioStats(pool);
+    expect(calls[0].text).toMatch(/status = 'active'/);
+  });
+  it("allTags counts kept, active cards' tags, most-common first", async () => {
+    const { pool, calls } = recorder([[{ name: "python", count: "3" }, { name: "cli", count: "1" }]]);
+    const tags = await allTags(pool);
+    expect(calls[0].text).toMatch(/verdict = 'keep'/);
+    expect(calls[0].text).toMatch(/status = 'active'/);
+    expect(calls[0].text).toMatch(/unnest\(tags\)/);
+    expect(tags).toEqual([{ name: "python", count: 3 }, { name: "cli", count: 1 }]);
   });
   it("libraryStats counts kept by type, distinct tags of kept, pending, and to-build (reference, todo/planned — building excluded)", async () => {
     const { pool, calls } = recorder([[{ type: "skill", n: "3" }, { type: "prompt", n: "1" }], [{ n: "7" }], [{ n: "2" }], [{ n: "5" }]]);

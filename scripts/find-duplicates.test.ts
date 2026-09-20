@@ -41,6 +41,15 @@ describe("findCandidatePairs", () => {
   it("uses the same threshold value main() would default to", () => {
     expect(DEFAULT_THRESHOLD).toBe(0.8);
   });
+
+  it("requires both cards to already have a serial, so a title can never end up in overlap.target", async () => {
+    // A serial-less card's title, if it ever leaked into overlap.target, could never be resolved
+    // by parseSerialQuery() (it only parses serial codes like "TOL-0009"), which would silently
+    // break the overlap notice's confirm button for that pair (M3.6 final-review fix).
+    const { pool, queries } = fakePairsPool([pairRow()]);
+    await findCandidatePairs(pool as never, 0.85);
+    expect(queries[0]?.text).toMatch(/a\.serial IS NOT NULL AND b\.serial IS NOT NULL/);
+  });
 });
 
 describe("duplicatePairPrompt", () => {

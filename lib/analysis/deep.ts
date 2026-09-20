@@ -51,9 +51,17 @@ interface CapabilityRow {
   source_url: string | null; playbook: Playbook; updated_at: string;
 }
 
+/**
+ * Re-checks `verdict = 'keep' AND deleted_at IS NULL` at claim time, not just eligibility time:
+ * requestDeepAnalysis() only checks this when the run is *queued*, and the card can be discarded
+ * or soft-deleted in the time between queueing and a worker claiming the lease. Without this
+ * re-check here, a run claimed for a since-discarded card would still spend ~8 provider calls
+ * (see DEEP_BUDGET_LIMITS) and write a deep analysis onto a card nobody wants it on -- failing
+ * cheaply via the same CAPABILITY_NOT_FOUND path as a missing row is far cheaper.
+ */
 async function loadCapability(pool: Pick<Pool, "query">, captureId: string): Promise<CapabilityRow | null> {
   const row = (await pool.query<CapabilityRow>(
-    "SELECT id, title, type, summary, tags, source_url, playbook, updated_at FROM caphub_v2.capabilities WHERE capture_id = $1",
+    "SELECT id, title, type, summary, tags, source_url, playbook, updated_at FROM caphub_v2.capabilities WHERE capture_id = $1 AND verdict = 'keep' AND deleted_at IS NULL",
     [captureId]
   )).rows[0];
   return row ?? null;

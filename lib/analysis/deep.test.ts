@@ -153,6 +153,28 @@ describe("runDeepAnalysis", () => {
     await expect(runDeepAnalysis(d, lease, new AbortController().signal)).rejects.toMatchObject({ code: "CAPABILITY_NOT_FOUND" });
   });
 
+  it("re-checks verdict='keep' AND deleted_at IS NULL at claim time, not just at queue time", async () => {
+    // requestDeepAnalysis() only checks this when the run is queued; the card can be discarded or
+    // soft-deleted between queueing and a worker claiming the lease. The query itself must carry
+    // both predicates so a card that became ineligible in that window fails cheaply (one query,
+    // CAPABILITY_NOT_FOUND) instead of the run spending ~8 provider calls and writing a deep
+    // analysis onto a card nobody wants it on (M3.6 final-review fix).
+    let capturedQuery = "";
+    const pool = {
+      query: async (text: string) => {
+        if (text.startsWith("SELECT id, title, type, summary, tags, source_url, playbook, updated_at FROM caphub_v2.capabilities")) {
+          capturedQuery = text;
+          return { rows: [] }; // simulates a discarded/deleted card: the row exists but no longer matches
+        }
+        return { rows: [] };
+      }
+    };
+    const d: DeepAnalysisDeps = { pool: pool as never, reason: { provider: "deepseek", model: "d", invoke: async () => ({ value: {}, usage: { inputTokens: 0, outputTokens: 0 } }) }, search: { provider: "tavily", model: "s", search: async () => ({ value: { sources: [] }, usage: { inputTokens: 0, outputTokens: 0 } }) } };
+    await expect(runDeepAnalysis(d, lease, new AbortController().signal)).rejects.toMatchObject({ code: "CAPABILITY_NOT_FOUND" });
+    expect(capturedQuery).toMatch(/verdict = 'keep'/);
+    expect(capturedQuery).toMatch(/deleted_at IS NULL/);
+  });
+
   it("fails with BUDGET once the deep run's 10-call / 400k-token budget is exceeded, without writing deep_analysis", async () => {
     expect(DEEP_BUDGET_LIMITS).toEqual({ maxCalls: 10, maxTokens: 400_000 });
     const { d, updates } = deps({ reasonUsage: { inputTokens: 300_000, outputTokens: 0 } });

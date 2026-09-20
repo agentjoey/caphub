@@ -113,7 +113,7 @@ export interface TodoCapabilityRow extends CapabilityRow {
 export function listTodoCapabilities(pool: Q, opts: { page: number }) {
   return paged<TodoCapabilityRow>(
     pool,
-    "cb.verdict = 'keep' AND cb.deleted_at IS NULL AND cb.usage = 'reference' AND cb.progress = ANY($1)",
+    "cb.verdict = 'keep' AND cb.deleted_at IS NULL AND cb.status = 'active' AND cb.usage = 'reference' AND cb.progress = ANY($1)",
     [TODO_PROGRESS],
     opts.page,
     undefined,
@@ -232,16 +232,19 @@ export async function libraryStats(pool: Q): Promise<LibraryStats> {
 /** Per-scenario counts among currently-visible cards (kept, or discarded when `discarded` is set), for the library's scenario chip row. */
 export async function scenarioStats(pool: Q, opts: { discarded?: boolean } = {}): Promise<Array<{ slug: string; count: number }>> {
   const verdict = opts.discarded ? "discard" : "keep";
+  // Scoped to status='active' like libraryStats' other facet counts (M3.6 fix round 4) — otherwise
+  // these chips count deprecated/superseded cards that the library list itself hides by default.
   const r = await pool.query<{ slug: string; count: string }>(
     `SELECT s AS slug, count(*)::text AS count FROM caphub_v2.capabilities, unnest(scenarios) AS s
-     WHERE verdict = $1 AND deleted_at IS NULL GROUP BY s`, [verdict]);
+     WHERE verdict = $1 AND deleted_at IS NULL AND status = 'active' GROUP BY s`, [verdict]);
   return r.rows.map((x) => ({ slug: x.slug, count: Number(x.count) }));
 }
 
 export async function allTags(pool: Q): Promise<Array<{ name: string; count: number }>> {
+  // Scoped to status='active' for the same reason as scenarioStats above.
   const r = await pool.query<{ name: string; count: string }>(
     `SELECT t AS name, count(*)::text AS count FROM caphub_v2.capabilities, unnest(tags) AS t
-     WHERE verdict = 'keep' AND deleted_at IS NULL GROUP BY t ORDER BY count(*) DESC, t LIMIT 200`);
+     WHERE verdict = 'keep' AND deleted_at IS NULL AND status = 'active' GROUP BY t ORDER BY count(*) DESC, t LIMIT 200`);
   return r.rows.map((x) => ({ name: x.name, count: Number(x.count) }));
 }
 

@@ -192,6 +192,19 @@ describe("buildSpikeReport", () => {
     }
   });
 
+  it("scopes every query to kind='analysis' so deep-analysis runs (M3.6) never pollute the A/B numbers", async () => {
+    // Deep runs (analysis_runs.kind='deep') reuse the card's own run's pipeline value and record
+    // analysis_steps under the same step-name vocabulary (e.g. 'search') this concluded A/B
+    // tooling groups by -- without this filter a deep run would inflate whichever pipeline's card
+    // it happened to analyze.
+    const { pool, calls } = fakePool(handlers());
+    await buildSpikeReport(pool);
+    expect(calls.length).toBeGreaterThan(0);
+    for (const c of calls) {
+      expect(c.text).toMatch(/r\.kind = 'analysis'/);
+    }
+  });
+
   it("applies no source filter for 'all'", async () => {
     const { pool, calls } = fakePool(handlers());
     const report = await buildSpikeReport(pool, {}, "all");

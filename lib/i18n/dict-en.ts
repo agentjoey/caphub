@@ -182,8 +182,12 @@ export const dictEn: Dict = {
     genericError: "Something went wrong, please retry"
   },
   overlapNotice: {
-    notice: "Possible duplicate of {target} · {reason}",
+    noticeDuplicate: "Possible duplicate of {target}",
+    noticeUpgrade: "This card may be stronger than {target}",
+    noticeSuperseded: "{target} may already supersede this card",
+    noticeComplement: "Similar to {target} but complementary",
     markOtherSuperseded: "Mark {target} as superseded by this card",
+    markSelfSuperseded: "Mark this card as superseded by {target}",
     ignore: "Ignore",
     genericError: "Something went wrong, please retry"
   },
@@ -284,6 +288,7 @@ export const dictEn: Dict = {
     statusSupersededBySelf: "A card cannot be superseded by itself",
     overlapNoTarget: "No overlap finding to act on",
     overlapTargetInvalid: "The overlap finding's card serial is invalid",
+    overlapTargetAlreadyRetired: "The other card is already deprecated or superseded, nothing to do",
     deepNotKept: "Only kept cards can be deep-analyzed",
     deepAlreadyQueued: "Deep analysis already queued or running"
   }

@@ -187,8 +187,12 @@ export const dictZh = {
     genericError: "操作失败，请重试"
   },
   overlapNotice: {
-    notice: "疑似与 {target} 重复 · {reason}",
+    noticeDuplicate: "疑似与 {target} 重复",
+    noticeUpgrade: "本卡可能比 {target} 更强",
+    noticeSuperseded: "{target} 可能已取代本卡",
+    noticeComplement: "与 {target} 相近但互补",
     markOtherSuperseded: "把 {target} 标为被本卡替代",
+    markSelfSuperseded: "把本卡标为被 {target} 替代",
     ignore: "忽略",
     genericError: "操作失败，请重试"
   },
@@ -289,6 +293,7 @@ export const dictZh = {
     statusSupersededBySelf: "不能设置为被自己替代",
     overlapNoTarget: "没有可处理的比对结果",
     overlapTargetInvalid: "比对结果中的卡片编号不合法",
+    overlapTargetAlreadyRetired: "对方卡片已被标记为失效或替代，无需重复处理",
     deepNotKept: "只有已保留的卡片可以深度分析",
     deepAlreadyQueued: "深度分析已在排队或进行中"
   }

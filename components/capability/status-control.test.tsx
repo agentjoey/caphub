@@ -72,4 +72,26 @@ describe("StatusControl", () => {
     render(<StatusControl {...base} locale="en" />);
     expect(screen.getByRole("button", { name: "Mark deprecated" })).toBeTruthy();
   });
+
+  it("restoring to active clears the old deprecated/superseded note instead of re-persisting it", async () => {
+    setStatusAction.mockResolvedValue({ ok: true, updatedAt: "2026-09-19T00:00:05.000Z" });
+    render(<StatusControl {...base} status="deprecated" statusNote="不再维护" />);
+    fireEvent.click(screen.getByRole("button", { name: "恢复有效" }));
+    await waitFor(() => expect(setStatusAction).toHaveBeenCalledOnce());
+    // The old note ("不再维护") must not be sent back along with the restore-to-active write.
+    expect(setStatusAction).toHaveBeenCalledWith("cab_1", T, "active", null, null);
+  });
+
+  it("re-deprecating after a restore starts from a blank note, not the previous retirement's reason", async () => {
+    setStatusAction.mockResolvedValueOnce({ ok: true, updatedAt: "2026-09-19T00:00:05.000Z" });
+    render(<StatusControl {...base} status="deprecated" statusNote="不再维护" />);
+    fireEvent.click(screen.getByRole("button", { name: "恢复有效" }));
+    await waitFor(() => expect(setStatusAction).toHaveBeenCalledOnce());
+    // The note field, cleared locally on a successful restore, must not resurrect "不再维护"
+    // if the card is immediately deprecated again before the page reloads.
+    setStatusAction.mockResolvedValueOnce({ ok: true, updatedAt: "2026-09-19T00:00:10.000Z" });
+    fireEvent.click(screen.getByRole("button", { name: "置为失效" }));
+    await waitFor(() => expect(setStatusAction).toHaveBeenCalledTimes(2));
+    expect(setStatusAction).toHaveBeenLastCalledWith("cab_1", "2026-09-19T00:00:05.000Z", "deprecated", null, null);
+  });
 });

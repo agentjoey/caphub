@@ -134,6 +134,13 @@ function emptyPipelineStat(): PipelineStat {
  * upsert overwrite the first's row there. Reading the reason step's own `output` jsonb
  * (the parsed capability card, recorded by runStructured/recordStep) keeps both
  * pipelines' cards distinct, keyed by (capture, pipeline).
+ *
+ * Every query below is scoped to `r.kind = 'analysis'`: M3.6 added deep-analysis runs
+ * (`analysis_runs.kind = 'deep'`, see lib/analysis/deep.ts), which reuse the card's own run's
+ * `pipeline` value (it carries no meaning for a deep run) and record `search`/`synthesize`
+ * analysis_steps under the same step-name vocabulary this report groups by. Without the `kind`
+ * filter, a deep run would silently inflate this concluded A/B tooling's run counts and token
+ * totals for whichever pipeline its card happened to be analyzed with.
  */
 export async function buildSpikeReport(pool: Pick<Pool, "query">, prices: SpikePrices = {}, source: SpikeSource = "import"): Promise<SpikeReport> {
   const filter = sourceFilter(source, 1);
@@ -145,7 +152,7 @@ export async function buildSpikeReport(pool: Pick<Pool, "query">, prices: SpikeP
             avg(extract(epoch FROM (r.finished_at - r.started_at)) * 1000) FILTER (WHERE r.state = 'done')::text AS avg_ms
      FROM caphub_v2.analysis_runs r
      JOIN caphub_v2.captures c ON c.id = r.capture_id
-     WHERE ${filter.clause}
+     WHERE r.kind = 'analysis' AND ${filter.clause}
      GROUP BY r.pipeline`,
     filter.params)).rows;
 
@@ -156,7 +163,7 @@ export async function buildSpikeReport(pool: Pick<Pool, "query">, prices: SpikeP
      FROM caphub_v2.analysis_steps s
      JOIN caphub_v2.analysis_runs r ON r.id = s.run_id
      JOIN caphub_v2.captures c ON c.id = r.capture_id
-     WHERE ${filter.clause} AND s.ok
+     WHERE r.kind = 'analysis' AND ${filter.clause} AND s.ok
      GROUP BY r.pipeline, s.step`,
     filter.params)).rows;
 
@@ -170,7 +177,7 @@ export async function buildSpikeReport(pool: Pick<Pool, "query">, prices: SpikeP
      FROM caphub_v2.analysis_steps s
      JOIN caphub_v2.analysis_runs r ON r.id = s.run_id
      JOIN caphub_v2.captures c ON c.id = r.capture_id
-     WHERE ${filter.clause} AND (s.input_tokens IS NOT NULL OR s.output_tokens IS NOT NULL)
+     WHERE r.kind = 'analysis' AND ${filter.clause} AND (s.input_tokens IS NOT NULL OR s.output_tokens IS NOT NULL)
      GROUP BY r.pipeline, s.provider, finished, s.ok`,
     filter.params)).rows;
 
@@ -185,7 +192,7 @@ export async function buildSpikeReport(pool: Pick<Pool, "query">, prices: SpikeP
      FROM caphub_v2.analysis_steps s
      JOIN caphub_v2.analysis_runs r ON r.id = s.run_id
      JOIN caphub_v2.captures c ON c.id = r.capture_id
-     WHERE s.step = 'reason' AND s.ok AND ${filter.clause}
+     WHERE r.kind = 'analysis' AND s.step = 'reason' AND s.ok AND ${filter.clause}
      ORDER BY r.capture_id, r.pipeline, s.id DESC`,
     filter.params)).rows;
 

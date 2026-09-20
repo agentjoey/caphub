@@ -341,10 +341,16 @@ export function supersedeOverlapTarget(pool: Pool, input: { id: string }, locale
     if (!overlap || overlap.relation === "none" || !overlap.target) return invalid(dict.overlapNoTarget);
     const serial = parseSerialQuery(overlap.target);
     if (serial === null) return invalid(dict.overlapTargetInvalid);
-    const target = (await db.query<{ id: string }>(
-      "SELECT id FROM caphub_v2.capabilities WHERE serial = $1 AND deleted_at IS NULL FOR UPDATE", [serial])).rows[0];
+    const target = (await db.query<{ id: string; status: CapabilityStatus }>(
+      "SELECT id, status FROM caphub_v2.capabilities WHERE serial = $1 AND deleted_at IS NULL FOR UPDATE", [serial])).rows[0];
     if (!target) return invalid(dict.statusSupersededByNotFound);
     if (target.id === input.id) return invalid(dict.statusSupersededBySelf);
+    // Don't silently overwrite a target that was already retired by someone/something else in
+    // the meantime (e.g. a reviewer resolved the other card's own notice first) -- surface it
+    // as a conflict instead of clobbering whatever status/note/superseded_by it already carries.
+    if (target.status === "deprecated" || target.status === "superseded") {
+      return conflict(dict.overlapTargetAlreadyRetired);
+    }
     const r = await db.query<{ updated_at: Date }>(
       `UPDATE caphub_v2.capabilities SET status = 'superseded', superseded_by = $2, status_at = now(), status_note = $3, updated_at = now()
        WHERE id = $1 RETURNING updated_at`,

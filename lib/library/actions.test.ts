@@ -379,7 +379,7 @@ describe("supersedeOverlapTarget", () => {
   it("marks the other card superseded by this one, and clears this card's own overlap relation in the same transaction", async () => {
     const { pool, calls } = fakePool((t) =>
       t.startsWith("SELECT overlap") ? { rows: [{ overlap: { relation: "duplicate", target: "TOL-0009", reason: "same tool" } }] }
-      : t.startsWith("SELECT id FROM caphub_v2.capabilities WHERE serial") ? { rows: [{ id: "cab_2" }] }
+      : t.startsWith("SELECT id, status FROM caphub_v2.capabilities WHERE serial") ? { rows: [{ id: "cab_2", status: "active" }] }
       : t.startsWith("UPDATE caphub_v2.capabilities SET status = 'superseded'") ? { rows: [{ updated_at: new Date(T) }] }
       : t.startsWith("UPDATE caphub_v2.capabilities SET overlap") ? { rows: [] }
       : { rows: [] });
@@ -399,7 +399,7 @@ describe("supersedeOverlapTarget", () => {
   it("leaves this card's overlap untouched (and does not clear it) when the other card's status write fails", async () => {
     const { pool, calls } = fakePool((t) =>
       t.startsWith("SELECT overlap") ? { rows: [{ overlap: { relation: "duplicate", target: "TOL-0009", reason: "same tool" } }] }
-      : t.startsWith("SELECT id FROM caphub_v2.capabilities WHERE serial") ? { rows: [{ id: "cab_2" }] }
+      : t.startsWith("SELECT id, status FROM caphub_v2.capabilities WHERE serial") ? { rows: [{ id: "cab_2", status: "active" }] }
       : t.startsWith("UPDATE caphub_v2.capabilities SET status = 'superseded'") ? { rows: [] } // simulates the write failing/conflicting
       : t.startsWith("SELECT 1") ? { rows: [{ "?column?": 1 }] } // missingOrConflict's probe finds the target row still there
       : { rows: [] });
@@ -421,9 +421,28 @@ describe("supersedeOverlapTarget", () => {
   it("rejects when the target serial cannot be resolved", async () => {
     const { pool } = fakePool((t) =>
       t.startsWith("SELECT overlap") ? { rows: [{ overlap: { relation: "duplicate", target: "TOL-0009", reason: "x" } }] }
-      : t.startsWith("SELECT id FROM caphub_v2.capabilities WHERE serial") ? { rows: [] }
+      : t.startsWith("SELECT id, status FROM caphub_v2.capabilities WHERE serial") ? { rows: [] }
       : { rows: [] });
     expect(await supersedeOverlapTarget(pool, { id: "cab_1" })).toMatchObject({ ok: false, reason: "INVALID", message: "找不到对应编号的卡片" });
+  });
+
+  it("returns a CONFLICT-style result without writing anything when the target is already deprecated/superseded", async () => {
+    const { pool, calls } = fakePool((t) =>
+      t.startsWith("SELECT overlap") ? { rows: [{ overlap: { relation: "duplicate", target: "TOL-0009", reason: "same tool" } }] }
+      : t.startsWith("SELECT id, status FROM caphub_v2.capabilities WHERE serial") ? { rows: [{ id: "cab_2", status: "deprecated" }] }
+      : { rows: [] });
+    const r = await supersedeOverlapTarget(pool, { id: "cab_1" });
+    expect(r).toMatchObject({ ok: false, reason: "CONFLICT", message: "对方卡片已被标记为失效或替代，无需重复处理" });
+    expect(calls.some((c) => c.text.startsWith("UPDATE caphub_v2.capabilities SET status = 'superseded'"))).toBe(false);
+    expect(calls.some((c) => c.text.startsWith("UPDATE caphub_v2.capabilities SET overlap"))).toBe(false);
+  });
+
+  it("also treats an already-superseded target as a conflict, not a silent overwrite", async () => {
+    const { pool } = fakePool((t) =>
+      t.startsWith("SELECT overlap") ? { rows: [{ overlap: { relation: "duplicate", target: "TOL-0009", reason: "same tool" } }] }
+      : t.startsWith("SELECT id, status FROM caphub_v2.capabilities WHERE serial") ? { rows: [{ id: "cab_2", status: "superseded" }] }
+      : { rows: [] });
+    expect(await supersedeOverlapTarget(pool, { id: "cab_1" })).toMatchObject({ ok: false, reason: "CONFLICT" });
   });
 });
 
