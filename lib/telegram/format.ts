@@ -1,5 +1,5 @@
 import type { CapabilityType } from "../analysis/card";
-import { errorLabel, typeLabel, usageLabel } from "../library/labels";
+import { errorLabel, progressLabel, typeLabel, usageLabel, type Progress } from "../library/labels";
 import { formatSerial } from "../library/serial";
 import { escapeHtml, type InlineKeyboardMarkup } from "./api";
 import { publicBaseUrl } from "./capture";
@@ -42,6 +42,34 @@ export interface DecidedCardInput {
   scenarioLabels: string[];
   /** Display serial (e.g. "SKL-0007"), or null when the card has none to show. */
   serial: number | null;
+  /** AI value score 1–5, or null/undefined for a card with no score (e.g. scored before M3.5's backfill) — never rendered as a 0. */
+  score?: number | null;
+  /** Short (≤80 char) reason for `score`, shown inline after it. Ignored when `score` is null/undefined. */
+  scoreReason?: string | null;
+  /** The capability's `updated_at`, ISO — used to encode the optimistic-lock token in button callback_data. */
+  updatedAt: string;
+}
+
+/**
+ * Input to `formatResult` for a `/todo` self-build card (AJ-298): a kept, `usage='reference'`
+ * card with self-build `progress` in `('todo','planned','building')` — see commands.ts's
+ * `listTodoCapabilities`. Deliberately narrower than {@link DecidedCardInput}: there is no
+ * suggestion to show (the card is already decided), so no `suggestedVerdict`/`suggestedReason`.
+ */
+export interface TodoCardInput {
+  status: "todo";
+  id: string;
+  title: string;
+  type: CapabilityType;
+  summary: string;
+  tags: string[];
+  /** Chinese scenario labels, already resolved from slugs (see lib/analysis/scenarios.ts). */
+  scenarioLabels: string[];
+  /** Display serial (e.g. "SKL-0007"), or null when the card has none to show. */
+  serial: number | null;
+  score?: number | null;
+  scoreReason?: string | null;
+  progress: Progress;
   /** The capability's `updated_at`, ISO — used to encode the optimistic-lock token in button callback_data. */
   updatedAt: string;
 }
@@ -71,7 +99,7 @@ export interface FailedCardInput {
   target?: "capability" | "capture";
 }
 
-export type FormatCardInput = DecidedCardInput | FailedCardInput;
+export type FormatCardInput = DecidedCardInput | FailedCardInput | TodoCardInput;
 
 export interface FormattedMessage {
   text: string;
@@ -168,6 +196,19 @@ function tagsLine(tags: string[]): string {
   return `标签：${tags.map(escapeHtml).join("、") || "无"}`;
 }
 
+/**
+ * `评分：★4/5 · 理由`, or `null` when there's nothing to show — a null/undefined `score` (never a
+ * literal 0; the schema only allows 1–5) omits the whole line rather than rendering `★0/5`.
+ * `reason` is already bounded to ≤80 chars by the card schema, so unlike `body`/`tags`/
+ * `scenarioLabels` it isn't run through {@link shrinkUntilFits} — it's a fixed-size field, not an
+ * unbounded one.
+ */
+function scoreLine(score: number | null | undefined, reason: string | null | undefined): string | null {
+  if (score === null || score === undefined || score < 1) return null;
+  const base = `评分：★${score}/5`;
+  return reason ? `${base} · ${escapeHtml(reason)}` : base;
+}
+
 function formatKeep(card: DecidedCardInput): FormattedMessage {
   const serial = formatSerial(card.type, card.serial);
   const header = serial ? `✅ 已保留 · ${escapeHtml(serial)}` : "✅ 已保留";
@@ -195,27 +236,70 @@ function suggestedVerdictLabel(v: "keep" | "discard"): string {
   return v === "keep" ? "保留" : "丢弃";
 }
 
+/**
+ * Renders a pending card as distinct paragraphs separated by blank lines (AJ-298 — the owner
+ * reported the previous run-on block read poorly): title, 建议, 总结, 场景·标签, then 评分 (only
+ * when the card has one). Every over-budget field is still shrunk on its raw, pre-escape value
+ * before assembly (see {@link shrinkUntilFits}), so the paragraph breaks never interact with the
+ * length-budget cutting — a dropped tag/scenario/title only ever removes text within a line,
+ * never a blank-line separator itself.
+ */
 function formatPending(card: DecidedCardInput): FormattedMessage {
   const summary = truncate(card.summary, PENDING_SUMMARY_MAX_LEN);
-  const build = (f: ShrinkableFields) =>
-    [
+  const build = (f: ShrinkableFields) => {
+    const paragraphs = [
       `<b>${escapeHtml(f.title)}</b>`,
       `建议：${suggestedVerdictLabel(card.suggestedVerdict)} · ${escapeHtml(card.suggestedReason)}`,
-      escapeHtml(f.body ?? ""),
-      metaLine(card),
-      scenariosLine(f.scenarioLabels),
-      tagsLine(f.tags)
-    ].join("\n");
+      `总结：${escapeHtml(f.body ?? "")}`,
+      `${scenariosLine(f.scenarioLabels)} · ${tagsLine(f.tags)}`
+    ];
+    const score = scoreLine(card.score, card.scoreReason);
+    if (score) paragraphs.push(score);
+    return paragraphs.join("\n\n");
+  };
   const text = shrinkUntilFits(build, { title: card.title, tags: card.tags, scenarioLabels: card.scenarioLabels, body: summary });
   const replyMarkup: InlineKeyboardMarkup = {
     inline_keyboard: [
       [
-        { text: "保留", callback_data: encodeDecision("keep", card.id, card.updatedAt) },
-        { text: "丢弃", callback_data: encodeDecision("discard", card.id, card.updatedAt) }
+        { text: "✅ 保留", callback_data: encodeDecision("keep", card.id, card.updatedAt) },
+        { text: "🗑 丢弃", callback_data: encodeDecision("discard", card.id, card.updatedAt) }
       ],
       [
-        { text: "重跑分析", callback_data: encodeDecision("rerun", card.id, card.updatedAt) },
-        { text: "去 web", url: libraryLink(card.id) }
+        { text: "♻️ 重跑分析", callback_data: encodeDecision("rerun", card.id, card.updatedAt) },
+        { text: "🔗 去 web", url: libraryLink(card.id) }
+      ]
+    ]
+  };
+  return { text, replyMarkup };
+}
+
+/**
+ * Renders a `/todo` self-build card (AJ-298): title, 总结, 场景·标签, 评分 (when present), 进度 —
+ * same paragraph layout as {@link formatPending} minus the 建议 line (the card is already kept,
+ * there's no suggestion to show), plus a 进度 line and the 开始自研/已完成/放弃/去 web buttons.
+ */
+function formatTodo(card: TodoCardInput): FormattedMessage {
+  const build = (f: ShrinkableFields) => {
+    const paragraphs = [
+      `<b>${escapeHtml(f.title)}</b>`,
+      `总结：${escapeHtml(f.body ?? "")}`,
+      `${scenariosLine(f.scenarioLabels)} · ${tagsLine(f.tags)}`,
+      `进度：${escapeHtml(progressLabel(card.progress, "zh"))}`
+    ];
+    const score = scoreLine(card.score, card.scoreReason);
+    if (score) paragraphs.push(score);
+    return paragraphs.join("\n\n");
+  };
+  const text = shrinkUntilFits(build, { title: card.title, tags: card.tags, scenarioLabels: card.scenarioLabels, body: card.summary });
+  const replyMarkup: InlineKeyboardMarkup = {
+    inline_keyboard: [
+      [
+        { text: "🔨 开始自研", callback_data: encodeDecision("progress-building", card.id, card.updatedAt) },
+        { text: "✅ 已完成", callback_data: encodeDecision("progress-done", card.id, card.updatedAt) }
+      ],
+      [
+        { text: "🚫 放弃", callback_data: encodeDecision("progress-dropped", card.id, card.updatedAt) },
+        { text: "🔗 去 web", url: libraryLink(card.id) }
       ]
     ]
   };
@@ -244,6 +328,7 @@ export function formatResult(card: FormatCardInput): FormattedMessage {
       case "discard": return formatDiscard(card);
       case "pending": return formatPending(card);
       case "failed": return formatFailed(card);
+      case "todo": return formatTodo(card);
     }
   })();
   return { ...rendered, text: capMessageSafely(rendered.text) };

@@ -56,8 +56,12 @@ export interface RouterUpdate extends TelegramUpdate {
  * `"rerun-capture"`'s carries a *capture* id directly — used for a capture whose first analysis
  * run failed, so no capability row exists yet to look up (see notify.ts's failed-run-with-no-
  * capability selection branch, and decide.ts's handling of it).
+ *
+ * `"progress-building"`/`"progress-done"`/`"progress-dropped"` (the `/todo` card's 🔨/✅/🚫
+ * buttons — see commands.ts and decide.ts) carry a capability id, like `"keep"`/`"discard"`, and
+ * are handled the same optimistic-lock way, just calling `setProgress` instead of `decide`.
  */
-export type DecisionAction = "keep" | "discard" | "rerun" | "rerun-capture";
+export type DecisionAction = "keep" | "discard" | "rerun" | "rerun-capture" | "progress-building" | "progress-done" | "progress-dropped";
 
 export type ClassifiedUpdate =
   | { kind: "ignored"; reason: string }
@@ -278,8 +282,24 @@ export function classifyUpdate(update: unknown, opts: { ownerChatId: number }): 
   return { kind: "ignored", reason: "unsupported" };
 }
 
-const ACTION_TO_CODE: Record<DecisionAction, string> = { keep: "k", discard: "d", rerun: "r", "rerun-capture": "rc" };
-const CODE_TO_ACTION: Record<string, DecisionAction> = { k: "keep", d: "discard", r: "rerun", rc: "rerun-capture" };
+const ACTION_TO_CODE: Record<DecisionAction, string> = {
+  keep: "k",
+  discard: "d",
+  rerun: "r",
+  "rerun-capture": "rc",
+  "progress-building": "pb",
+  "progress-done": "pd",
+  "progress-dropped": "px"
+};
+const CODE_TO_ACTION: Record<string, DecisionAction> = {
+  k: "keep",
+  d: "discard",
+  r: "rerun",
+  rc: "rerun-capture",
+  pb: "progress-building",
+  pd: "progress-done",
+  px: "progress-dropped"
+};
 
 /**
  * Encodes a moderation decision as Telegram `callback_data`: `k|<capabilityId>|<epochMs>`.

@@ -1,6 +1,6 @@
 import type { Pool } from "pg";
 import type { CapabilityType, Playbook, ReviewNote, SourceFacts } from "../analysis/card";
-import type { Progress } from "./labels";
+import { type Progress } from "./labels";
 import { toVectorLiteral } from "../analysis/embedding";
 import { parseSerialQuery } from "./serial";
 
@@ -59,6 +59,19 @@ async function paged(pool: Q, where: string, values: unknown[], page: number, or
 
 export function listPending(pool: Q, opts: { page: number }) {
   return paged(pool, "cb.verdict = 'pending' AND cb.deleted_at IS NULL", [], opts.page);
+}
+
+/** Self-build progress states shown by the Telegram `/todo` command — kept, reference-only cards not yet finished or abandoned. */
+export const TODO_PROGRESS: Progress[] = ["todo", "planned", "building"];
+
+/** Kept `usage='reference'` cards still awaiting/undergoing self-build — backs the Telegram `/todo` command (commands.ts). */
+export function listTodoCapabilities(pool: Q, opts: { page: number }) {
+  return paged(
+    pool,
+    "cb.verdict = 'keep' AND cb.deleted_at IS NULL AND cb.usage = 'reference' AND cb.progress = ANY($1)",
+    [TODO_PROGRESS],
+    opts.page
+  );
 }
 
 export interface LibraryFilter {

@@ -1,9 +1,10 @@
 import type { Pool } from "pg";
 import type { CapabilityType } from "../analysis/card";
 import { loadScenarios } from "../analysis/scenarios";
+import type { Progress } from "../library/labels";
 import type { InlineKeyboardMarkup, TelegramApi } from "./api";
 import { TelegramError } from "./errors";
-import { formatResult, type DecidedCardInput, type FailedCardInput, type FormatCardInput } from "./format";
+import { formatResult, type DecidedCardInput, type FailedCardInput, type FormatCardInput, type TodoCardInput } from "./format";
 
 const BATCH_SIZE = 10;
 
@@ -19,6 +20,11 @@ export interface Candidate {
   tags: string[];
   scenarios: string[];
   serial: number | null;
+  /** AI value score 1–5, or null for a card scored before M3.5's backfill — never rendered as a 0. */
+  score: number | null;
+  scoreReason: string | null;
+  /** Self-build progress — only meaningful for `usage = 'reference'` cards (see setProgress). */
+  progress: Progress;
   verdict: "keep" | "discard" | "pending";
   updatedAt: Date;
   telegramChatId: string | null;
@@ -116,9 +122,35 @@ export function buildFormatInput(candidate: Candidate, scenarioLabel: Map<string
     tags: candidate.tags,
     scenarioLabels: candidate.scenarios.map((slug) => scenarioLabel.get(slug) ?? slug),
     serial: candidate.serial,
+    score: candidate.score,
+    scoreReason: candidate.scoreReason,
     updatedAt: candidate.updatedAt.toISOString()
   };
   return input;
+}
+
+/**
+ * Builds a `/todo` self-build card's `formatResult` input (see format.ts's `formatTodo`) from a
+ * candidate — used by decide.ts to re-render a `/todo` card in place after a progress-button
+ * press (see `handleProgress`). Unlike {@link buildFormatInput}, this never branches on
+ * `runState`/`verdict`: a `/todo` card is, by construction, already a kept `usage='reference'`
+ * card with a self-build `progress` to show.
+ */
+export function buildTodoFormatInput(candidate: Candidate, scenarioLabel: Map<string, string>): TodoCardInput {
+  return {
+    status: "todo",
+    id: candidate.id,
+    title: candidate.title,
+    type: candidate.type,
+    summary: candidate.summary,
+    tags: candidate.tags,
+    scenarioLabels: candidate.scenarios.map((slug) => scenarioLabel.get(slug) ?? slug),
+    serial: candidate.serial,
+    score: candidate.score,
+    scoreReason: candidate.scoreReason,
+    progress: candidate.progress,
+    updatedAt: candidate.updatedAt.toISOString()
+  };
 }
 
 /**
@@ -129,7 +161,8 @@ export function buildFormatInput(candidate: Candidate, scenarioLabel: Map<string
  */
 const CANDIDATE_COLUMNS = `cb.id, cb.capture_id AS "captureId", cb.title, cb.type, cb.usage,
             cb.suggested_verdict AS "suggestedVerdict", cb.suggested_reason AS "suggestedReason",
-            cb.summary, cb.tags, cb.scenarios, cb.serial, cb.verdict, cb.updated_at AS "updatedAt",
+            cb.summary, cb.tags, cb.scenarios, cb.serial, cb.score, cb.score_reason AS "scoreReason",
+            cb.progress, cb.verdict, cb.updated_at AS "updatedAt",
             c.telegram_chat_id AS "telegramChatId", c.telegram_message_id AS "telegramMessageId",
             lr.state AS "runState", lr.error_code AS "errorCode"`;
 

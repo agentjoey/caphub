@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { listLibrary, listPending, libraryStats, scenarioStats, getCapabilityDetail, PAGE_SIZE, SEMANTIC_MIN, TO_BUILD_PROGRESS } from "./queries";
+import { listLibrary, listPending, listTodoCapabilities, libraryStats, scenarioStats, getCapabilityDetail, PAGE_SIZE, SEMANTIC_MIN, TO_BUILD_PROGRESS, TODO_PROGRESS } from "./queries";
 
 function recorder(rows: unknown[][]) {
   const calls: Array<{ text: string; values: unknown[] }> = [];
@@ -15,6 +15,16 @@ describe("library queries", () => {
     expect(calls[0].text).toMatch(/cb\.deleted_at IS NULL/);
     expect(calls[0].text).toMatch(/ORDER BY cb\.created_at DESC/);
     expect(calls[0].values).toEqual([PAGE_SIZE, PAGE_SIZE]);
+  });
+  it("listTodoCapabilities filters kept, reference-only cards in todo/planned/building, paged", async () => {
+    const { pool, calls } = recorder([[], [{ total: "0" }]]);
+    await listTodoCapabilities(pool, { page: 1 });
+    expect(calls[0].text).toMatch(/cb\.verdict = 'keep'/);
+    expect(calls[0].text).toMatch(/cb\.deleted_at IS NULL/);
+    expect(calls[0].text).toMatch(/cb\.usage = 'reference'/);
+    expect(calls[0].text).toMatch(/cb\.progress = ANY\(\$1\)/);
+    expect(calls[0].values).toEqual([TODO_PROGRESS, PAGE_SIZE, 0]);
+    expect(TODO_PROGRESS).toEqual(["todo", "planned", "building"]);
   });
   it("listLibrary defaults to keep and applies search/type/tag/usage filters as parameters", async () => {
     const { pool, calls } = recorder([[], [{ total: "0" }]]);

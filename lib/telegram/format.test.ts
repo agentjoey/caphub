@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { decodeDecision } from "./router";
-import { formatResult, TELEGRAM_MESSAGE_MAX_LEN, type DecidedCardInput, type FailedCardInput } from "./format";
+import { formatResult, TELEGRAM_MESSAGE_MAX_LEN, type DecidedCardInput, type FailedCardInput, type TodoCardInput } from "./format";
 
 const base: DecidedCardInput = {
   status: "keep",
@@ -84,7 +84,7 @@ describe("formatResult — pending", () => {
     const out = formatResult({ ...base, status: "pending", summary: longSummary });
     expect(out.text).toContain("<b>示例标题</b>");
     expect(out.text).toContain("建议：保留 · 很实用");
-    expect(out.text).toContain("字".repeat(300));
+    expect(out.text).toContain("总结：" + "字".repeat(300));
     expect(out.text).not.toContain("字".repeat(301));
     expect(out.text).not.toContain("SKL-");
 
@@ -92,10 +92,10 @@ describe("formatResult — pending", () => {
     expect(kb).toHaveLength(2);
     expect(kb?.[0]).toHaveLength(2);
     expect(kb?.[1]).toHaveLength(2);
-    expect(kb?.[0]?.[0]?.text).toBe("保留");
-    expect(kb?.[0]?.[1]?.text).toBe("丢弃");
-    expect(kb?.[1]?.[0]?.text).toBe("重跑分析");
-    expect(kb?.[1]?.[1]?.text).toBe("去 web");
+    expect(kb?.[0]?.[0]?.text).toBe("✅ 保留");
+    expect(kb?.[0]?.[1]?.text).toBe("🗑 丢弃");
+    expect(kb?.[1]?.[0]?.text).toBe("♻️ 重跑分析");
+    expect(kb?.[1]?.[1]?.text).toBe("🔗 去 web");
 
     // The three non-URL buttons are callbacks that decode back to keep/discard/rerun for this id.
     const keepData = kb?.[0]?.[0]?.callback_data;
@@ -110,6 +110,31 @@ describe("formatResult — pending", () => {
   it("renders a discard suggestion label", () => {
     const out = formatResult({ ...base, status: "pending", suggestedVerdict: "discard" });
     expect(out.text).toContain("建议：丢弃");
+  });
+
+  it("AJ-298: renders 建议/总结/场景·标签 as distinct paragraphs separated by blank lines", () => {
+    const out = formatResult({ ...base, status: "pending" });
+    const paragraphs = out.text.split("\n\n");
+    expect(paragraphs[0]).toBe("<b>示例标题</b>");
+    expect(paragraphs[1]).toBe("建议：保留 · 很实用");
+    expect(paragraphs[2]).toBe("总结：这是一段摘要。");
+    expect(paragraphs[3]).toBe("场景：编程、自动化 · 标签：rag、web-scraping");
+  });
+
+  it("AJ-298: shows 评分：★4/5 with the reason when the card has a score", () => {
+    const out = formatResult({ ...base, status: "pending", score: 4, scoreReason: "生态成熟" });
+    expect(out.text).toContain("评分：★4/5 · 生态成熟");
+  });
+
+  it("AJ-298: omits the 评分 line entirely when the card has no score (never renders ★0/5)", () => {
+    const out = formatResult({ ...base, status: "pending", score: null, scoreReason: null });
+    expect(out.text).not.toContain("评分");
+    expect(out.text).not.toContain("★");
+  });
+
+  it("AJ-298: also omits the 评分 line when score is undefined", () => {
+    const out = formatResult({ ...base, status: "pending" });
+    expect(out.text).not.toContain("评分");
   });
 });
 
@@ -181,5 +206,54 @@ describe("formatResult — defensive message-length cap", () => {
     expect(Array.from(out.text).length).toBeLessThanOrEqual(TELEGRAM_MESSAGE_MAX_LEN);
     expect(out.text).toContain('<a href="https://caphub.agentjoey.ai/library/cab_deadbeefcafef00d">详情</a>');
     expect((out.text.match(/</g) ?? []).length).toBe((out.text.match(/>/g) ?? []).length);
+  });
+});
+
+const todoBase: TodoCardInput = {
+  status: "todo",
+  id: "cab_deadbeefcafef00d",
+  title: "示例标题",
+  type: "skill",
+  summary: "这是一段摘要。",
+  tags: ["rag", "web-scraping"],
+  scenarioLabels: ["编程", "自动化"],
+  serial: 7,
+  score: 4,
+  scoreReason: "生态成熟",
+  progress: "todo",
+  updatedAt: "2026-09-20T00:00:00.000Z"
+};
+
+describe("formatResult — todo", () => {
+  it("renders 总结/场景·标签/进度/评分 as paragraphs and the 开始自研/已完成/放弃/去 web buttons", () => {
+    const out = formatResult(todoBase);
+    const paragraphs = out.text.split("\n\n");
+    expect(paragraphs[0]).toBe("<b>示例标题</b>");
+    expect(paragraphs[1]).toBe("总结：这是一段摘要。");
+    expect(paragraphs[2]).toBe("场景：编程、自动化 · 标签：rag、web-scraping");
+    expect(paragraphs[3]).toBe("进度：未处理");
+    expect(paragraphs[4]).toBe("评分：★4/5 · 生态成熟");
+
+    const kb = out.replyMarkup?.inline_keyboard;
+    expect(kb).toHaveLength(2);
+    expect(kb?.[0]?.[0]?.text).toBe("🔨 开始自研");
+    expect(kb?.[0]?.[1]?.text).toBe("✅ 已完成");
+    expect(kb?.[1]?.[0]?.text).toBe("🚫 放弃");
+    expect(kb?.[1]?.[1]?.text).toBe("🔗 去 web");
+
+    expect(decodeDecision(kb![0]![0]!.callback_data!)).toEqual({ action: "progress-building", capabilityId: todoBase.id, updatedAt: todoBase.updatedAt });
+    expect(decodeDecision(kb![0]![1]!.callback_data!)).toEqual({ action: "progress-done", capabilityId: todoBase.id, updatedAt: todoBase.updatedAt });
+    expect(decodeDecision(kb![1]![0]!.callback_data!)).toEqual({ action: "progress-dropped", capabilityId: todoBase.id, updatedAt: todoBase.updatedAt });
+    expect(kb?.[1]?.[1]?.url).toContain("/library/cab_deadbeefcafef00d");
+  });
+
+  it("omits the 评分 line when the card has no score", () => {
+    const out = formatResult({ ...todoBase, score: null, scoreReason: null });
+    expect(out.text).not.toContain("评分");
+  });
+
+  it("shows the current progress label", () => {
+    const out = formatResult({ ...todoBase, progress: "building" });
+    expect(out.text).toContain("进度：自研中");
   });
 });

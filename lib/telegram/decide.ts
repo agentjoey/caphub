@@ -3,9 +3,10 @@ import { loadScenarios } from "../analysis/scenarios";
 import { recordTelegramReceipt } from "../captures/captures";
 import type { Pipeline } from "../config";
 import { getDict } from "../i18n";
-import { decide, requestRerun } from "../library/actions";
+import { decide, requestRerun, setProgress } from "../library/actions";
+import type { Progress } from "../library/labels";
 import type { InlineKeyboardMarkup, TelegramApi } from "./api";
-import { buildFormatInput, loadCandidateById, type Candidate } from "./notify";
+import { buildFormatInput, buildTodoFormatInput, loadCandidateById, type Candidate } from "./notify";
 import { formatResult } from "./format";
 import type { ClassifiedUpdate, DecisionAction } from "./router";
 
@@ -38,8 +39,18 @@ const TOAST = {
   // its result (notified_at is still set), so the user must check the web UI instead of waiting
   // on a Telegram message that may never arrive.
   rerunNoAutoPush: "已重新排队，但结果可能不会自动推送，请去 web 查看",
-  notOwner: "无权操作"
+  notOwner: "无权操作",
+  "progress-building": "已标记为自研中",
+  "progress-done": "已标记为已完成",
+  "progress-dropped": "已标记为放弃"
 } as const;
+
+/** Maps a `/todo` card's callback action to the `Progress` value `setProgress` should write. */
+const PROGRESS_ACTION_VALUE: Record<"progress-building" | "progress-done" | "progress-dropped", Progress> = {
+  "progress-building": "building",
+  "progress-done": "done",
+  "progress-dropped": "dropped"
+};
 
 const REQUEUE_TEXT = "已重新排队，分析中…";
 
@@ -59,6 +70,13 @@ async function loadScenarioLabels(pool: Pool): Promise<Map<string, string>> {
 async function editToCurrentState(deps: HandleCallbackDeps, cb: CallbackDecoded, candidate: Candidate, signal?: AbortSignal): Promise<void> {
   const scenarioLabel = await loadScenarioLabels(deps.pool);
   const rendered = formatResult(buildFormatInput(candidate, scenarioLabel));
+  await deps.api.editMessageText({ chatId: cb.chatId, messageId: cb.messageId, text: rendered.text, replyMarkup: NO_BUTTONS, signal });
+}
+
+/** {@link editToCurrentState}'s counterpart for a `/todo` self-build card — re-renders via `buildTodoFormatInput`/`formatTodo` instead of the verdict-based `buildFormatInput`, with buttons stripped the same way. */
+async function editTodoToCurrentState(deps: HandleCallbackDeps, cb: CallbackDecoded, candidate: Candidate, signal?: AbortSignal): Promise<void> {
+  const scenarioLabel = await loadScenarioLabels(deps.pool);
+  const rendered = formatResult(buildTodoFormatInput(candidate, scenarioLabel));
   await deps.api.editMessageText({ chatId: cb.chatId, messageId: cb.messageId, text: rendered.text, replyMarkup: NO_BUTTONS, signal });
 }
 
@@ -156,6 +174,10 @@ export async function handleCallback(deps: HandleCallbackDeps, cb: CallbackDecod
         return await handleDecide(deps, cb, signal);
       case "rerun":
         return await handleRerun(deps, cb, candidate, signal);
+      case "progress-building":
+      case "progress-done":
+      case "progress-dropped":
+        return await handleProgress(deps, cb, cb.action, signal);
       default: {
         // Unreachable given DecisionAction's type, but decodeDecision's output isn't
         // re-validated here — kept as a defensive, total branch.
@@ -233,6 +255,44 @@ async function handleRerun(deps: HandleCallbackDeps, cb: CallbackDecoded, candid
   await safeAnswer(deps, cb, result.message, signal);
   if (result.reason === "OBJECT_GONE") return { outcome: "rejected", reason: "object-gone", capabilityId: cb.capabilityId };
   if (result.reason === "CONFLICT") return { outcome: "rejected", reason: "already-queued", capabilityId: cb.capabilityId };
+  if (result.reason === "NOT_FOUND") return { outcome: "rejected", reason: "not-found", capabilityId: cb.capabilityId };
+  return { outcome: "rejected", reason: "invalid", capabilityId: cb.capabilityId };
+}
+
+/**
+ * Handles a `/todo` card's 🔨开始自研/✅已完成/🚫放弃 button press: writes the new `progress` via
+ * the shared `setProgress` action (the single writer — see lib/library/actions.ts), then
+ * re-renders the message via {@link editTodoToCurrentState} with buttons removed. The optimistic
+ * lock is already verified by `handleCallback`'s pre-check before this runs, but `setProgress`
+ * re-checks it itself (a second decision could have landed in between), so the CONFLICT branch
+ * here is still reachable.
+ */
+async function handleProgress(
+  deps: HandleCallbackDeps,
+  cb: CallbackDecoded,
+  action: "progress-building" | "progress-done" | "progress-dropped",
+  signal?: AbortSignal
+): Promise<CallbackOutcome> {
+  const progress = PROGRESS_ACTION_VALUE[action];
+  const result = await setProgress(deps.pool, { id: cb.capabilityId, expectedUpdatedAt: cb.updatedAt, progress }, "zh");
+
+  if (result.ok) {
+    await safeAnswer(deps, cb, TOAST[action], signal);
+    await runSideEffect(deps, cb, "render-progress-failed", async () => {
+      const fresh = await loadCandidateById(deps.pool, cb.capabilityId);
+      if (fresh) await editTodoToCurrentState(deps, cb, fresh, signal);
+    });
+    return { outcome: "decided", action, capabilityId: cb.capabilityId };
+  }
+
+  await safeAnswer(deps, cb, result.message, signal);
+  if (result.reason === "CONFLICT") {
+    await runSideEffect(deps, cb, "render-progress-conflict-failed", async () => {
+      const current = await loadCandidateById(deps.pool, cb.capabilityId);
+      if (current) await editTodoToCurrentState(deps, cb, current, signal);
+    });
+    return { outcome: "conflict", capabilityId: cb.capabilityId };
+  }
   if (result.reason === "NOT_FOUND") return { outcome: "rejected", reason: "not-found", capabilityId: cb.capabilityId };
   return { outcome: "rejected", reason: "invalid", capabilityId: cb.capabilityId };
 }

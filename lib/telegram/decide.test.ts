@@ -11,7 +11,8 @@ function candidateRow(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: "cab_1", captureId: "cap_1", title: "示例标题", type: "skill", usage: "integrate",
     suggestedVerdict: "keep", suggestedReason: "很实用", summary: "摘要",
-    tags: ["rag"], scenarios: ["coding"], serial: null, verdict: "pending",
+    tags: ["rag"], scenarios: ["coding"], serial: null, score: null, scoreReason: null,
+    progress: "todo", verdict: "pending",
     updatedAt: new Date(T),
     telegramChatId: "1000", telegramMessageId: "500",
     runState: "done", errorCode: null,
@@ -43,6 +44,10 @@ function routedPool(opts: {
   decideRow?: { updated_at: Date; tags: string[]; previous: string } | null;
   decideConflictExists?: boolean;
   rerunCapture?: { kind: string; purged: boolean; active: boolean } | null;
+  /** `setProgress`'s UPDATE result — `undefined` (the default) means a matching row, `null` means no row matched (conflict/not-found/wrong-usage). */
+  progressRow?: { updated_at: Date } | null;
+  /** Only consulted when `progressRow` is `null`, to distinguish NOT_FOUND/wrong-usage from CONFLICT. */
+  progressUsage?: string | null;
 }) {
   const candidate = opts.candidate === undefined ? candidateRow() : opts.candidate;
   const candidateAfter = opts.candidateAfterMutation === undefined ? candidate : opts.candidateAfterMutation;
@@ -58,6 +63,12 @@ function routedPool(opts: {
     if (text.startsWith("SELECT 1 FROM caphub_v2.capabilities")) return { rows: opts.decideConflictExists ? [{ "?column?": 1 }] : [] };
     if (text.startsWith("UPDATE caphub_v2.capabilities cb SET verdict")) {
       return opts.decideRow === undefined ? { rows: [] } : { rows: opts.decideRow ? [opts.decideRow] : [] };
+    }
+    if (text.startsWith("UPDATE caphub_v2.capabilities SET progress")) {
+      return opts.progressRow === null ? { rows: [] } : { rows: [opts.progressRow ?? { updated_at: new Date(T2) }] };
+    }
+    if (text.startsWith("SELECT usage FROM caphub_v2.capabilities")) {
+      return { rows: opts.progressUsage === undefined ? [{ usage: "reference" }] : opts.progressUsage === null ? [] : [{ usage: opts.progressUsage }] };
     }
     if (text.includes("INSERT INTO caphub_v2.tags")) return { rows: [] };
     if (text.startsWith("UPDATE caphub_v2.capabilities SET notified_at = NULL")) return { rows: [], rowCount: 1 };
@@ -356,5 +367,103 @@ describe("handleCallback — rerun-capture", () => {
     expect(result).toEqual({ outcome: "rejected", reason: "not-owner" });
     expect(answered).toHaveLength(1);
     expect(calls).toHaveLength(0);
+  });
+});
+
+// AJ-298 / `/todo`: the three self-build progress buttons (🔨开始自研/✅已完成/🚫放弃) reuse
+// setProgress (the single writer — see lib/library/actions.ts) rather than a second writer.
+describe("handleCallback — progress actions (pb/pd/px)", () => {
+  it("progress-building: writes 'building', answers with its own toast, and re-renders the todo card with no buttons", async () => {
+    const { pool, calls } = routedPool({
+      candidate: candidateRow({ usage: "reference", verdict: "keep", progress: "todo" }),
+      candidateAfterMutation: candidateRow({ usage: "reference", verdict: "keep", progress: "building", updatedAt: new Date(T2) })
+    });
+    const { api, answered, edited } = fakeApi();
+    const result = await handleCallback(deps(pool, api), cb({ action: "progress-building" }));
+
+    expect(result).toEqual({ outcome: "decided", action: "progress-building", capabilityId: "cab_1" });
+    expect(answered[0]).toMatchObject({ text: "已标记为自研中" });
+    expect((edited[0] as { text: string }).text).toContain("进度：自研中");
+    expect((edited[0] as { replyMarkup?: unknown }).replyMarkup).toEqual({ inline_keyboard: [] });
+    expect(calls.some((c) => c.text.startsWith("UPDATE caphub_v2.capabilities SET progress"))).toBe(true);
+  });
+
+  it("progress-done: writes 'done' and answers with its own toast", async () => {
+    const { pool } = routedPool({
+      candidate: candidateRow({ usage: "reference", verdict: "keep", progress: "building" }),
+      candidateAfterMutation: candidateRow({ usage: "reference", verdict: "keep", progress: "done", updatedAt: new Date(T2) })
+    });
+    const { api, answered, edited } = fakeApi();
+    const result = await handleCallback(deps(pool, api), cb({ action: "progress-done" }));
+
+    expect(result).toEqual({ outcome: "decided", action: "progress-done", capabilityId: "cab_1" });
+    expect(answered[0]).toMatchObject({ text: "已标记为已完成" });
+    expect((edited[0] as { text: string }).text).toContain("进度：已完成");
+  });
+
+  it("progress-dropped: writes 'dropped' and answers with its own toast", async () => {
+    const { pool } = routedPool({
+      candidate: candidateRow({ usage: "reference", verdict: "keep", progress: "todo" }),
+      candidateAfterMutation: candidateRow({ usage: "reference", verdict: "keep", progress: "dropped", updatedAt: new Date(T2) })
+    });
+    const { api, answered, edited } = fakeApi();
+    const result = await handleCallback(deps(pool, api), cb({ action: "progress-dropped" }));
+
+    expect(result).toEqual({ outcome: "decided", action: "progress-dropped", capabilityId: "cab_1" });
+    expect(answered[0]).toMatchObject({ text: "已标记为放弃" });
+    expect((edited[0] as { text: string }).text).toContain("进度：放弃");
+  });
+
+  it("conflict: someone else changed the card between handleCallback's pre-check and setProgress's own lock check", async () => {
+    const { pool } = routedPool({
+      candidate: candidateRow({ usage: "reference", verdict: "keep" }),
+      progressRow: null,
+      progressUsage: "reference",
+      decideConflictExists: true
+    });
+    const { api, answered, edited } = fakeApi();
+    const result = await handleCallback(deps(pool, api), cb({ action: "progress-building" }));
+
+    expect(result).toEqual({ outcome: "conflict", capabilityId: "cab_1" });
+    expect(answered[0]).toMatchObject({ text: "已在别处处理" });
+    expect((edited[0] as { replyMarkup?: unknown }).replyMarkup).toEqual({ inline_keyboard: [] });
+  });
+
+  it("not found: the capability was deleted between the pre-check and setProgress", async () => {
+    const { pool } = routedPool({
+      candidate: candidateRow({ usage: "reference", verdict: "keep" }),
+      progressRow: null,
+      progressUsage: null,
+      decideConflictExists: false
+    });
+    const { api, answered } = fakeApi();
+    const result = await handleCallback(deps(pool, api), cb({ action: "progress-building" }));
+
+    expect(result).toEqual({ outcome: "rejected", reason: "not-found", capabilityId: "cab_1" });
+    expect(answered[0]).toMatchObject({ text: "卡片不存在或已删除" });
+  });
+
+  it("invalid: an integrate card has no self-build progress to set", async () => {
+    const { pool } = routedPool({
+      candidate: candidateRow({ usage: "reference", verdict: "keep" }),
+      progressRow: null,
+      progressUsage: "integrate"
+    });
+    const { api, answered } = fakeApi();
+    const result = await handleCallback(deps(pool, api), cb({ action: "progress-building" }));
+
+    expect(result).toEqual({ outcome: "rejected", reason: "invalid", capabilityId: "cab_1" });
+    expect(answered[0]).toMatchObject({ text: "只有参考自研的卡片可以记录进度" });
+  });
+
+  it("forged callback_data: a nonexistent capability id is rejected by the shared pre-check before setProgress runs", async () => {
+    const { pool, calls } = routedPool({ candidate: null });
+    const { api, answered, edited } = fakeApi();
+    const result = await handleCallback(deps(pool, api), cb({ action: "progress-building", capabilityId: "cab_ghost" }));
+
+    expect(result).toEqual({ outcome: "rejected", reason: "not-found", capabilityId: "cab_ghost" });
+    expect(answered[0]).toMatchObject({ text: "卡片不存在或已删除" });
+    expect(edited).toHaveLength(0);
+    expect(calls.some((c) => c.text.startsWith("UPDATE caphub_v2.capabilities SET progress"))).toBe(false);
   });
 });
