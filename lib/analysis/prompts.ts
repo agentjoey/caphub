@@ -125,12 +125,12 @@ function deepSubjectText(subject: DeepSubject): string {
   ].join("\n");
 }
 
-/** Prompt for the `plan` step: 4-6 search queries covering docs / repo / word-of-mouth / alternatives. */
+/** Prompt for the `plan` step: 4-5 search queries covering docs / repo / word-of-mouth / alternatives. */
 export function deepPlanPrompt(subject: DeepSubject): string {
   return [
     "你在为个人 agent 能力库里已经建档的一张卡片做「深度分析」，第一步是规划检索式。",
     deepSubjectText(subject),
-    "请给出 4–6 条搜索检索式（queries），覆盖以下四个方向，每个方向至少覆盖到（不要求一一对应，但整体要覆盖）：",
+    "请给出 4–5 条搜索检索式（queries，最多 5 条，多于 5 条会被拒绝重写），覆盖以下四个方向，每个方向至少覆盖到（不要求一一对应，但整体要覆盖）：",
     "1）官方文档/官网/仓库 README；2）代码仓库本身（issues、release、star 数等）；3）讨论区与口碑（Reddit、Hacker News、中文社区、博客评测等）；4）与同类替代方案的对比。",
     "每条检索式是一句可直接丢进搜索引擎的查询词，不要写成问题，不要重复。"
   ].join("\n\n");

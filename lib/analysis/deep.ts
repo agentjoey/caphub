@@ -20,11 +20,16 @@ export const DEEP_TIMEOUTS = { plan: 60_000, search: 60_000, synthesize: 120_000
 export const DEEP_RUN_TIMEOUT_MS = 300_000;
 /**
  * A separate, larger budget than the normal analysis run's default (4 calls / 200k tokens,
- * see budget.ts) -- deep analysis does far more provider work (plan + up to 6 searches + two
- * synthesize passes, each possibly retried once). Never shared with or derived from the normal
- * run's RunBudget instance; each run constructs its own.
+ * see budget.ts) -- deep analysis does far more provider work. A full run is 1 plan + up to 5
+ * search + 2 synthesize = 8 calls (controller ruling, fix round 1: the plan step is capped at
+ * 5 queries, not 6, precisely so this worst case never exceeds 8); the cap here is raised to
+ * 10 so a single retry of a synthesize step (invalid output / out-of-range source index) still
+ * fits inside the budget instead of killing the run. Never shared with or derived from the
+ * normal run's RunBudget instance; each run constructs its own.
+ *
+ * 一次完整深度分析约 8 次调用（上限 10）。
  */
-export const DEEP_BUDGET_LIMITS = { maxCalls: 8, maxTokens: 400_000 };
+export const DEEP_BUDGET_LIMITS = { maxCalls: 10, maxTokens: 400_000 };
 
 export interface DeepAnalysisDeps {
   pool: Pick<Pool, "query">;
@@ -87,8 +92,8 @@ async function runDeepSearch(deps: DeepAnalysisDeps, runId: string, query: strin
 }
 
 /**
- * Runs the deep-analysis pipeline for a leased run: plan (1 DeepSeek call, 4-6 queries) →
- * search (one Tavily call per query, ≤ 6) → synthesize (two DeepSeek passes: facts, then the
+ * Runs the deep-analysis pipeline for a leased run: plan (1 DeepSeek call, 4-5 queries) →
+ * search (one Tavily call per query, ≤ 5) → synthesize (two DeepSeek passes: facts, then the
  * final scannable card). On success, writes `capabilities.deep_analysis` / `deep_analysis_at` /
  * `deep_analysis_of` without touching `updated_at` (that would re-trigger re-embedding for
  * nothing). On failure, nothing is written here -- the caller (worker/tick.ts's runTick) records

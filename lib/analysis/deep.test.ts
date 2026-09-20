@@ -9,7 +9,11 @@ const capabilityRow = {
   source_url: null, playbook: { kind: "reference", points: ["p"] }, updated_at: "2026-09-01T00:00:00.000Z"
 };
 
-const planValue = { queries: ["official docs", "github repo", "reddit reviews", "vs alternatives"] };
+// 5 queries: the worst-case plan size (controller ruling, fix round 1: capped at 5, not 6, so
+// a full run -- 1 plan + 5 search + 2 synthesize -- is exactly 8 calls, fitting inside the
+// 10-call budget with room for one retry).
+const planValue = { queries: ["official docs", "github repo", "reddit reviews", "hacker news discussion", "vs alternatives"] };
+const sixQueryPlan = { queries: [...planValue.queries, "one query too many"] };
 const searchValue = { sources: [{ title: "Docs", url: "https://a.example/1", content: "c1" }] };
 const factsValue = { facts: [{ text: "fact one", source: 0 }] };
 const analysisValue = {
@@ -25,7 +29,7 @@ const analysisValue = {
 
 function deps(opts: {
   capability?: typeof capabilityRow | null;
-  planValueOverride?: unknown;
+  planValues?: unknown[]; // consumed in order across successive "deep_plan" invokes (for plan-retry tests)
   factsValueOverride?: unknown;
   analysisValues?: unknown[]; // consumed in order across successive "deep_analysis" invokes (for retry tests)
   searchImpl?: (query: string) => Promise<{ value: unknown; usage: { inputTokens: number; outputTokens: number } }>;
@@ -39,7 +43,9 @@ function deps(opts: {
   const capability = opts.capability === undefined ? capabilityRow : opts.capability;
   const usage = opts.reasonUsage ?? { inputTokens: 10, outputTokens: 10 };
   let analysisCallIndex = 0;
+  let planCallIndex = 0;
   const remainingAnalysisValues = opts.analysisValues ? [...opts.analysisValues] : [analysisValue];
+  const remainingPlanValues = opts.planValues ? [...opts.planValues] : [planValue];
 
   const pool = {
     query: async (text: string, values: unknown[] = []) => {
@@ -70,7 +76,9 @@ function deps(opts: {
               signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })), { once: true });
             }) as never;
           }
-          return { value: opts.planValueOverride ?? planValue, usage };
+          const planOut = remainingPlanValues[Math.min(planCallIndex, remainingPlanValues.length - 1)];
+          planCallIndex += 1;
+          return { value: planOut, usage };
         }
         if (input.schemaName === "deep_facts") { calls.push("facts"); return { value: opts.factsValueOverride ?? factsValue, usage }; }
         calls.push("synthesize-final");
@@ -98,11 +106,35 @@ describe("runDeepAnalysis", () => {
     expect(out).toEqual({ capabilityId: "cab_1" });
     expect(calls).toEqual([
       "plan",
-      `search:${planValue.queries[0]}`, `search:${planValue.queries[1]}`, `search:${planValue.queries[2]}`, `search:${planValue.queries[3]}`,
+      ...planValue.queries.map((q) => `search:${q}`),
       "facts", "synthesize-final"
     ]);
-    expect(steps.map((s) => s.step)).toEqual(["plan", "search", "search", "search", "search", "synthesize", "synthesize"]);
+    expect(steps.map((s) => s.step)).toEqual(["plan", "search", "search", "search", "search", "search", "synthesize", "synthesize"]);
     expect(steps.every((s) => s.ok)).toBe(true);
+  });
+
+  it("completes a 5-query plan (the worst-case size) within the budget: 1 plan + 5 search + 2 synthesize = 8 calls", async () => {
+    expect(planValue.queries).toHaveLength(5);
+    const { d, calls } = deps();
+    const out = await runDeepAnalysis(d, lease, new AbortController().signal);
+    expect(out).toEqual({ capabilityId: "cab_1" });
+    const budgetedCalls = calls.filter((c) => c === "plan" || c === "facts" || c === "synthesize-final" || c.startsWith("search:")).length;
+    expect(budgetedCalls).toBe(8);
+    expect(budgetedCalls).toBeLessThanOrEqual(DEEP_BUDGET_LIMITS.maxCalls);
+  });
+
+  it("rejects (invalid output, retried) a plan with 6 queries, and succeeds once the retry returns 5", async () => {
+    const { d, calls } = deps({ planValues: [sixQueryPlan, planValue] });
+    const out = await runDeepAnalysis(d, lease, new AbortController().signal);
+    expect(out).toEqual({ capabilityId: "cab_1" });
+    expect(calls.filter((c) => c === "plan")).toHaveLength(2);
+  });
+
+  it("fails the run (invalid output, retried twice) when the plan keeps returning 6 queries", async () => {
+    const { d, calls } = deps({ planValues: [sixQueryPlan, sixQueryPlan] });
+    await expect(runDeepAnalysis(d, lease, new AbortController().signal)).rejects.toMatchObject({ code: "INVALID_OUTPUT" });
+    expect(calls.filter((c) => c === "plan")).toHaveLength(2);
+    expect(calls.some((c) => c.startsWith("search:"))).toBe(false);
   });
 
   it("writes deep_analysis / deep_analysis_at / deep_analysis_of without touching updated_at, keyed off the card's updated_at read at the start of the run", async () => {
@@ -121,8 +153,8 @@ describe("runDeepAnalysis", () => {
     await expect(runDeepAnalysis(d, lease, new AbortController().signal)).rejects.toMatchObject({ code: "CAPABILITY_NOT_FOUND" });
   });
 
-  it("fails with BUDGET once the deep run's 8-call / 400k-token budget is exceeded, without writing deep_analysis", async () => {
-    expect(DEEP_BUDGET_LIMITS).toEqual({ maxCalls: 8, maxTokens: 400_000 });
+  it("fails with BUDGET once the deep run's 10-call / 400k-token budget is exceeded, without writing deep_analysis", async () => {
+    expect(DEEP_BUDGET_LIMITS).toEqual({ maxCalls: 10, maxTokens: 400_000 });
     const { d, updates } = deps({ reasonUsage: { inputTokens: 300_000, outputTokens: 0 } });
     await expect(runDeepAnalysis(d, lease, new AbortController().signal)).rejects.toMatchObject({ code: "BUDGET" });
     expect(updates).toHaveLength(0);
@@ -133,12 +165,16 @@ describe("runDeepAnalysis", () => {
     await expect(runDeepAnalysis(d, lease, new AbortController().signal, { runTimeoutMs: 5 })).rejects.toMatchObject({ code: "TIMEOUT" });
   });
 
-  it("retries the final synthesize pass (and then succeeds) when a case cites a source index outside the sources array", async () => {
+  it("retries the final synthesize pass (and then succeeds) when a case cites a source index outside the sources array, still fitting the budget on a worst-case 5-query plan", async () => {
     const badAnalysis = { ...analysisValue, cases: [{ title: "c1", detail: "d1", source: 5 }] };
     const { d, calls } = deps({ analysisValues: [badAnalysis, analysisValue] });
     const out = await runDeepAnalysis(d, lease, new AbortController().signal);
     expect(out).toEqual({ capabilityId: "cab_1" });
     expect(calls.filter((c) => c === "synthesize-final")).toHaveLength(2);
+    // 1 plan + 5 search + 1 facts + 2 synthesize attempts = 9 calls, within the 10-call budget.
+    const budgetedCalls = calls.filter((c) => c === "plan" || c === "facts" || c === "synthesize-final" || c.startsWith("search:")).length;
+    expect(budgetedCalls).toBe(9);
+    expect(budgetedCalls).toBeLessThanOrEqual(DEEP_BUDGET_LIMITS.maxCalls);
   });
 
   it("fails the run (invalid output, retried twice) when every synthesize attempt keeps citing an out-of-range source", async () => {

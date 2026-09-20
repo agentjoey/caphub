@@ -207,9 +207,14 @@ export type ReviewNote = z.infer<typeof reviewNoteSchema>;
 // See lib/analysis/deep.ts. Owner's design decision 5: deep analysis must not produce a wall
 // of text, so every field below is capped short and scannable instead of free prose.
 
-/** Deep analysis' `plan` step output: 4-6 search queries covering docs / repo / word-of-mouth / alternatives. */
+/**
+ * Deep analysis' `plan` step output: 4-5 search queries covering docs / repo / word-of-mouth /
+ * alternatives. Capped at 5 (not 6, per the brief) so a worst-case full run -- 1 plan + 5
+ * search + 2 synthesize = 8 calls -- fits the budget with room for one retry (see deep.ts's
+ * DEEP_BUDGET_LIMITS, 10 calls / 400k tokens).
+ */
 export const deepPlanSchema = z.object({
-  queries: z.array(z.string().min(1).max(200)).min(4).max(6)
+  queries: z.array(z.string().min(1).max(200)).min(4).max(5)
 });
 export type DeepPlan = z.infer<typeof deepPlanSchema>;
 
