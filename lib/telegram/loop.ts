@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import type { Pool } from "pg";
 import type { CaptureDeps } from "./capture";
 import { handleCapture } from "./capture";
@@ -5,6 +6,7 @@ import type { CommandDeps } from "./commands";
 import { handleCommand } from "./commands";
 import type { HandleCallbackDeps } from "./decide";
 import { handleCallback } from "./decide";
+import { TelegramError } from "./errors";
 import type { SearchDeps } from "./search";
 import { handleSearch } from "./search";
 import { classifyUpdate, type RouterUpdate } from "./router";
@@ -14,6 +16,12 @@ import type { TelegramApi, TelegramUpdate } from "./api";
 const OFFSET_KEY = "getUpdates_offset";
 /** Long-poll duration passed to `getUpdates` — Telegram holds the request open up to this many seconds waiting for an update. */
 const POLL_TIMEOUT_SECONDS = 25;
+/**
+ * Floor on how often an idle tick returns, in case `getUpdates` ever comes back immediately
+ * instead of holding for {@link POLL_TIMEOUT_SECONDS} (e.g. a proxy in front of Telegram that
+ * doesn't honor long-poll timeouts) — without this, that would spin the caller's loop.
+ */
+const MIN_IDLE_INTERVAL_MS = 1_000;
 
 /**
  * The four update handlers this loop dispatches to (Tasks 3–6). Overridable purely for testing —
@@ -39,26 +47,40 @@ export interface TelegramLoopDeps {
   search: SearchDeps;
   callback: HandleCallbackDeps;
   handlers?: Partial<TelegramLoopHandlers>;
+  /** Overrides {@link MIN_IDLE_INTERVAL_MS} — test-only (production always uses the real floor). */
+  minIdleIntervalMs?: number;
   log?: (o: Record<string, unknown>) => void;
 }
 
 export type TelegramTickOutcome =
   | { kind: "idle" }
   | { kind: "processed"; count: number }
-  | { kind: "error"; reason: string };
+  /** `retryAfterMs` is set when the failure was a Telegram 429 that told us how long to wait — callers should prefer it over their own backoff's doubling delay. */
+  | { kind: "error"; reason: string; retryAfterMs?: number };
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function loadOffset(pool: Pool): Promise<number | undefined> {
+/** `retry_after` on a 429 is in seconds (Telegram's `parameters.retry_after`); callers want ms. */
+function retryAfterMs(error: unknown): number | undefined {
+  return error instanceof TelegramError && error.code === 429 && error.retryAfter !== undefined
+    ? error.retryAfter * 1000
+    : undefined;
+}
+
+async function loadOffset(pool: Pool, log?: (o: Record<string, unknown>) => void): Promise<number | undefined> {
   const { rows } = await pool.query<{ value: string }>(
     "SELECT value FROM caphub_v2.telegram_state WHERE key = $1", [OFFSET_KEY]
   );
   const raw = rows[0]?.value;
   if (raw === undefined) return undefined;
   const n = Number(raw);
-  return Number.isSafeInteger(n) ? n : undefined;
+  if (!Number.isSafeInteger(n)) {
+    log?.({ telegram: "invalid-stored-offset", value: raw });
+    return undefined;
+  }
+  return n;
 }
 
 async function saveOffset(pool: Pool, offset: number): Promise<void> {
@@ -111,21 +133,33 @@ export async function runTelegramTick(deps: TelegramLoopDeps, signal: AbortSigna
 
   let offset: number | undefined;
   try {
-    offset = await loadOffset(deps.pool);
+    offset = await loadOffset(deps.pool, deps.log);
   } catch (error) {
     deps.log?.({ telegram: "load-offset-failed", error: errorMessage(error) });
     return { kind: "error", reason: "load-offset-failed" };
   }
 
+  const startedAt = Date.now();
   let updates: TelegramUpdate[];
   try {
     updates = await deps.api.getUpdates({ offset, timeout: POLL_TIMEOUT_SECONDS, signal });
   } catch (error) {
     deps.log?.({ telegram: "get-updates-failed", error: errorMessage(error) });
-    return { kind: "error", reason: "get-updates-failed" };
+    return { kind: "error", reason: "get-updates-failed", retryAfterMs: retryAfterMs(error) };
   }
 
-  if (updates.length === 0) return { kind: "idle" };
+  if (updates.length === 0) {
+    // getUpdates is a long poll — it should have held for ~POLL_TIMEOUT_SECONDS if there was
+    // nothing to return. If it came back much faster than that (a proxy in front of Telegram
+    // that doesn't honor long-poll timeouts), wait out a floor here so the caller's loop doesn't
+    // spin on an effectively-instant "nothing to do" tick.
+    const floorMs = deps.minIdleIntervalMs ?? MIN_IDLE_INTERVAL_MS;
+    const elapsed = Date.now() - startedAt;
+    if (elapsed < floorMs) {
+      await delay(floorMs - elapsed, undefined, { signal }).catch(() => {});
+    }
+    return { kind: "idle" };
+  }
 
   let processed = 0;
   for (const update of updates) {

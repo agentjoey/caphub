@@ -64,3 +64,45 @@ describe("EmbedBackoff", () => {
     expect(backoff.shouldSkip()).toBe(false);
   });
 });
+
+describe("EmbedBackoff — injectable floor/cap", () => {
+  it("uses the injected initial/max instead of the embed defaults", () => {
+    let now = 0;
+    const backoff = new EmbedBackoff({ now: () => now, initialMs: 2_000, maxMs: 60_000 });
+    backoff.onError();
+    expect(backoff.remainingMs()).toBe(2_000);
+    now += 2_000;
+    backoff.onError(); // doubles: 4_000
+    expect(backoff.remainingMs()).toBe(4_000);
+  });
+
+  it("caps doubling at the injected max, not the embed default", () => {
+    const backoff = new EmbedBackoff({ now: () => 0, initialMs: 2_000, maxMs: 60_000 });
+    for (let i = 0; i < 10; i++) backoff.onError();
+    expect(backoff.remainingMs()).toBe(60_000); // proves it isn't using the 5 min/1 h embed defaults
+  });
+
+  it("onError(overrideMs) backs off by exactly that long (e.g. a 429's retry_after), capped at max", () => {
+    let now = 1_000;
+    const backoff = new EmbedBackoff({ now: () => now, initialMs: 2_000, maxMs: 60_000 });
+    backoff.onError(5_000);
+    expect(backoff.remainingMs()).toBe(5_000);
+    now += 5_000;
+    expect(backoff.shouldSkip()).toBe(false);
+  });
+
+  it("onError(overrideMs) is capped at max even when the override is larger", () => {
+    const backoff = new EmbedBackoff({ now: () => 0, initialMs: 2_000, maxMs: 60_000 });
+    backoff.onError(999_000);
+    expect(backoff.remainingMs()).toBe(60_000);
+  });
+
+  it("a plain onError() after an override doubles from the pre-override delay, not the override", () => {
+    let now = 0;
+    const backoff = new EmbedBackoff({ now: () => now, initialMs: 2_000, maxMs: 60_000 });
+    backoff.onError(50_000); // override; internal doubling delay stays at 0
+    now += 50_000;
+    backoff.onError(); // no prior plain error yet -> floor
+    expect(backoff.remainingMs()).toBe(2_000);
+  });
+});

@@ -48,41 +48,56 @@ function buildTelegramWiring(config: WorkerConfig, pool: Pool, objects: ObjectSt
 }
 
 /**
+ * A routine long-poll blip (a dropped connection, a 502, a single 429) must not make the bot
+ * look dead for minutes — unlike the embed tick's provider-call backoff (5 min floor / 1 h cap,
+ * appropriate for a paid API call worth throttling hard), Telegram polling backs off gently:
+ * a 2 s floor and a 60 s cap, using the same `EmbedBackoff` class with its floor/cap overridden.
+ */
+const TELEGRAM_BACKOFF_INITIAL_MS = 2_000;
+const TELEGRAM_BACKOFF_MAX_MS = 60_000;
+
+/**
  * The Telegram long poll (`getUpdates`, up to a 25 s wait per call) and the notify push both run
  * here, on their own cadence, deliberately *outside* the main 2 s do/while loop below — serially
  * awaiting a 25 s poll inside that loop would starve the analysis/review/embed ticks (and the
  * retention sweep) for up to 25 s at a time. Each iteration's tick failures are caught and
- * backed off independently (mirroring the embed tick's `EmbedBackoff`) so neither ever aborts
- * this loop, and every `await` here takes `signal` so a SIGTERM aborts an in-flight long poll
- * immediately instead of waiting out its timeout.
+ * backed off independently (mirroring the embed tick's `EmbedBackoff`, but with a much gentler
+ * floor/cap — see {@link TELEGRAM_BACKOFF_INITIAL_MS}) so neither ever aborts this loop, and
+ * every `await` here takes `signal` so a SIGTERM aborts an in-flight long poll immediately
+ * instead of waiting out its timeout.
+ *
+ * While the poll is backed off, this sleeps out the *whole* remaining window in one `delay` (not
+ * a fixed 2 s re-check) and skips the notify tick entirely for that window — a poll failure is
+ * usually a shared network/Telegram-API problem, so retrying the notify push's two DB `SELECT`s
+ * on every wake would just burn queries for a push that's also likely to fail. The skip is
+ * logged once per window, not once per wake.
  */
 async function runTelegramLoop(wiring: TelegramWiring, log: (o: Record<string, unknown>) => void, signal: AbortSignal): Promise<void> {
-  const pollBackoff = new EmbedBackoff();
-  const notifyBackoff = new EmbedBackoff();
+  const pollBackoff = new EmbedBackoff({ initialMs: TELEGRAM_BACKOFF_INITIAL_MS, maxMs: TELEGRAM_BACKOFF_MAX_MS });
+  const notifyBackoff = new EmbedBackoff({ initialMs: TELEGRAM_BACKOFF_INITIAL_MS, maxMs: TELEGRAM_BACKOFF_MAX_MS });
   while (!signal.aborted) {
     if (pollBackoff.shouldSkip()) {
-      // A failed tick (offset/getUpdates error) returns immediately with no long-poll delay of
-      // its own — wait out the backoff window here so a persistent failure doesn't busy-loop.
-      log({ telegramTick: "skipped-backoff" });
-      await delay(2_000, undefined, { signal }).catch(() => {});
-    } else {
-      try {
-        const result = await runTelegramTick(wiring.loopDeps, signal);
-        if (result.kind === "error") {
-          log({ telegramTick: result });
-          pollBackoff.onError();
-        } else {
-          if (result.kind === "processed") log({ telegramTick: result });
-          pollBackoff.reset();
-        }
-      } catch (e) {
-        log({ telegramTickError: e instanceof Error ? e.message : String(e) });
-        pollBackoff.onError();
+      const forMs = pollBackoff.remainingMs();
+      log({ telegramTick: "skipped-backoff", forMs });
+      await delay(forMs, undefined, { signal }).catch(() => {});
+      continue;
+    }
+    try {
+      const result = await runTelegramTick(wiring.loopDeps, signal);
+      if (result.kind === "error") {
+        log({ telegramTick: result });
+        pollBackoff.onError(result.retryAfterMs);
+      } else {
+        if (result.kind === "processed") log({ telegramTick: result });
+        pollBackoff.reset();
       }
+    } catch (e) {
+      log({ telegramTickError: e instanceof Error ? e.message : String(e) });
+      pollBackoff.onError();
     }
     if (signal.aborted) break;
     if (notifyBackoff.shouldSkip()) {
-      log({ notifyTick: "skipped-backoff" });
+      log({ notifyTick: "skipped-backoff", forMs: notifyBackoff.remainingMs() });
     } else {
       try {
         const state = await runNotifyTick(wiring.notifyDeps, signal);
@@ -201,6 +216,12 @@ async function main() {
       await delay(2_000, undefined, { signal: controller.signal }).catch(() => {});
     } while (!controller.signal.aborted);
   } finally {
+    // Ensure the background telegramLoop (and anything else honoring `controller.signal`) is
+    // actually being asked to stop before we await it below — if control reaches here via a
+    // path that never called `stop()` (e.g. an exception escaping the main loop above), awaiting
+    // telegramLoop without this would hang the process forever, since that loop only exits on
+    // `signal.aborted`.
+    controller.abort();
     await retentionSweep;
     await telegramLoop;
     await pool.end();

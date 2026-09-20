@@ -6,6 +6,7 @@ import { runTelegramTick, type TelegramLoopDeps } from "./loop";
 import { encodeDecision } from "./router";
 import type { SearchDeps, SearchParams } from "./search";
 import type { TelegramUpdate } from "./api";
+import { TelegramError } from "./errors";
 
 const OWNER = 1000;
 
@@ -54,7 +55,7 @@ function baseDeps(overrides: Partial<TelegramLoopDeps> = {}): TelegramLoopDeps {
 
 describe("runTelegramTick", () => {
   it("is idle when getUpdates returns nothing", async () => {
-    const deps = baseDeps();
+    const deps = baseDeps({ minIdleIntervalMs: 0 });
     const result = await runTelegramTick(deps, new AbortController().signal);
     expect(result).toEqual({ kind: "idle" });
   });
@@ -62,9 +63,33 @@ describe("runTelegramTick", () => {
   it("reads the persisted offset and passes it to getUpdates", async () => {
     const { pool } = fakePool(42);
     const api = fakeGetUpdates([[]]);
-    const result = await runTelegramTick(baseDeps({ pool, api }), new AbortController().signal);
+    const result = await runTelegramTick(baseDeps({ pool, api, minIdleIntervalMs: 0 }), new AbortController().signal);
     expect(result).toEqual({ kind: "idle" });
     expect(api.calls[0]).toEqual({ offset: 42, timeout: 25 });
+  });
+
+  it("logs and falls back to no offset when the stored value isn't a safe integer", async () => {
+    const logs: Record<string, unknown>[] = [];
+    const query = async (text: string) => {
+      if (text.includes("SELECT value FROM caphub_v2.telegram_state")) return { rows: [{ value: "not-a-number" }] };
+      return { rows: [] };
+    };
+    const api = fakeGetUpdates([[]]);
+    const deps = baseDeps({ pool: { query } as never, api, log: (o) => logs.push(o), minIdleIntervalMs: 0 });
+    const result = await runTelegramTick(deps, new AbortController().signal);
+    expect(result).toEqual({ kind: "idle" });
+    expect(api.calls[0]).toEqual({ offset: undefined, timeout: 25 });
+    expect(logs.some((l) => l.telegram === "invalid-stored-offset" && l.value === "not-a-number")).toBe(true);
+  });
+
+  it("adds a floor delay before returning idle when getUpdates comes back immediately (a proxy ignoring the long-poll timeout)", async () => {
+    const api = fakeGetUpdates([[]]); // resolves instantly, unlike a real 25s long poll
+    const floorMs = 200;
+    const startedAt = Date.now();
+    const result = await runTelegramTick(baseDeps({ api, minIdleIntervalMs: floorMs }), new AbortController().signal);
+    const elapsed = Date.now() - startedAt;
+    expect(result).toEqual({ kind: "idle" });
+    expect(elapsed).toBeGreaterThanOrEqual(floorMs - 5); // small tolerance for timer scheduling jitter
   });
 
   it("routes a mixed batch (image, search text, command, callback) to the matching handler and persists offset after each", async () => {
@@ -158,6 +183,13 @@ describe("runTelegramTick", () => {
     const api = { getUpdates: async () => { throw new Error("network error"); } };
     const result = await runTelegramTick(baseDeps({ pool, api }), new AbortController().signal);
     expect(result).toEqual({ kind: "error", reason: "get-updates-failed" });
+  });
+
+  it("surfaces a 429's retry_after (in ms) so the caller can back off by exactly that long", async () => {
+    const { pool } = fakePool();
+    const api = { getUpdates: async () => { throw new TelegramError(429, "too many requests", 3); } };
+    const result = await runTelegramTick(baseDeps({ pool, api }), new AbortController().signal);
+    expect(result).toEqual({ kind: "error", reason: "get-updates-failed", retryAfterMs: 3_000 });
   });
 
   it("returns idle immediately when the signal is already aborted", async () => {

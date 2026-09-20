@@ -196,8 +196,12 @@ rolling deploy with the switch flipped afterward.
      arrives as a `❌ 分析失败` card with a single 重跑 button, even though it never became a
      library card.
    - Restart the `worker` service mid-conversation (Railway dashboard) and confirm no message is
-     either reprocessed (duplicate replies) or silently dropped — the persisted offset in
-     `caphub_v2.telegram_state` is what this step is verifying.
+     silently dropped, and that at most the in-flight message may repeat after the crash
+     (delivery is at-least-once by design, not exactly-once — the offset in
+     `caphub_v2.telegram_state` is only persisted after a message finishes handling, so a crash
+     between "handled" and "offset saved" reprocesses that one message on restart; every handler
+     tolerates this — capture dedupes, decide/requestRerun are idempotent under their own
+     conflict checks).
 6. **Rollback**: set `TELEGRAM_ENABLED` back to `false` and let `worker` redeploy. No schema
    rollback is needed — migration 006 is additive and inert with the flag off (the bot simply
    stops polling; in-flight `getUpdates` offset state is left in place for a future re-enable).

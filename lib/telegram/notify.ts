@@ -165,6 +165,12 @@ export interface CaptureFailure {
  * a capture stuck on repeated failures would otherwise never be notified). One row per capture
  * (its most recent still-unnotified failed run), so an older failed run for the same capture is
  * left as-is rather than double-pushed.
+ *
+ * TODO: an older superseded failed run for the same capture (one that was itself never
+ * notified, now shadowed by this capture's latest failed run) is permanently skipped by
+ * `DISTINCT ON (c.id)` above — it's never pushed and never marked notified. Low-risk (bounded,
+ * doesn't affect current behavior beyond that one run's push being silently dropped) but should
+ * eventually either mark those rows notified too, or push them as a single combined message.
  */
 async function selectFailedCaptureRuns(pool: Pool): Promise<CaptureFailure[]> {
   const { rows } = await pool.query<CaptureFailure>(
