@@ -1,6 +1,9 @@
 import type { Pool } from "pg";
 import type { CapabilityType } from "../analysis/card";
 import { loadScenarios } from "../analysis/scenarios";
+import { setProgress } from "../library/actions";
+import { appendBuildNote, normalizeNote } from "../library/build-notes";
+import type { Progress } from "../library/labels";
 import { embedSearchQuery } from "../library/query-embedding";
 import { getCapabilityDetail, libraryStats, listLibrary, listTodoCapabilities, type CapabilityDetail, type CapabilityRow, type LibraryFilter } from "../library/queries";
 import { matchScenarios } from "../library/scenario-match";
@@ -126,4 +129,61 @@ export async function listRecent(deps: ToolDeps, input: ListRecentInput = {}) {
 /** Library-wide counts (by type, tag count, pending, to-build) — plain numbers, always JSON-safe. */
 export function getStats(deps: ToolDeps) {
   return libraryStats(deps.pool);
+}
+
+/** Self-build progress an agent may set — never `todo`/`planned`, which are the human's scheduling act. */
+const AGENT_PROGRESS = ["building", "done", "dropped"] as const;
+
+export interface SetBuildProgressInput {
+  serial: string;
+  progress: string;
+  link?: string | null;
+  note?: string;
+  by?: string;
+}
+
+export type WriteToolResult =
+  | { ok: true; serial: string; progress?: string; noteCount?: number; noteSkipped?: string }
+  | { ok: false; error: string };
+
+/**
+ * The only way an agent can move a card's self-build progress. Refuses `todo`/`planned` outright
+ * (those are the human's scheduling decision, not the agent's), then resolves the serial and
+ * delegates to {@link setProgress}. When a `note` is also given, it is appended in a *second*
+ * write — the ruling for this task is that these are two statements, not one transaction — and
+ * critically uses the `updatedAt` `setProgress` just returned as the note's optimistic-lock
+ * token, not the one read before the progress write, since `setProgress` already bumped
+ * `updated_at` and the stale value would make the note's own lock check fail every time.
+ */
+export async function setBuildProgress(deps: ToolDeps, input: SetBuildProgressInput): Promise<WriteToolResult> {
+  if (!(AGENT_PROGRESS as readonly string[]).includes(input.progress)) {
+    return { ok: false, error: "progress 只能是 building / done / dropped；排期（todo / planned）由人来定" };
+  }
+  const card = await resolveSerial(deps.pool, input.serial);
+  if (!card) return { ok: false, error: `找不到编号 ${input.serial}` };
+  const r = await setProgress(deps.pool, { id: card.id, expectedUpdatedAt: card.updatedAt, progress: input.progress as Progress, link: input.link ?? null });
+  if (!r.ok) return { ok: false, error: r.message };
+  if (!input.note) return { ok: true, serial: input.serial, progress: input.progress };
+  const note = normalizeNote({ by: input.by, text: input.note });
+  if (!note) return { ok: true, serial: input.serial, progress: input.progress, noteSkipped: "笔记为空或超过 2000 字" };
+  const n = await appendBuildNote(deps.pool, { id: card.id, expectedUpdatedAt: r.updatedAt, note });
+  return n.ok
+    ? { ok: true, serial: input.serial, progress: input.progress, noteCount: 1 }
+    : { ok: false, error: n.message };
+}
+
+export interface AppendNoteInput {
+  serial: string;
+  note: string;
+  by?: string;
+}
+
+/** Appends a self-build note without touching progress — resolveSerial -> normalizeNote -> appendBuildNote. */
+export async function appendNote(deps: ToolDeps, input: AppendNoteInput): Promise<WriteToolResult> {
+  const card = await resolveSerial(deps.pool, input.serial);
+  if (!card) return { ok: false, error: `找不到编号 ${input.serial}` };
+  const note = normalizeNote({ by: input.by, text: input.note });
+  if (!note) return { ok: false, error: "笔记为空或超过 2000 字" };
+  const n = await appendBuildNote(deps.pool, { id: card.id, expectedUpdatedAt: card.updatedAt, note });
+  return n.ok ? { ok: true, serial: input.serial, noteCount: 1 } : { ok: false, error: n.message };
 }

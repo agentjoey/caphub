@@ -1,6 +1,18 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CapabilityDetail } from "../library/queries";
-import { getCapability, getStats, listRecent, listToBuild, MAX_ITEMS, resolveSerial, searchCapabilities } from "./tools";
+
+const { setProgressMock, appendBuildNoteMock } = vi.hoisted(() => ({
+  setProgressMock: vi.fn(),
+  appendBuildNoteMock: vi.fn()
+}));
+
+vi.mock("../library/actions", () => ({ setProgress: setProgressMock }));
+vi.mock("../library/build-notes", async () => {
+  const actual = await vi.importActual<typeof import("../library/build-notes")>("../library/build-notes");
+  return { ...actual, appendBuildNote: appendBuildNoteMock };
+});
+
+import { appendNote, getCapability, getStats, listRecent, listToBuild, MAX_ITEMS, resolveSerial, searchCapabilities, setBuildProgress } from "./tools";
 
 const fakePool = (rows: unknown[]) => ({ query: vi.fn().mockResolvedValue({ rows, rowCount: rows.length }) });
 
@@ -114,5 +126,67 @@ describe("mcp tools", () => {
       byType: { skill: 0, experience: 0, plugin: 0, prompt: 0, tool: 0, model: 0, other: 0 },
       total: 0, tagCount: 0, pending: 0, toBuild: 0
     });
+  });
+});
+
+describe("mcp write tools", () => {
+  const resolvedCard = { id: "cap_1", captureId: "cpt_1", updatedAt: "2026-09-21T00:00:00.000Z" };
+  const deps = { pool: fakePool([{ id: "cap_1", capture_id: "cpt_1", updated_at: new Date(resolvedCard.updatedAt) }]) as never };
+
+  beforeEach(() => {
+    setProgressMock.mockReset();
+    appendBuildNoteMock.mockReset();
+  });
+
+  it("refuses to move progress back to todo or planned", async () => {
+    await expect(setBuildProgress(deps, { serial: "SKL-0031", progress: "todo" }))
+      .resolves.toMatchObject({ ok: false });
+    await expect(setBuildProgress(deps, { serial: "SKL-0031", progress: "planned" }))
+      .resolves.toMatchObject({ ok: false });
+    expect(setProgressMock).not.toHaveBeenCalled();
+  });
+
+  it("writes the progress and appends the note in the same call, using setProgress's new updatedAt for the note lock", async () => {
+    const newUpdatedAt = "2026-09-21T00:00:01.000Z";
+    setProgressMock.mockResolvedValueOnce({ ok: true, updatedAt: newUpdatedAt });
+    appendBuildNoteMock.mockResolvedValueOnce({ ok: true, updatedAt: newUpdatedAt });
+
+    const res = await setBuildProgress(deps, { serial: "SKL-0031", progress: "done", note: "装上就能用", by: "claude" });
+
+    expect(res).toMatchObject({ ok: true, progress: "done", noteCount: 1 });
+    expect(setProgressMock).toHaveBeenCalledWith(
+      deps.pool,
+      { id: "cap_1", expectedUpdatedAt: resolvedCard.updatedAt, progress: "done", link: null }
+    );
+    expect(appendBuildNoteMock).toHaveBeenCalledWith(
+      deps.pool,
+      expect.objectContaining({ id: "cap_1", expectedUpdatedAt: newUpdatedAt, note: expect.objectContaining({ by: "claude", text: "装上就能用" }) })
+    );
+  });
+
+  it("reports a conflict instead of overwriting", async () => {
+    setProgressMock.mockResolvedValueOnce({ ok: false, reason: "CONFLICT", message: "已在别处处理" });
+
+    await expect(setBuildProgress(deps, { serial: "SKL-0031", progress: "done" }))
+      .resolves.toMatchObject({ ok: false, error: expect.stringContaining("别处") });
+  });
+
+  it("reports not-found for an unknown serial", async () => {
+    const missingDeps = { pool: fakePool([]) as never };
+    await expect(appendNote(missingDeps, { serial: "SKL-9999", note: "x" })).resolves.toMatchObject({ ok: false });
+    expect(appendBuildNoteMock).not.toHaveBeenCalled();
+  });
+
+  it("appendNote resolves the serial, normalizes the note and appends it without touching progress", async () => {
+    appendBuildNoteMock.mockResolvedValueOnce({ ok: true, updatedAt: "2026-09-21T00:00:02.000Z" });
+
+    const res = await appendNote(deps, { serial: "SKL-0031", note: "还需要测一下移动端", by: "claude" });
+
+    expect(res).toMatchObject({ ok: true, noteCount: 1 });
+    expect(setProgressMock).not.toHaveBeenCalled();
+    expect(appendBuildNoteMock).toHaveBeenCalledWith(
+      deps.pool,
+      expect.objectContaining({ id: "cap_1", expectedUpdatedAt: resolvedCard.updatedAt, note: expect.objectContaining({ by: "claude", text: "还需要测一下移动端" }) })
+    );
   });
 });
