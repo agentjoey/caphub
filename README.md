@@ -17,3 +17,8 @@ npm run worker
 完整设计规格见 [`docs/superpowers/specs/2026-09-19-caphub-v2-design.md`](./docs/superpowers/specs/2026-09-19-caphub-v2-design.md)。
 
 基础实现计划见 [`docs/superpowers/plans/2026-09-19-caphub-v2-foundation.md`](./docs/superpowers/plans/2026-09-19-caphub-v2-foundation.md)。
+
+## Agent 接入
+
+其他 agent（claude / codex / opencode）连接 Caphub 的远程 MCP server，见
+[`docs/agent-access.md`](./docs/agent-access.md)。

@@ -21,7 +21,21 @@ describe("verifyAccessJwt", () => {
     const token = await sign({ aud: "aud1", iss: `https://${teamDomain}`, email: "a@b.c" });
     await expect(
       verifyAccessJwt(token, { aud: "aud1", teamDomain, fetch: fetchFn })
-    ).resolves.toEqual({ email: "a@b.c" });
+    ).resolves.toEqual({ email: "a@b.c", commonName: "" });
+  });
+
+  it("returns the common_name identity for a service-token JWT with no email", async () => {
+    const { fetchFn, sign, teamDomain } = await setup();
+    const token = await sign({ aud: "aud1", iss: `https://${teamDomain}`, common_name: "caphub-agent" });
+    await expect(verifyAccessJwt(token, { aud: "aud1", teamDomain, fetch: fetchFn }))
+      .resolves.toEqual({ email: "", commonName: "caphub-agent" });
+  });
+
+  it("still rejects a JWT carrying neither email nor common_name", async () => {
+    const { fetchFn, sign, teamDomain } = await setup();
+    const token = await sign({ aud: "aud1", iss: `https://${teamDomain}` });
+    await expect(verifyAccessJwt(token, { aud: "aud1", teamDomain, fetch: fetchFn }))
+      .rejects.toThrow(/ACCESS_IDENTITY_MISSING/);
   });
 
   it("rejects wrong aud", async () => {
@@ -45,7 +59,7 @@ describe("verifyAccessJwt", () => {
     const token = await sign({ aud: "aud1", iss: `https://${teamDomain}` });
     await expect(
       verifyAccessJwt(token, { aud: "aud1", teamDomain, fetch: fetchFn })
-    ).rejects.toThrow("ACCESS_EMAIL_MISSING");
+    ).rejects.toThrow("ACCESS_IDENTITY_MISSING");
   });
 
   it("rejects an expired token", async () => {
@@ -102,7 +116,7 @@ describe("verifyAccessJwt", () => {
           .setProtectedHeader({ alg: "RS256", kid: "old" }).setIssuedAt().setExpirationTime("1h").sign(oldPrivate),
         { aud: "aud1", teamDomain, fetch: fetchFn as unknown as typeof fetch }
       )
-    ).resolves.toEqual({ email: "a@b.c" });
+    ).resolves.toEqual({ email: "a@b.c", commonName: "" });
 
     // Now the server has rotated to a new key not yet in our cache.
     fetchFn.mockImplementation(async () => new Response(JSON.stringify({ keys: [newJwk] }), { status: 200, headers: { "content-type": "application/json" } }));
@@ -111,6 +125,6 @@ describe("verifyAccessJwt", () => {
 
     await expect(
       verifyAccessJwt(token, { aud: "aud1", teamDomain, fetch: fetchFn as unknown as typeof fetch })
-    ).resolves.toEqual({ email: "rotated@b.c" });
+    ).resolves.toEqual({ email: "rotated@b.c", commonName: "" });
   });
 });

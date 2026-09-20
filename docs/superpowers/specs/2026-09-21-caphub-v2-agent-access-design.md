@@ -35,7 +35,7 @@ web、Telegram、MCP 三个入口共用同一套查询与同一套乐观锁。
 
 | 工具 | 入参 | 返回 |
 |---|---|---|
-| `search_capabilities` | `query`（自然语言）、`limit`（默认 10，上限 25）、可选 `type` / `tags` / `usage` | 编号、标题、类型、评分、`summary` 引子、`summary_points` |
+| `search_capabilities` | `query`（自然语言）、`limit`（默认 10，上限 20，等于 PAGE_SIZE，因为没有分页参数）、可选 `type` / `tags` / `usage` | 编号、标题、类型、评分、`summary` 引子、`summary_points` |
 | `get_capability` | `serial`（如 `SKL-0031`） | 完整卡片：要点、价值信号、playbook、来源事实、深度分析（若有）、待核实、自研进度与笔记 |
 | `list_to_build` | `limit` | 待自研的卡（`usage='reference'` 且 `progress ∈ (todo, planned)`，仅 `status='active'`） |
 | `list_recent` | `limit` | 最近入库的卡 |
@@ -83,7 +83,7 @@ Telegram 卡片不加笔记（会把卡片撑长），但 `/todo` 的卡片在�
 
 ## 7. 错误、日志与边界
 
-- 单用户场景不做限流，但限死返回体量：搜索最多 25 条，卡片正文字段按既有上限截断。
+- 单用户场景不做限流，但限死返回体量：搜索最多 PAGE_SIZE（20）条，卡片正文字段按既有上限截断。
 - 所有工具调用记结构化日志：工具名、编号、结果、耗时；**不记 token、不记图片内容、不记密钥**。
 - 任何未知工具名、参数校验失败，返回 MCP 标准错误，不抛裸异常。
 - `/api/mcp` 不参与 Cloudflare Access 的浏览器登录流程，不设 cookie。

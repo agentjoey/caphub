@@ -10,7 +10,41 @@ function request(init: { headers?: Record<string, string>; cookie?: string } = {
   return new NextRequest("http://localhost/api/captures", { headers });
 }
 
+const mcp = (headers: Record<string, string> = {}) =>
+  new NextRequest("http://localhost/api/mcp", { method: "POST", headers });
+const MCP_ENV = { ...ENV, CF_ACCESS_SERVICE_TOKEN_CN: "caphub-agent" };
+
 describe("guardRequest", () => {
+  it("401s on /api/mcp when no service-token common name is configured", async () => {
+    const verify = vi.fn().mockResolvedValue({ email: "", commonName: "caphub-agent" });
+    const res = await guardRequest(mcp({ "cf-access-jwt-assertion": "t" }), ENV, { verify });
+    expect(res.status).toBe(401);
+  });
+
+  it("401s on /api/mcp when the common name does not match the allowlist", async () => {
+    const verify = vi.fn().mockResolvedValue({ email: "", commonName: "someone-elses-token" });
+    const res = await guardRequest(mcp({ "cf-access-jwt-assertion": "t" }), MCP_ENV, { verify });
+    expect(res.status).toBe(401);
+  });
+
+  it("lets the configured service token through on /api/mcp", async () => {
+    const verify = vi.fn().mockResolvedValue({ email: "", commonName: "caphub-agent" });
+    const res = await guardRequest(mcp({ "cf-access-jwt-assertion": "t" }), MCP_ENV, { verify });
+    expect(res.status).not.toBe(401);
+  });
+
+  it("401s on /api/mcp for a human email JWT", async () => {
+    const verify = vi.fn().mockResolvedValue({ email: "theagentjoey@gmail.com", commonName: "" });
+    const res = await guardRequest(mcp({ "cf-access-jwt-assertion": "t" }), MCP_ENV, { verify });
+    expect(res.status).toBe(401);
+  });
+
+  it("401s on a normal page for a service-token JWT", async () => {
+    const verify = vi.fn().mockResolvedValue({ email: "", commonName: "caphub-agent" });
+    const res = await guardRequest(new NextRequest("http://localhost/library"), MCP_ENV, { verify });
+    expect(res.status).toBe(401);
+  });
+
   it("returns 401 when no token is present", async () => {
     const verify = vi.fn();
     const res = await guardRequest(request(), ENV, { verify });

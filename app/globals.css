@@ -753,3 +753,11 @@ a.stat--accent:hover { background: #fcebcc; border-color: var(--amber-border); }
 .deep-analysis__trigger { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-top: var(--space-4); }
 .deep-analysis__cost { color: var(--ink-faint); font-size: var(--text-xs); }
 .deep-analysis .notice, .deep-analysis .inline-error { margin-top: var(--space-3); }
+
+/* Build notes (M4): append-only notes an external agent writes back after self-building a
+   capability. A plain list, newest first — author/time are secondary metadata, so they sit
+   faint and small above each note's text. */
+.build-notes__list { display: flex; flex-direction: column; gap: var(--space-4); }
+.build-notes__list li + li { padding-top: var(--space-4); border-top: 1px solid var(--hairline); }
+.build-notes__meta { margin-bottom: 4px; color: var(--ink-faint); font-size: var(--text-xs); }
+.build-notes__text { max-width: var(--measure); font-size: var(--text-sm); line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }

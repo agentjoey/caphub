@@ -209,6 +209,9 @@ export const dictZh = {
     saving: "保存中…",
     genericError: "操作失败，请重试"
   },
+  buildNotes: {
+    title: "自研笔记"
+  },
   detailActions: {
     keep: "保留",
     discard: "丢弃",
