@@ -86,10 +86,10 @@ export function listPending(pool: Q, opts: { page: number }) {
 }
 
 /**
- * Self-build progress states shown by the Telegram `/todo` command — kept, reference-only cards
+ * Self-build progress states counted as 待自研 — kept, reference-only cards
  * not yet started. `building` is deliberately excluded (owner ruling, 2026-09-20, reversing an
  * earlier controller ruling): once self-build has begun, the card is "自研中", not "待自研", so it
- * no longer belongs in `/todo` or the library's 待自研 tile. Those cards remain reachable through
+ * no longer belongs in the library's 待自研 tile. Those cards remain reachable through
  * the library's own progress filter.
  */
 export const TODO_PROGRESS: Progress[] = ["todo", "planned"];
@@ -100,21 +100,21 @@ export const TODO_PROGRESS: Progress[] = ["todo", "planned"];
  * decide whether a failed analysis rerun should still render as a self-build card (progress line
  * + progress buttons) rather than the bare 分析失败 card — a card already `building` deserves that
  * treatment just as much as one still `todo`/`planned`, even though it no longer belongs in
- * `/todo` or the library's 待自研 tile (see {@link TODO_PROGRESS}).
+ * the library's 待自研 tile (see {@link TODO_PROGRESS}).
  */
 export const SELF_BUILD_PROGRESS: Progress[] = ["todo", "planned", "building"];
 
 /**
- * A `/todo` row: a card plus the state of its capture's latest analysis run. That run may have
+ * A 待自研 row: a card plus the state of its capture's latest analysis run. That run may have
  * failed (a failed *rerun* of an already-decided card leaves the card's own columns holding the
- * previous, successful run's data), which `/todo` notes on the card — see commands.ts.
+ * previous, successful run's data), which the self-build card notes — see telegram/format.ts.
  */
 export interface TodoCapabilityRow extends CapabilityRow {
   lastRunState: string | null;
   lastRunErrorCode: string | null;
 }
 
-/** Kept `usage='reference'` cards still awaiting/undergoing self-build — backs the Telegram `/todo` command (commands.ts). */
+/** Kept `usage='reference'` cards still awaiting/undergoing self-build — backs the library's 待自研 filter and the MCP `list_to_build` tool. */
 export function listTodoCapabilities(pool: Q, opts: { page: number }) {
   return paged<TodoCapabilityRow>(
     pool,
@@ -124,7 +124,7 @@ export function listTodoCapabilities(pool: Q, opts: { page: number }) {
     undefined,
     {
       columns: `lr.state AS "lastRunState", lr.error_code AS "lastRunErrorCode"`,
-      // kind = 'analysis': a failed *deep* run must not put a 上次分析失败 note on a /todo card
+      // kind = 'analysis': a failed *deep* run must not put a 上次分析失败 note on a self-build card
       // (see notify.ts's CANDIDATE_FROM, and getCapabilityDetail's own deep-scoped lateral).
       join: `LEFT JOIN LATERAL (
        SELECT state, error_code FROM caphub_v2.analysis_runs
@@ -207,7 +207,7 @@ export interface LibraryStats { byType: Record<CapabilityType, number>; total: n
  * The `progress` values counted by the library stats bar's "待自研" tile — kept, reference-only
  * cards not yet started. Deliberately the *same* set as {@link TODO_PROGRESS} (a card that has
  * entered self-build is "自研中", not "待自研," even though it isn't `done` yet): the tile's count,
- * its filter link, `/todo`'s list and its "更多" link must all describe exactly the same cards,
+ * its filter link and the MCP `list_to_build` tool must all describe exactly the same cards,
  * not two subtly different ones.
  */
 export const TO_BUILD_PROGRESS: Progress[] = TODO_PROGRESS;

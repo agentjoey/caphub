@@ -112,10 +112,10 @@ function dbErrorCode(error: unknown): string | undefined {
  */
 export function buildFormatInput(candidate: Candidate, scenarioLabel: Map<string, string>): FormatCardInput {
   if (candidate.runState === "failed") {
-    // ...unless the card is a self-build candidate (the same rows `/todo` lists). Replacing one
+    // ...unless the card is a self-build candidate. Replacing one
     // of those with the bare 「分析失败」 card drops its 进度 line and its progress buttons — and
     // because this push EDITS the card's stored Telegram message, it would also overwrite a
-    // `/todo` card the owner is looking at. Such a card keeps its self-build rendering and only
+    // self-build card the owner is looking at. Such a card keeps its self-build rendering and only
     // gains a muted note about the failed run.
     if (isSelfBuildCard(candidate)) return buildTodoFormatInput(candidate, scenarioLabel);
     const input: FailedCardInput = { status: "failed", id: candidate.id, updatedAt: candidate.updatedAt.toISOString(), errorCode: candidate.errorCode };
@@ -143,10 +143,10 @@ export function buildFormatInput(candidate: Candidate, scenarioLabel: Map<string
 }
 
 /**
- * Builds a `/todo` self-build card's `formatResult` input (see format.ts's `formatTodo`) from a
- * candidate — used by decide.ts to re-render a `/todo` card in place after a progress-button
+ * Builds a self-build card's `formatResult` input (see format.ts's `formatTodo`) from a
+ * candidate — used by decide.ts to re-render a self-build card in place after a progress-button
  * press (see `handleProgress`). Unlike {@link buildFormatInput}, this never branches on
- * `runState`/`verdict`: a `/todo` card is, by construction, already a kept `usage='reference'`
+ * `runState`/`verdict`: a self-build card is, by construction, already a kept `usage='reference'`
  * card with a self-build `progress` to show.
  */
 export function buildTodoFormatInput(candidate: Candidate, scenarioLabel: Map<string, string>): TodoCardInput {
@@ -171,7 +171,7 @@ export function buildTodoFormatInput(candidate: Candidate, scenarioLabel: Map<st
 
 /**
  * True for a kept, `usage='reference'` card still in the self-build pipeline (todo/planned/
- * building) — wider than `/todo`'s own list (see {@link SELF_BUILD_PROGRESS}), so a card whose
+ * building) — wider than the 待自研 list (see {@link SELF_BUILD_PROGRESS}), so a card whose
  * self-build is already underway still gets its progress line/buttons on a failed rerun instead
  * of the bare 分析失败 card.
  */

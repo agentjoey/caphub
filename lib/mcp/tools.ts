@@ -114,7 +114,7 @@ export interface ListToBuildInput {
   limit?: number;
 }
 
-/** Kept, reference-only cards still awaiting/undergoing self-build (the `/todo` set). */
+/** Kept, reference-only cards still awaiting self-build (progress todo / planned). */
 export async function listToBuild(deps: ToolDeps, input: ListToBuildInput = {}) {
   const { items, total } = await listTodoCapabilities(deps.pool, { page: 1 });
   return { total, items: items.slice(0, clamp(input.limit, 10)).map(toBrief) };

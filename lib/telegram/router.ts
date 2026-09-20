@@ -57,7 +57,7 @@ export interface RouterUpdate extends TelegramUpdate {
  * run failed, so no capability row exists yet to look up (see notify.ts's failed-run-with-no-
  * capability selection branch, and decide.ts's handling of it).
  *
- * `"progress-building"`/`"progress-done"`/`"progress-dropped"` (the `/todo` card's 🔨/✅/🚫
+ * `"progress-building"`/`"progress-done"`/`"progress-dropped"` (the self-build card's 🔨/✅/🚫
  * buttons — see commands.ts and decide.ts) carry a capability id, like `"keep"`/`"discard"`, and
  * are handled the same optimistic-lock way, just calling `setProgress` instead of `decide`.
  *

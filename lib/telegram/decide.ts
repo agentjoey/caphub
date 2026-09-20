@@ -46,7 +46,7 @@ const TOAST = {
   deep: "已排队"
 } as const;
 
-/** Maps a `/todo` card's callback action to the `Progress` value `setProgress` should write. */
+/** Maps a self-build card's callback action to the `Progress` value `setProgress` should write. */
 const PROGRESS_ACTION_VALUE: Record<"progress-building" | "progress-done" | "progress-dropped", Progress> = {
   "progress-building": "building",
   "progress-done": "done",
@@ -108,7 +108,7 @@ export async function editCardAfterEnrich(deps: EditCardAfterEnrichDeps, capabil
   }
 }
 
-/** {@link editToCurrentState}'s counterpart for a `/todo` self-build card — re-renders via `buildTodoFormatInput`/`formatTodo` instead of the verdict-based `buildFormatInput`, with buttons stripped the same way. */
+/** {@link editToCurrentState}'s counterpart for a self-build card — re-renders via `buildTodoFormatInput`/`formatTodo` instead of the verdict-based `buildFormatInput`, with buttons stripped the same way. */
 async function editTodoToCurrentState(deps: HandleCallbackDeps, cb: CallbackDecoded, candidate: Candidate, signal?: AbortSignal): Promise<void> {
   const scenarioLabel = await loadScenarioLabels(deps.pool);
   const rendered = formatResult(buildTodoFormatInput(candidate, scenarioLabel));
@@ -207,7 +207,7 @@ export async function handleCallback(deps: HandleCallbackDeps, cb: CallbackDecod
 
     if (candidate.updatedAt.toISOString() !== cb.updatedAt) {
       await safeAnswer(deps, cb, dict.conflict, signal);
-      // A stale progress-* press is on a /todo card, not a verdict card — re-rendering it via
+      // A stale progress-* press is on a self-build card, not a verdict card — re-rendering it via
       // editToCurrentState would rewrite it into a verdict card (e.g. "已保留 · SKL-…"), losing
       // the 进度 line. Mirror handleProgress's own CONFLICT branch and use editTodoToCurrentState
       // for these actions instead.
@@ -310,7 +310,7 @@ async function handleRerun(deps: HandleCallbackDeps, cb: CallbackDecoded, candid
 }
 
 /**
- * Handles a `/todo` card's 🔨开始自研/✅已完成/🚫放弃 button press: writes the new `progress` via
+ * Handles a self-build card's 🔨开始自研/✅已完成/🚫放弃 button press: writes the new `progress` via
  * the shared `setProgress` action (the single writer — see lib/library/actions.ts), then
  * re-renders the message via {@link editTodoToCurrentState} with buttons removed. The optimistic
  * lock is already verified by `handleCallback`'s pre-check before this runs, but `setProgress`

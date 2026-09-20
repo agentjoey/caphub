@@ -59,7 +59,7 @@ export interface DecidedCardInput {
 }
 
 /**
- * Input to `formatResult` for a `/todo` self-build card (AJ-298): a kept, `usage='reference'`
+ * Input to `formatResult` for a self-build card (AJ-298): a kept, `usage='reference'`
  * card with self-build `progress` in `('todo','planned','building')` — see commands.ts's
  * `listTodoCapabilities`. Deliberately narrower than {@link DecidedCardInput}: there is no
  * suggestion to show (the card is already decided), so no `suggestedVerdict`/`suggestedReason`.
@@ -343,7 +343,7 @@ function formatPending(card: DecidedCardInput): FormattedMessage {
 }
 
 /**
- * Renders a `/todo` self-build card (AJ-298): title, 总结, 场景·标签, 评分 (when present), 进度 —
+ * Renders a self-build card (AJ-298): title, 总结, 场景·标签, 评分 (when present), 进度 —
  * same paragraph layout as {@link formatPending} minus the 建议 line (the card is already kept,
  * there's no suggestion to show), plus a 进度 line and the 开始自研/已完成/放弃/去 web buttons —
  * and, when the capture's latest analysis run failed, a muted note plus a 重跑分析 button.
@@ -383,7 +383,7 @@ function formatTodo(card: TodoCardInput): FormattedMessage {
       ]
     ]
   };
-  // A todo card always has a capability row (that's what `/todo` lists), so its rerun always
+  // A self-build card always has a capability row, so its rerun always
   // encodes the plain "rerun" action with the capability id — the "rerun-capture" variant only
   // applies to a capture whose first run failed before any capability existed (see formatFailed).
   if (card.lastRunError !== undefined) {

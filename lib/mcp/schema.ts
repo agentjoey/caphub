@@ -36,7 +36,7 @@ export const TOOL_DEFS = [
   },
   {
     name: "list_to_build",
-    description: "列出还在等待自建、尚未开始的卡片（todo / planned，/todo 集合）。一旦标记为 building 就会从这个列表移除。想知道'接下来该做什么'时用这个。",
+    description: "列出还在等待自建、尚未开始的卡片（progress 为 todo / planned）。一旦标记为 building 就会从这个列表移除。想知道'接下来该做什么'时用这个。",
     inputSchema: {
       type: "object",
       properties: {

@@ -169,7 +169,7 @@ export async function setProgress(
   // verdict = 'keep' guards against a discarded reference card sitting at a progress other than
   // its initial 'todo' — a discard should retire the card from self-build tracking, but nothing
   // else resets `progress`, so without this a discarded card could otherwise be pushed to
-  // 'building' and then never show up (or wrongly keep showing up) in the 待自研 tile / `/todo`.
+  // 'building' and then never show up (or wrongly keep showing up) in the 待自研 tile.
   const r = await pool.query<{ updated_at: Date }>(
     `UPDATE caphub_v2.capabilities SET progress = $3, progress_link = $4, progress_at = now(), updated_at = now()
      WHERE id = $1 AND date_trunc('milliseconds', updated_at) = $2::timestamptz AND deleted_at IS NULL AND usage = 'reference' AND verdict = 'keep'
