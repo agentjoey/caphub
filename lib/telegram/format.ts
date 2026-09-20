@@ -212,22 +212,31 @@ function scoreLine(score: number | null | undefined, reason: string | null | und
 function formatKeep(card: DecidedCardInput): FormattedMessage {
   const serial = formatSerial(card.type, card.serial);
   const header = serial ? `✅ 已保留 · ${escapeHtml(serial)}` : "✅ 已保留";
-  const build = (f: ShrinkableFields) =>
-    [
+  const build = (f: ShrinkableFields) => {
+    const lines = [
       header,
       `<b>${escapeHtml(f.title)}</b>`,
       metaLine(card),
       scenariosLine(f.scenarioLabels),
-      tagsLine(f.tags),
-      libraryLinkHtml(card.id, "详情")
-    ].join("\n");
+      tagsLine(f.tags)
+    ];
+    const score = scoreLine(card.score, card.scoreReason);
+    if (score) lines.push(score);
+    lines.push(libraryLinkHtml(card.id, "详情"));
+    return lines.join("\n");
+  };
   const text = shrinkUntilFits(build, { title: card.title, tags: card.tags, scenarioLabels: card.scenarioLabels });
   return { text };
 }
 
 function formatDiscard(card: DecidedCardInput): FormattedMessage {
-  const build = (f: ShrinkableFields) =>
-    ["🗑 已丢弃", `<b>${escapeHtml(f.title)}</b>`, escapeHtml(f.body ?? ""), libraryLinkHtml(card.id, "详情")].join("\n");
+  const build = (f: ShrinkableFields) => {
+    const lines = ["🗑 已丢弃", `<b>${escapeHtml(f.title)}</b>`, escapeHtml(f.body ?? "")];
+    const score = scoreLine(card.score, card.scoreReason);
+    if (score) lines.push(score);
+    lines.push(libraryLinkHtml(card.id, "详情"));
+    return lines.join("\n");
+  };
   const text = shrinkUntilFits(build, { title: card.title, tags: [], scenarioLabels: [], body: card.suggestedReason });
   return { text };
 }
@@ -251,7 +260,7 @@ function formatPending(card: DecidedCardInput): FormattedMessage {
       `<b>${escapeHtml(f.title)}</b>`,
       `建议：${suggestedVerdictLabel(card.suggestedVerdict)} · ${escapeHtml(card.suggestedReason)}`,
       `总结：${escapeHtml(f.body ?? "")}`,
-      `${scenariosLine(f.scenarioLabels)} · ${tagsLine(f.tags)}`
+      `${metaLine(card)} · ${scenariosLine(f.scenarioLabels)} · ${tagsLine(f.tags)}`
     ];
     const score = scoreLine(card.score, card.scoreReason);
     if (score) paragraphs.push(score);
@@ -311,7 +320,7 @@ function formatFailed(card: FailedCardInput): FormattedMessage {
   const text = `❌ 分析失败 · ${escapeHtml(reason)}`;
   const action: DecisionAction = card.target === "capture" ? "rerun-capture" : "rerun";
   const replyMarkup: InlineKeyboardMarkup = {
-    inline_keyboard: [[{ text: "重跑", callback_data: encodeDecision(action, card.id, card.updatedAt) }]]
+    inline_keyboard: [[{ text: "♻️ 重跑分析", callback_data: encodeDecision(action, card.id, card.updatedAt) }]]
   };
   return { text, replyMarkup };
 }

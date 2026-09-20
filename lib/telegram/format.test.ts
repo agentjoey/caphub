@@ -60,6 +60,17 @@ describe("formatResult — keep", () => {
     const out = formatResult(base);
     expect(out.text).toContain('<a href="https://caphub.agentjoey.ai/library/cab_deadbeefcafef00d">详情</a>');
   });
+
+  it("AJ-298: shows 评分：★4/5 with the reason when the card has a score", () => {
+    const out = formatResult({ ...base, score: 4, scoreReason: "生态成熟" });
+    expect(out.text).toContain("评分：★4/5 · 生态成熟");
+  });
+
+  it("AJ-298: omits the 评分 line when the card has no score (never renders ★0/5)", () => {
+    const out = formatResult({ ...base, score: null, scoreReason: null });
+    expect(out.text).not.toContain("评分");
+    expect(out.text).not.toContain("★");
+  });
 });
 
 describe("formatResult — discard", () => {
@@ -75,6 +86,16 @@ describe("formatResult — discard", () => {
   it("also links via an HTML anchor labeled 详情", () => {
     const out = formatResult({ ...base, status: "discard" });
     expect(out.text).toContain('<a href="https://caphub.agentjoey.ai/library/cab_deadbeefcafef00d">详情</a>');
+  });
+
+  it("AJ-298: shows 评分：★4/5 with the reason when the card has a score", () => {
+    const out = formatResult({ ...base, status: "discard", score: 2, scoreReason: "内容过旧" });
+    expect(out.text).toContain("评分：★2/5 · 内容过旧");
+  });
+
+  it("AJ-298: omits the 评分 line when the card has no score", () => {
+    const out = formatResult({ ...base, status: "discard", score: null, scoreReason: null });
+    expect(out.text).not.toContain("评分");
   });
 });
 
@@ -118,7 +139,7 @@ describe("formatResult — pending", () => {
     expect(paragraphs[0]).toBe("<b>示例标题</b>");
     expect(paragraphs[1]).toBe("建议：保留 · 很实用");
     expect(paragraphs[2]).toBe("总结：这是一段摘要。");
-    expect(paragraphs[3]).toBe("场景：编程、自动化 · 标签：rag、web-scraping");
+    expect(paragraphs[3]).toBe("类型：技能 · 用法：直接整合 · 场景：编程、自动化 · 标签：rag、web-scraping");
   });
 
   it("AJ-298: shows 评分：★4/5 with the reason when the card has a score", () => {
@@ -145,7 +166,7 @@ describe("formatResult — failed", () => {
     const kb = out.replyMarkup?.inline_keyboard;
     expect(kb).toHaveLength(1);
     expect(kb?.[0]).toHaveLength(1);
-    expect(kb?.[0]?.[0]?.text).toBe("重跑");
+    expect(kb?.[0]?.[0]?.text).toBe("♻️ 重跑分析");
     expect(decodeDecision(kb![0]![0]!.callback_data!)).toEqual({ action: "rerun", capabilityId: failedBase.id, updatedAt: failedBase.updatedAt });
   });
 

@@ -136,8 +136,14 @@ export function listLibrary(pool: Q, f: LibraryFilter, search: LibrarySearchCont
 
 export interface LibraryStats { byType: Record<CapabilityType, number>; total: number; tagCount: number; pending: number; toBuild: number }
 
-/** The `progress` values counted by the library stats bar's "待自研" tile: kept, reference-only cards not yet started or finished. */
-export const TO_BUILD_PROGRESS: Progress[] = ["todo", "planned"];
+/**
+ * The `progress` values counted by the library stats bar's "待自研" tile — kept, reference-only
+ * cards not yet finished or abandoned. Deliberately the *same* set as {@link TODO_PROGRESS} (a
+ * card being built is still "to build" until it's `done`): the tile's count, its filter link,
+ * `/todo`'s list and its "更多" link must all describe exactly the same cards, not two subtly
+ * different ones.
+ */
+export const TO_BUILD_PROGRESS: Progress[] = TODO_PROGRESS;
 
 export async function libraryStats(pool: Q): Promise<LibraryStats> {
   const byType: Record<CapabilityType, number> = { skill: 0, experience: 0, plugin: 0, prompt: 0, other: 0 };

@@ -109,7 +109,7 @@ describe("library queries", () => {
     await scenarioStats(pool, { discarded: true });
     expect(calls[0].values).toEqual(["discard"]);
   });
-  it("libraryStats counts kept by type, distinct tags of kept, pending, and to-build (reference, todo/planned)", async () => {
+  it("libraryStats counts kept by type, distinct tags of kept, pending, and to-build (reference, todo/planned/building)", async () => {
     const { pool, calls } = recorder([[{ type: "skill", n: "3" }, { type: "prompt", n: "1" }], [{ n: "7" }], [{ n: "2" }], [{ n: "5" }]]);
     const s = await libraryStats(pool);
     expect(s.byType.skill).toBe(3);
