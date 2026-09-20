@@ -3,12 +3,12 @@ import { cardSchema, isValidTag } from "../analysis/card";
 import { buildDemoRows, runSeedDemo } from "./demo";
 
 describe("buildDemoRows", () => {
-  it("produces 6 captures/runs/capabilities and 3 steps per run", () => {
+  it("produces 7 captures/runs/capabilities and 3 steps per run", () => {
     const data = buildDemoRows();
-    expect(data.captures).toHaveLength(6);
-    expect(data.runs).toHaveLength(6);
-    expect(data.capabilities).toHaveLength(6);
-    expect(data.steps).toHaveLength(18);
+    expect(data.captures).toHaveLength(7);
+    expect(data.runs).toHaveLength(7);
+    expect(data.capabilities).toHaveLength(7);
+    expect(data.steps).toHaveLength(21);
   });
 
   it("uses fixed demo_-prefixed ids, not random ones", () => {
@@ -32,16 +32,16 @@ describe("buildDemoRows", () => {
     for (const cap of data.capabilities) for (const tag of cap.card.tags) expect(isValidTag(tag)).toBe(true);
   });
 
-  it("covers all 5 capability types", () => {
+  it("covers all 6 capability types", () => {
     const data = buildDemoRows();
     const types = new Set(data.capabilities.map((c) => c.card.type));
-    expect(types).toEqual(new Set(["skill", "experience", "plugin", "prompt", "other"]));
+    expect(types).toEqual(new Set(["skill", "experience", "plugin", "prompt", "tool", "other"]));
   });
 
-  it("splits verdicts 2 pending / 3 keep / 1 discard", () => {
+  it("splits verdicts 2 pending / 4 keep / 1 discard", () => {
     const data = buildDemoRows();
     expect(data.capabilities.filter((c) => c.verdict === "pending")).toHaveLength(2);
-    expect(data.capabilities.filter((c) => c.verdict === "keep")).toHaveLength(3);
+    expect(data.capabilities.filter((c) => c.verdict === "keep")).toHaveLength(4);
     expect(data.capabilities.filter((c) => c.verdict === "discard")).toHaveLength(1);
   });
 
@@ -79,7 +79,7 @@ describe("buildDemoRows", () => {
   it("has exactly one search step whose output carries 2 sources", () => {
     const data = buildDemoRows();
     const searchSteps = data.steps.filter((s) => s.step === "search");
-    expect(searchSteps).toHaveLength(6);
+    expect(searchSteps).toHaveLength(7);
     const withTwoSources = searchSteps.filter((s) => (s.output as { sources: unknown[] }).sources.length === 2);
     expect(withTwoSources).toHaveLength(1);
   });
@@ -120,7 +120,7 @@ describe("runSeedDemo", () => {
     const ids = await runSeedDemo(fakePool as never, { SEED_ALLOW: "1" });
     expect(queries[0]).toBe("BEGIN");
     expect(queries.at(-1)).toBe("COMMIT");
-    expect(ids).toHaveLength(6);
+    expect(ids).toHaveLength(7);
   });
 
   it("rolls back and rethrows if an insert fails", async () => {
@@ -150,7 +150,7 @@ describe("runSeedDemo", () => {
     };
     const fakePool = { connect: async () => fakeClient };
     await runSeedDemo(fakePool as never, { SEED_ALLOW: "1" });
-    expect(bumpCalls).toBe(3); // one per "keep" capability
+    expect(bumpCalls).toBe(4); // one per "keep" capability
   });
 
   it("does not bump tags when the capability insert is a no-op re-run", async () => {

@@ -13,7 +13,7 @@ export const PENDING_SHOW_LIMIT = 5;
 /** At most this many `/todo` cards are pushed as individual messages; the rest get a web link. */
 export const TODO_SHOW_LIMIT = 5;
 
-const TYPES: CapabilityType[] = ["skill", "experience", "plugin", "prompt", "other"];
+const TYPES: CapabilityType[] = ["skill", "experience", "plugin", "prompt", "tool", "other"];
 
 const HELP_TEXT = [
   "Caphub 使用说明",

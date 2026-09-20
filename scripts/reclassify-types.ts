@@ -1,6 +1,6 @@
 /**
  * One-off re-classification pass: for every non-deleted capability, asks DeepSeek to pick the
- * best `type` (skill/experience/plugin/prompt/other) from the card's own stored fields — no new
+ * best `type` (skill/experience/plugin/prompt/tool/other) from the card's own stored fields — no new
  * web search, no re-analysis of anything else. Only `type` is written when it differs from the
  * model's pick; `updated_at` and every other column (including `playbook`, `tags`, `serial`) are
  * left alone.
@@ -36,7 +36,7 @@
  * review is the gate the owner uses before trusting `--apply` against production.
  *
  * Note: a card's displayed serial (see lib/library/serial.ts's `formatSerial`) prefixes the
- * stored number with a type-derived code (SKL/EXP/PLG/PRM/OTH). Changing `type` here therefore
+ * stored number with a type-derived code (SKL/EXP/PLG/PRM/TOL/OTH). Changing `type` here therefore
  * changes what a card displays as (e.g. SKL-0012 -> PRM-0012) even though the underlying `serial`
  * number is never touched. That is intended, not a bug this script should guard against.
  *
@@ -81,7 +81,7 @@ export function reclassifyTypePrompt(input: {
     `价值信号：${input.signals.join("；") || "（无）"}`,
     `Playbook：${JSON.stringify(input.playbook)}`,
     `标签：${input.tags.join(", ") || "（无）"}`,
-    "只输出 type 字段，从 skill、experience、plugin、prompt、other 中选一个最合适的。"
+    "只输出 type 字段，从 skill、experience、plugin、prompt、tool、other 中选一个最合适的。"
   ].join("\n\n");
 }
 

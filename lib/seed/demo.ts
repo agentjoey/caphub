@@ -234,6 +234,31 @@ const SPECS: DemoSpec[] = [
       source_url: null,
       scenarios: ["automation"]
     }
+  },
+  {
+    n: 7,
+    kind: "url",
+    url: "https://github.com/example/local-dev-tool",
+    verdict: "keep",
+    verdictBy: "human",
+    searchSources: [],
+    card: {
+      title: "本地开发用的示例 CLI 工具",
+      type: "tool",
+      summary: "一个自带运行入口、不依附任何宿主平台的本地 CLI 工具，装完直接跑起来处理本地开发常见的重复操作。",
+      signals: ["安装后直接有独立的命令行入口，不需要挂载到别的应用里", "文档明确写了这是一个独立运行的应用而不是某个平台的插件"],
+      suggested_verdict: "keep",
+      suggested_reason: "自成一体，安装步骤清楚，值得直接整合。",
+      confidence: 0.8,
+      score: 3,
+      score_reason: "有明确安装方式和独立入口，成熟度中等偏上。",
+      source_facts: {},
+      usage: "integrate",
+      playbook: { kind: "integrate", install: ["brew install example/tap/local-dev-tool"], repo: "https://github.com/example/local-dev-tool", prompt_text: null },
+      tags: ["cli", "developer-tools"],
+      source_url: "https://github.com/example/local-dev-tool",
+      scenarios: ["coding"]
+    }
   }
 ];
 
