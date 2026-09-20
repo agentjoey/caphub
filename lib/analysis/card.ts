@@ -120,7 +120,8 @@ export type OverlapRelation = z.infer<typeof overlapRelationSchema>;
 export const overlapSchema = z.object({
   relation: overlapRelationSchema,
   target: z.string().max(40).nullable(),
-  reason: z.string().max(80)
+  /** Prompt target is 80 chars; the cap keeps the usual headroom (see summaryPointSchema). */
+  reason: z.string().max(120)
 });
 export type Overlap = z.infer<typeof overlapSchema>;
 
@@ -193,7 +194,9 @@ export const cardObjectSchema = z.object({
   scenarios: scenariosSchema,
   /** AI-assigned value score, 1 (drop) – 5 (integrate now); see prompts.ts's rubric. */
   score: z.number().int().min(1).max(5),
-  score_reason: z.string().min(1).max(80),
+  /** Prompt target is 80 chars; cap keeps headroom -- an 81-char reason once killed a whole
+   * backfill run (M3.5 verification). See summaryPointSchema for the rationale. */
+  score_reason: z.string().min(1).max(120),
   source_facts: sourceFactsSchema.default({}),
   overlap: overlapSchema.default(NO_OVERLAP),
   /**
@@ -204,7 +207,7 @@ export const cardObjectSchema = z.object({
    * list rather than being folded into `summary` (design decision 5 keeps process narration
    * out of the summary entirely).
    */
-  open_questions: z.array(z.string().max(30)).max(3).default([])
+  open_questions: z.array(z.string().max(45)).max(3).default([])
 });
 
 export function refineCard<T extends {
@@ -284,7 +287,8 @@ export type DeepSource = z.infer<typeof deepSourceSchema>;
  */
 export const deepFactsSchema = z.object({
   facts: z.array(z.object({
-    text: z.string().min(1).max(300),
+    /** Prompt target is 300 chars; cap keeps headroom so one long fact can't discard the run. */
+    text: z.string().min(1).max(450),
     source: z.number().int().min(0).nullable()
   })).max(40)
 });

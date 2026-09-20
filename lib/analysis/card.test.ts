@@ -135,8 +135,9 @@ describe("cardSchema", () => {
       const { score_reason: _reason, ...withoutReason } = valid as typeof valid & { score_reason: string };
       expect(() => cardSchema.parse(withoutReason)).toThrow();
     });
-    it("rejects a score_reason over 80 chars", () => {
-      expect(() => cardSchema.parse({ ...valid, score_reason: "a".repeat(81) })).toThrow();
+    it("accepts a score_reason at the 120-char cap and rejects one over it (prompt target is 80)", () => {
+      expect(cardSchema.parse({ ...valid, score_reason: "a".repeat(120) }).score_reason).toHaveLength(120);
+      expect(() => cardSchema.parse({ ...valid, score_reason: "a".repeat(121) })).toThrow();
     });
     it("defaults source_facts to {} when omitted, and accepts an explicit empty object", () => {
       const { source_facts: _sf, ...withoutSourceFacts } = valid as typeof valid & { source_facts: object };
@@ -165,7 +166,7 @@ describe("cardSchema", () => {
     it("stays representable as JSON Schema for providers", () => {
       const jsonSchema = z.toJSONSchema(cardSchema) as { properties?: Record<string, unknown> };
       expect(jsonSchema.properties?.score).toMatchObject({ type: "integer", minimum: 1, maximum: 5 });
-      expect(jsonSchema.properties?.score_reason).toMatchObject({ type: "string", maxLength: 80 });
+      expect(jsonSchema.properties?.score_reason).toMatchObject({ type: "string", maxLength: 120 });
       expect(jsonSchema.properties?.source_facts).toMatchObject({ type: "object" });
     });
   });
@@ -176,7 +177,7 @@ describe("cardSchema open_questions", () => {
     const { open_questions: _oq, ...withoutOpenQuestions } = valid as typeof valid & { open_questions: string[] };
     expect(cardSchema.parse(withoutOpenQuestions).open_questions).toEqual([]);
   });
-  it("accepts up to 3 items, each up to 30 chars", () => {
+  it("accepts up to 3 items, each within the cap", () => {
     const open_questions = ["是否需要登录才能用", "免费额度上限是多少", "导出格式有哪些"];
     expect(cardSchema.parse({ ...valid, open_questions }).open_questions).toEqual(open_questions);
     expect(cardSchema.parse({ ...valid, open_questions: ["a".repeat(30)] }).open_questions).toEqual(["a".repeat(30)]);
@@ -184,8 +185,9 @@ describe("cardSchema open_questions", () => {
   it("rejects a 4th item", () => {
     expect(() => cardSchema.parse({ ...valid, open_questions: ["a", "b", "c", "d"] })).toThrow();
   });
-  it("rejects an item over 30 chars", () => {
-    expect(() => cardSchema.parse({ ...valid, open_questions: ["a".repeat(31)] })).toThrow();
+  it("accepts an item at the 45-char cap and rejects one over it (prompt target is 30)", () => {
+    expect(cardSchema.parse({ ...valid, open_questions: ["a".repeat(45)] }).open_questions[0]).toHaveLength(45);
+    expect(() => cardSchema.parse({ ...valid, open_questions: ["a".repeat(46)] })).toThrow();
   });
   it("stays representable as JSON Schema for providers", () => {
     const jsonSchema = z.toJSONSchema(cardSchema) as { properties?: Record<string, unknown> };
@@ -286,8 +288,9 @@ describe("cardSchema overlap", () => {
   it("rejects an unknown relation value", () => {
     expect(() => cardSchema.parse({ ...valid, overlap: { relation: "unrelated", target: null, reason: "r" } })).toThrow();
   });
-  it("rejects an overlap reason over 80 chars", () => {
-    expect(() => cardSchema.parse({ ...valid, overlap: { relation: "duplicate", target: "TOL-0009", reason: "a".repeat(81) } })).toThrow();
+  it("accepts an overlap reason at the 120-char cap and rejects one over it (prompt target is 80)", () => {
+    expect(cardSchema.parse({ ...valid, overlap: { relation: "duplicate", target: "TOL-0009", reason: "a".repeat(120) } }).overlap.reason).toHaveLength(120);
+    expect(() => cardSchema.parse({ ...valid, overlap: { relation: "duplicate", target: "TOL-0009", reason: "a".repeat(121) } })).toThrow();
   });
   it("stays representable as JSON Schema for providers", () => {
     const jsonSchema = z.toJSONSchema(cardSchema) as { properties?: Record<string, unknown> };
@@ -301,9 +304,9 @@ describe("scoreResultSchema", () => {
     expect(parsed).toEqual({ score: 4, score_reason: "有仓库和安装命令", source_facts: {} });
   });
 
-  it("still enforces score's 1-5 range and score_reason's 80-char cap", () => {
+  it("still enforces score's 1-5 range and score_reason's 120-char cap", () => {
     expect(() => scoreResultSchema.parse({ score: 0, score_reason: "x", source_facts: {} })).toThrow();
-    expect(() => scoreResultSchema.parse({ score: 3, score_reason: "x".repeat(81), source_facts: {} })).toThrow();
+    expect(() => scoreResultSchema.parse({ score: 3, score_reason: "x".repeat(121), source_facts: {} })).toThrow();
   });
 });
 

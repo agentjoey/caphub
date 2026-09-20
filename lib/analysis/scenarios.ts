@@ -50,7 +50,7 @@ export function scenariosResultSchemaFor(slugs: readonly [string, ...string[]]) 
  */
 function overlapFieldFor(codes: string[]) {
   const target = codes.length > 0 ? z.enum(codes as [string, ...string[]]).nullable() : z.null();
-  return z.object({ relation: overlapRelationSchema, target, reason: z.string().max(80) }).default(NO_OVERLAP);
+  return z.object({ relation: overlapRelationSchema, target, reason: z.string().max(120) }).default(NO_OVERLAP);
 }
 
 /**
