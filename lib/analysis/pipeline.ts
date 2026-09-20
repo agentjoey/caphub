@@ -226,14 +226,27 @@ export async function runPipeline(deps: PipelineDeps, lease: Lease, signal: Abor
     const enteringKeep = stored.verdict === "keep" && stored.previousVerdict !== "keep" && !stored.deleted;
     if (enteringKeep) await bumpTags(db, card.tags);
     await db.query("COMMIT");
-    // Queued outside the transaction just committed above (via deps.pool, a separate
-    // connection): a losing race against another enqueue for the same capture surfaces as
-    // 23505 inside enqueueEnrichRun's own try/catch, and swallowing that *inside* the
-    // transaction would abort it (Postgres marks a transaction failed on any error until
-    // ROLLBACK, even one caught in application code) -- see migration 011's
-    // analysis_runs_one_active_enrich.
-    if (stored.verdict === "keep" && stored.enrichedAt === null) {
-      await enqueueEnrichRun(deps.pool, lease.captureId, lease.pipeline);
+    // Ruling (M3.7 review, fix round 1): a rerun must re-enrich even when enriched_at is
+    // already set. upsertCapability's ON CONFLICT branch overwrites summary/signals/playbook/
+    // open_questions on every rerun (it has no idea whether this card was ever enriched), so
+    // gating the enqueue on enrichedAt === null would let a rerun permanently strand a card back
+    // on the pre-enrichment, process-narrating summary with no way to re-enrich it. The only
+    // gates left are verdict = keep and not soft-deleted (`!stored.deleted`, already computed
+    // above for enteringKeep) -- migration 011's analysis_runs_one_active_enrich unique index is
+    // what stops a duplicate enqueue while one is already queued or running for this capture.
+    if (stored.verdict === "keep" && !stored.deleted) {
+      // Deliberately its own try/catch, not the one below: this runs *after* COMMIT, so a
+      // non-23505 failure here (pool exhaustion, connection drop -- 23505 itself is already
+      // swallowed inside enqueueEnrichRun) must never be treated as this analysis run's own
+      // failure. Falling through to the catch below would ROLLBACK an already-committed
+      // connection and report a false "分析失败" for a card that was in fact stored -- a missed
+      // enrich enqueue is recoverable (the next decide/rerun re-enqueues it), a falsely reported
+      // analysis failure is not.
+      try {
+        await enqueueEnrichRun(deps.pool, lease.captureId, lease.pipeline);
+      } catch (error) {
+        console.warn(JSON.stringify({ runId: lease.runId, enrichEnqueueError: error instanceof Error ? error.message : String(error) }));
+      }
     }
     return { capabilityId: stored.id, verdict: stored.verdict };
   } catch (error) {

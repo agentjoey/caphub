@@ -23,8 +23,11 @@ function deps(kind: Kind, opts: {
   embedQueryThrows?: boolean;
   /** `enriched_at` the fake upsert RETURNs; null (never enriched) unless overridden. */
   enrichedAt?: string | null;
-  /** Simulates a concurrent duplicate enqueue racing analysis_runs_one_active_enrich (23505). */
+  /** `deleted` the fake upsert RETURNs; false unless overridden. */
+  deleted?: boolean;
+  /** Throws from the enqueue's INSERT; code defaults to 23505 (a concurrent duplicate) unless overridden. */
   enrichEnqueueThrows?: boolean;
+  enrichEnqueueThrowsCode?: string;
 } = {}) {
   const calls: string[] = [];
   const sql: Array<{ text: string; values: unknown[]; client?: boolean }> = [];
@@ -66,10 +69,10 @@ function deps(kind: Kind, opts: {
       // values: [id, captureId, runId, title, type, summary, signals, suggested_verdict,
       //          suggested_reason, confidence, verdict, verdictBy, usage, playbook, tags, source_url]
       const verdict = values[10] as string;
-      return { rows: [{ id: "cab_1", verdict, previous_verdict: null, deleted: false, enriched_at: opts.enrichedAt ?? null }] };
+      return { rows: [{ id: "cab_1", verdict, previous_verdict: null, deleted: opts.deleted ?? false, enriched_at: opts.enrichedAt ?? null }] };
     }
     if (text.includes("INSERT INTO caphub_v2.analysis_runs")) {
-      if (opts.enrichEnqueueThrows) throw Object.assign(new Error("duplicate"), { code: "23505" });
+      if (opts.enrichEnqueueThrows) throw Object.assign(new Error("duplicate"), { code: opts.enrichEnqueueThrowsCode ?? "23505" });
       return { rows: [] };
     }
     return { rows: [] };
@@ -148,10 +151,14 @@ describe("runPipeline", () => {
     expect(enqueue!.values).toEqual([expect.any(String), "cap_enrich", "mixed"]);
   });
 
-  it("does not enqueue an enrich run when the card already has enriched_at set", async () => {
+  it("re-enqueues an enrich run on a rerun even when the card already has enriched_at set (owner ruling: a rerun must re-enrich)", async () => {
+    // upsertCapability's ON CONFLICT branch overwrites summary/signals/playbook/open_questions
+    // on every rerun regardless of enriched_at, so gating the enqueue on enriched_at === null
+    // would permanently strand a rerun card on the pre-enrichment summary. The partial unique
+    // index (analysis_runs_one_active_enrich) is what stops a duplicate, not this gate.
     const { d, sql } = deps("text", { enrichedAt: "2026-09-19T00:00:00.000Z" });
-    await runPipeline(d, { runId: "run_no_enrich", captureId: "cap_no_enrich", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
-    expect(sql.some((q) => q.text.includes("INSERT INTO caphub_v2.analysis_runs"))).toBe(false);
+    await runPipeline(d, { runId: "run_rerun_enrich", captureId: "cap_rerun_enrich", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
+    expect(sql.some((q) => q.text.includes("INSERT INTO caphub_v2.analysis_runs"))).toBe(true);
   });
 
   it("does not enqueue an enrich run when the card does not enter keep", async () => {
@@ -160,10 +167,32 @@ describe("runPipeline", () => {
     expect(sql.some((q) => q.text.includes("INSERT INTO caphub_v2.analysis_runs"))).toBe(false);
   });
 
+  it("does not enqueue an enrich run for a soft-deleted card, even if the recomputed verdict is keep", async () => {
+    const { d, sql } = deps("text", { deleted: true });
+    await runPipeline(d, { runId: "run_deleted", captureId: "cap_deleted", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
+    expect(sql.some((q) => q.text.includes("INSERT INTO caphub_v2.analysis_runs"))).toBe(false);
+  });
+
   it("does not fail the pipeline run when a concurrent enqueue already queued an enrich run (23505)", async () => {
     const { d } = deps("text", { enrichEnqueueThrows: true });
     const out = await runPipeline(d, { runId: "run_dup_enrich", captureId: "cap_dup_enrich", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
     expect(out).toEqual({ capabilityId: "cab_1", verdict: "keep" });
+  });
+
+  it("does not fail the pipeline run when the enrich enqueue fails for a reason other than a duplicate", async () => {
+    // A non-23505 failure (pool exhaustion, connection drop) must never be treated as this
+    // analysis run's own failure -- it runs after COMMIT, so falling into the outer catch would
+    // ROLLBACK an already-committed connection and report a false "分析失败" for a card that was
+    // in fact stored.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { d } = deps("text", { enrichEnqueueThrows: true, enrichEnqueueThrowsCode: "ECONNRESET" });
+      const out = await runPipeline(d, { runId: "run_enrich_enqueue_fails", captureId: "cap_enrich_enqueue_fails", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
+      expect(out).toEqual({ capabilityId: "cab_1", verdict: "keep" });
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("excludes its own capture from the similar-capability lookup", async () => {

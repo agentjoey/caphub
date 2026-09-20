@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { decide, editSuggestion, ignoreOverlap, requestDeepAnalysis, requestReview, requestRerun, setProgress, setStatus, softDelete, supersedeOverlapTarget } from "./actions";
 
 type Handler = (text: string, values: unknown[]) => { rows: unknown[]; rowCount?: number };
@@ -56,6 +56,25 @@ describe("decide", () => {
     await decide(enrichedPool, { id: "cab_1", expectedUpdatedAt: T, verdict: "keep" });
     expect(enrichedCalls.some((c) => c.text.includes("INSERT INTO caphub_v2.analysis_runs"))).toBe(false);
   });
+  it("still resolves ok when the (already-committed) enrich enqueue fails for a reason other than a duplicate", async () => {
+    // decide()'s own verdict write already committed by the time the enqueue runs -- a
+    // non-23505 enqueue failure (pool exhaustion, connection drop) must never make decide()
+    // reject an edit that in fact succeeded (the caller would see a false failure, and a retry
+    // would then hit a stale expectedUpdatedAt conflict).
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { pool } = fakePool((t) => {
+        if (t.startsWith("UPDATE caphub_v2.capabilities")) return { rows: [{ updated_at: new Date(T), tags: ["python"], previous: "pending", capture_id: "cap_1", enriched_at: null, pipeline: "mixed" }] };
+        if (t.includes("INSERT INTO caphub_v2.analysis_runs")) throw new Error("connection reset");
+        return { rows: [] };
+      });
+      const r = await decide(pool, { id: "cab_1", expectedUpdatedAt: T, verdict: "keep" });
+      expect(r).toMatchObject({ ok: true });
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
   it("returns CONFLICT when the row changed and NOT_FOUND when missing", async () => {
     const conflict = fakePool((t) => t.startsWith("SELECT 1") ? { rows: [{ "?column?": 1 }] } : { rows: [] });
     expect(await decide(conflict.pool, { id: "cab_1", expectedUpdatedAt: T, verdict: "keep" })).toMatchObject({ ok: false, reason: "CONFLICT", message: "已在别处处理" });
@@ -103,6 +122,21 @@ describe("editSuggestion", () => {
       : { rows: [] });
     await editSuggestion(pool, { id: "cab_1", expectedUpdatedAt: T, type: "skill", usage: "integrate", tags: ["web-scraping"] });
     expect(calls.some((c) => c.text.includes("INSERT INTO caphub_v2.analysis_runs"))).toBe(false);
+  });
+  it("still resolves ok when the (already-committed) enrich enqueue fails for a reason other than a duplicate", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { pool } = fakePool((t) => {
+        if (t.startsWith("UPDATE caphub_v2.capabilities")) return { rows: [{ updated_at: new Date(T), tags: ["web-scraping"], previous: "pending", capture_id: "cap_2", enriched_at: null, pipeline: "minimax" }] };
+        if (t.includes("INSERT INTO caphub_v2.analysis_runs")) throw new Error("connection reset");
+        return { rows: [] };
+      });
+      const r = await editSuggestion(pool, { id: "cab_1", expectedUpdatedAt: T, type: "skill", usage: "integrate", tags: ["web-scraping"] });
+      expect(r).toMatchObject({ ok: true });
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
   it("rejects malformed input without touching the database", async () => {
     const { pool, calls } = fakePool(() => ({ rows: [] }));

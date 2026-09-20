@@ -226,25 +226,38 @@ export async function runEnrichment(deps: EnrichDeps, lease: Lease, signal: Abor
       budget, timeoutMs: ENRICH_TIMEOUTS.reason, signal: t.signal
     });
 
-    // Belt-and-braces only: the pinned schema already guarantees rewritten.type/usage equal the
-    // stored values when pinned (z.literal), so this is a no-op read, not the enforcement itself.
-    const type = pinned ? capability.type : rewritten.type;
-    const usage = pinned ? capability.usage : rewritten.usage;
-    const tags = pinned ? capability.tags : rewritten.tags;
     const sourceFacts = finalizeSourceFacts(mergeSourceFacts(rewritten.source_facts, canonical));
 
-    await deps.pool.query(
+    // The `suggestion_by = 'human'` guard is re-evaluated by the CASE expressions below against
+    // the row's *current* value at UPDATE time, not `capability.suggestion_by` read up to
+    // ENRICH_RUN_TIMEOUT_MS (3 minutes) earlier at the top of this run -- a 改建议 landing
+    // mid-run (setting suggestion_by='human' plus new type/usage/tags) must not be silently
+    // reverted by this run writing back the auto values it read before that edit happened.
+    // This mirrors upsertCapability's existing verdict_by/type_by CASE pattern (capabilities.ts).
+    // The schema-level `z.literal` pinning above (enrichCardSchemaFor) is a belt-and-braces
+    // layer only when suggestion_by was already 'human' at load time -- this CASE is the actual
+    // enforcement against a suggestion_by that changed after that.
+    const result = await deps.pool.query(
       `UPDATE caphub_v2.capabilities SET
-         type = $2, usage = $3, tags = $4, summary = $5, signals = $6, playbook = $7,
+         type = CASE WHEN suggestion_by = 'human' THEN type ELSE $2 END,
+         usage = CASE WHEN suggestion_by = 'human' THEN usage ELSE $3 END,
+         tags = CASE WHEN suggestion_by = 'human' THEN tags ELSE $4 END,
+         summary = $5, signals = $6, playbook = $7,
          source_facts = $8, score = $9, score_reason = $10, open_questions = $11,
          enriched_at = now(), updated_at = now()
        WHERE id = $1 AND deleted_at IS NULL`,
       [
-        capability.id, type, usage, tags.map(stripNul), stripNul(rewritten.summary), jsonStringifyStripNul(rewritten.signals),
+        capability.id, rewritten.type, rewritten.usage, rewritten.tags.map(stripNul), stripNul(rewritten.summary), jsonStringifyStripNul(rewritten.signals),
         jsonStringifyStripNul(rewritten.playbook), jsonStringifyStripNul(sourceFacts), rewritten.score,
         stripNul(rewritten.score_reason), jsonStringifyStripNul(rewritten.open_questions)
       ]
     );
+    if (result.rowCount === 0) {
+      // The card was soft-deleted between loadCapability's read and this write -- not a failure
+      // worth retrying (there's nothing left to enrich), but worth surfacing since it means the
+      // run's provider calls above were spent for nothing.
+      console.warn(JSON.stringify({ runId: lease.runId, enrichWriteBack: "no matching row (deleted mid-run?)", capabilityId: capability.id }));
+    }
 
     return { capabilityId: capability.id };
   } catch (error) {

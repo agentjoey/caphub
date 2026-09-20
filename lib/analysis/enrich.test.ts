@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { CanonicalResult } from "./canonical";
 import type { Playbook } from "./card";
 import type { StructuredInput } from "./structured";
@@ -40,10 +40,12 @@ function deps(opts: {
   rewrittenOverride?: unknown;
   reasonUsage?: { inputTokens: number; outputTokens: number };
   searchUsage?: { inputTokens: number; outputTokens: number };
+  /** rowCount the fake write-back UPDATE resolves with; 1 (a match) unless overridden. */
+  writeBackRowCount?: number;
 } = {}) {
   const calls: string[] = [];
   const steps: Array<{ step: string; ok: boolean; error: string | null; output: string | null }> = [];
-  const updates: Array<{ values: unknown[] }> = [];
+  const updates: Array<{ text: string; values: unknown[] }> = [];
   const capability = opts.capability === undefined ? capabilityRow : opts.capability;
   const reasonUsage = opts.reasonUsage ?? { inputTokens: 10, outputTokens: 10 };
   const searchUsage = opts.searchUsage ?? { inputTokens: 5, outputTokens: 5 };
@@ -58,8 +60,8 @@ function deps(opts: {
         return { rows: [] };
       }
       if (text.startsWith("UPDATE caphub_v2.capabilities SET")) {
-        updates.push({ values });
-        return { rows: [] };
+        updates.push({ text, values });
+        return { rows: [], rowCount: opts.writeBackRowCount ?? 1 };
       }
       return { rows: [] };
     }
@@ -148,26 +150,46 @@ describe("runEnrichment", () => {
     expect(sourceFacts.as_of).toBeTruthy();
   });
 
-  it("keeps type/usage/tags at their stored values when suggestion_by = 'human', regardless of what the model outputs", async () => {
+  it("pins type/usage/tags to the schema level when loaded as suggestion_by = 'human', and the write-back re-guards them with a CASE evaluated at UPDATE time (not the stale load-time read)", async () => {
     const pinnedCapability = { ...capabilityRow, type: "skill" as const, usage: "reference" as const, tags: ["human-tag"], suggestion_by: "human" as const };
     const humanPlaybook: Playbook = { kind: "reference", points: ["p1"] };
     const { d, updates } = deps({
       capability: { ...pinnedCapability, playbook: humanPlaybook },
+      // The schema-level z.literal pin (belt-and-braces) means the model's own output for
+      // type/usage already has to match the pinned values or the call is rejected/retried --
+      // this rewrittenOverride reflects that (a disobedient "should-be-ignored" tags value is
+      // still possible since tags isn't pinned in the schema, only re-guarded by the CASE).
       rewrittenOverride: { ...rewrittenValue, type: "skill", usage: "reference", tags: ["should-be-ignored"], playbook: humanPlaybook }
     });
     await runEnrichment(d, lease, new AbortController().signal);
     const [, type, usage, tags] = updates[0].values;
+    // The actual enforcement lives in the UPDATE's CASE expressions (re-checked against the
+    // row's current suggestion_by at write time), not in these candidate params -- see the next
+    // assertions on the statement text itself.
     expect(type).toBe("skill");
     expect(usage).toBe("reference");
-    expect(tags).toEqual(["human-tag"]);
+    expect(tags).toEqual(["should-be-ignored"]);
+    expect(updates[0].text).toMatch(/type = CASE WHEN suggestion_by = 'human' THEN type ELSE \$2 END/);
+    expect(updates[0].text).toMatch(/usage = CASE WHEN suggestion_by = 'human' THEN usage ELSE \$3 END/);
+    expect(updates[0].text).toMatch(/tags = CASE WHEN suggestion_by = 'human' THEN tags ELSE \$4 END/);
   });
 
-  it("never includes verdict, verdict_by, status, progress, deep_analysis or notified_at in the write-back", async () => {
-    const { d, updates } = deps();
-    await runEnrichment(d, lease, new AbortController().signal);
-    // Captured indirectly: the UPDATE statement text itself is asserted in the pool fake via
-    // the "UPDATE caphub_v2.capabilities SET" prefix match, and its column list is fixed in
-    // enrich.ts; this test pins the value list length so a future column addition is caught.
+  it("never writes verdict, verdict_by, status, progress, deep_analysis or notified_at, and warns (without throwing) when the write-back matches no row", async () => {
+    const { d, updates } = deps({ writeBackRowCount: 0 });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const out = await runEnrichment(d, lease, new AbortController().signal);
+      expect(out).toEqual({ capabilityId: "cab_1" });
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+    // Assert against the statement text itself, not just the param count -- a param-count-only
+    // check can't catch a literal `notified_at = NULL` (or similar) being added to the SET list
+    // without adding a corresponding placeholder.
+    for (const forbidden of ["verdict", "verdict_by", "status", "progress", "deep_analysis", "notified_at"]) {
+      expect(updates[0].text).not.toMatch(new RegExp(`\\b${forbidden}\\b`));
+    }
     expect(updates[0].values).toHaveLength(11);
   });
 

@@ -67,12 +67,22 @@ export function decide(pool: Pool, input: { id: string; expectedUpdatedAt: strin
     const enrich = input.verdict === "keep" && row.enriched_at === null ? { captureId: row.capture_id, pipeline: row.pipeline } : null;
     return { result: { ok: true, updatedAt: iso(row.updated_at) } as ActionResult, enrich };
   }).then(async ({ result, enrich }) => {
-    // Enqueued after the transaction above has committed, via `pool` (a separate connection),
-    // not `db` -- swallowing enqueueEnrichRun's own 23505 handling *inside* that transaction
-    // would abort it (any error marks a Postgres transaction failed until ROLLBACK, even one
-    // caught in application code). A losing race against another enqueue for the same capture
-    // is exactly what migration 011's analysis_runs_one_active_enrich exists to stop.
-    if (enrich) await enqueueEnrichRun(pool, enrich.captureId, enrich.pipeline);
+    // Enqueued after the transaction above has fully committed (and released), via `pool` (a
+    // separate connection) -- swallowing enqueueEnrichRun's own 23505 handling *inside* that
+    // transaction would have aborted it. Its own try/catch here, separate from tx()'s: this
+    // decide() has already succeeded from the caller's point of view (the verdict write
+    // committed), so a non-23505 enqueue failure (pool exhaustion, connection drop) must never
+    // surface as decide() rejecting -- that would report a false failure for a write that in
+    // fact went through, and the owner's retry would then hit a stale expectedUpdatedAt
+    // conflict. A missed enrich enqueue is recoverable (the next decide/rerun re-enqueues it); a
+    // falsely reported failure on an already-successful decision is not.
+    if (enrich) {
+      try {
+        await enqueueEnrichRun(pool, enrich.captureId, enrich.pipeline);
+      } catch (error) {
+        console.warn(JSON.stringify({ decideEnrichEnqueueError: error instanceof Error ? error.message : String(error), captureId: enrich.captureId }));
+      }
+    }
     return result;
   });
 }
@@ -107,8 +117,15 @@ export function editSuggestion(pool: Pool, input: { id: string; expectedUpdatedA
     return { result: { ok: true, updatedAt: iso(row.updated_at) } as ActionResult, enrich };
   }).then(async ({ result, enrich }) => {
     // See decide()'s matching comment: enqueued after this transaction has committed, via
-    // `pool`, not `db`.
-    if (enrich) await enqueueEnrichRun(pool, enrich.captureId, enrich.pipeline);
+    // `pool`, in its own try/catch so a non-23505 enqueue failure can never surface as
+    // editSuggestion() rejecting an edit that in fact already succeeded.
+    if (enrich) {
+      try {
+        await enqueueEnrichRun(pool, enrich.captureId, enrich.pipeline);
+      } catch (error) {
+        console.warn(JSON.stringify({ editSuggestionEnrichEnqueueError: error instanceof Error ? error.message : String(error), captureId: enrich.captureId }));
+      }
+    }
     return result;
   });
 }
