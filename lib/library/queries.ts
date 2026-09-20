@@ -3,6 +3,7 @@ import type { CapabilityType, DeepAnalysis, Overlap, Playbook, ReviewNote, Sourc
 import { type Progress } from "./labels";
 import { toVectorLiteral } from "../analysis/embedding";
 import { formatSerial, parseSerialQuery } from "./serial";
+import type { BuildNote } from "./build-notes";
 
 export const PAGE_SIZE = 20;
 /** Minimum cosine similarity for an embedding-only match to count as a search candidate. */
@@ -18,6 +19,7 @@ const CARD_COLUMNS = `
   cb.progress, cb.progress_link AS "progressLink", cb.progress_at AS "progressAt",
   cb.review_note AS "reviewNote", cb.review_requested_at AS "reviewRequestedAt", cb.review_error AS "reviewError",
   cb.status, cb.superseded_by AS "supersededBy", cb.status_at AS "statusAt", cb.status_note AS "statusNote", cb.overlap,
+  cb.build_notes AS "buildNotes",
   (cb.deep_analysis IS NOT NULL) AS "hasDeepAnalysis",
   cb.synced_at AS "syncedAt", cb.deleted_at AS "deletedAt", cb.created_at AS "createdAt", cb.updated_at AS "updatedAt",
   json_build_object('kind', c.kind, 'objectKey', c.object_key, 'thumbKey', c.thumb_key, 'text', c.text, 'url', c.url) AS capture`;
@@ -180,7 +182,7 @@ export function listLibrary(pool: Q, f: LibraryFilter, search: LibrarySearchCont
     const semanticSim = `(1 - (cb.embedding <=> $${vecIdx}::vector))`;
     const ftsMatch = `cb.search @@ websearch_to_tsquery('simple', $${qIdx})`;
     const scenarioMatch = `cb.scenarios && $${scenIdx}::text[]`;
-    const ilikeMatch = `(cb.title ILIKE $${ilikeIdx} OR cb.summary ILIKE $${ilikeIdx} OR cb.summary_points::text ILIKE $${ilikeIdx} OR EXISTS (SELECT 1 FROM unnest(cb.tags) tg WHERE tg ILIKE $${ilikeIdx}))`;
+    const ilikeMatch = `(cb.title ILIKE $${ilikeIdx} OR cb.summary ILIKE $${ilikeIdx} OR cb.summary_points::text ILIKE $${ilikeIdx} OR cb.build_notes::text ILIKE $${ilikeIdx} OR EXISTS (SELECT 1 FROM unnest(cb.tags) tg WHERE tg ILIKE $${ilikeIdx}))`;
     const semanticCandidate = `(cb.embedding IS NOT NULL AND $${vecIdx}::vector IS NOT NULL AND ${semanticSim} >= $${minIdx})`;
 
     clauses.push(`(${semanticCandidate} OR ${ftsMatch} OR ${scenarioMatch} OR ${ilikeMatch})`);
@@ -269,10 +271,12 @@ export interface CapabilityDetail extends CapabilityRow {
   openQuestions: string[];
   /** When the M3.7 enrich pass last rewrote this card, or null if it never has. */
   enrichedAt: string | null;
+  /** Append-only agent self-build progress notes (M4), oldest first; `[]` for a card never written to since migration 013. */
+  buildNotes: BuildNote[];
 }
 
 export async function getCapabilityDetail(pool: Q, id: string): Promise<CapabilityDetail | null> {
-  const row = (await pool.query<CapabilityRow & { runPipeline: string; runState: string; runId: string; retentionEligibleAt: string | null; retentionPurgedAt: string | null; supersededByType: CapabilityType | null; supersededBySerialNum: number | null; deepAnalysis: DeepAnalysis | null; deepAnalysisOf: string | null; deepRunState: string | null; deepRunErrorCode: string | null; openQuestions: string[]; enrichedAt: string | null }>(
+  const row = (await pool.query<CapabilityRow & { runPipeline: string; runState: string; runId: string; retentionEligibleAt: string | null; retentionPurgedAt: string | null; supersededByType: CapabilityType | null; supersededBySerialNum: number | null; deepAnalysis: DeepAnalysis | null; deepAnalysisOf: string | null; deepRunState: string | null; deepRunErrorCode: string | null; openQuestions: string[]; enrichedAt: string | null; buildNotes: BuildNote[] | null }>(
     `SELECT ${CARD_COLUMNS}, r.pipeline AS "runPipeline", r.state AS "runState", r.id AS "runId",
             ret.eligible_at AS "retentionEligibleAt", ret.purged_at AS "retentionPurgedAt",
             sup.type AS "supersededByType", sup.serial AS "supersededBySerialNum",
@@ -299,6 +303,7 @@ export async function getCapabilityDetail(pool: Q, id: string): Promise<Capabili
   const rest = toIso(rowRest);
   return {
     ...rest,
+    buildNotes: rest.buildNotes ?? [],
     supersededBySerial,
     steps: steps.map(({ output: _o, ...s }) => { void _o; return s; }),
     sources: (search?.sources ?? []).map((s) => ({ title: s.title, url: s.url }))

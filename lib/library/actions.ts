@@ -8,17 +8,12 @@ import { getDict, type Locale } from "../i18n";
 import { stripNul } from "../text/sanitize";
 import { isProgress, type Progress } from "./labels";
 import { parseSerialQuery } from "./serial";
+import { conflict, invalid, isNonEmptyString, isParsableTimestamp, missingOrConflict, type ActionResult } from "./action-result";
 
-export type ActionResult =
-  | { ok: true; updatedAt: string }
-  | { ok: false; reason: "CONFLICT" | "NOT_FOUND" | "INVALID" | "OBJECT_GONE"; message: string };
+export type { ActionResult } from "./action-result";
 
-const conflict = (message: string): ActionResult => ({ ok: false, reason: "CONFLICT", message });
-const invalid = (message: string): ActionResult => ({ ok: false, reason: "INVALID", message });
 const iso = (d: Date | string) => (d instanceof Date ? d.toISOString() : new Date(d).toISOString());
 
-const isNonEmptyString = (v: unknown): v is string => typeof v === "string" && v.length > 0;
-const isParsableTimestamp = (v: unknown): v is string => typeof v === "string" && !Number.isNaN(Date.parse(v));
 const isUniqueViolation = (e: unknown): boolean => typeof e === "object" && e !== null && (e as { code?: unknown }).code === "23505";
 
 /** Rolls back on error and never returns a client to the pool in an unknown state (pg advises passing the error to release()). */
@@ -39,12 +34,6 @@ async function tx<T>(pool: Pool, fn: (db: PoolClient) => Promise<T>): Promise<T>
     }
     throw e;
   }
-}
-
-async function missingOrConflict(db: Pick<Pool, "query">, id: string, locale: Locale, busyMessage?: string): Promise<ActionResult> {
-  const dict = getDict(locale).actions;
-  const r = await db.query("SELECT 1 FROM caphub_v2.capabilities WHERE id = $1 AND deleted_at IS NULL", [id]);
-  return r.rows.length ? conflict(busyMessage ?? dict.conflict) : { ok: false, reason: "NOT_FOUND", message: dict.cardNotFound };
 }
 
 export function decide(pool: Pool, input: { id: string; expectedUpdatedAt: string; verdict: "keep" | "discard" }, locale: Locale = "zh"): Promise<ActionResult> {

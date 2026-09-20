@@ -88,7 +88,7 @@ describe("library queries", () => {
     const { text, values } = calls[0];
     expect(text).toMatch(/1 - \(cb\.embedding <=> \$\d+::vector\)/);
     expect(text).toMatch(/cb\.scenarios && \$\d+::text\[\]/);
-    expect(text).toMatch(/cb\.title ILIKE \$\d+ OR cb\.summary ILIKE \$\d+ OR cb\.summary_points::text ILIKE \$\d+ OR EXISTS \(SELECT 1 FROM unnest\(cb\.tags\) tg WHERE tg ILIKE \$\d+\)/);
+    expect(text).toMatch(/cb\.title ILIKE \$\d+ OR cb\.summary ILIKE \$\d+ OR cb\.summary_points::text ILIKE \$\d+ OR cb\.build_notes::text ILIKE \$\d+ OR EXISTS \(SELECT 1 FROM unnest\(cb\.tags\) tg WHERE tg ILIKE \$\d+\)/);
     expect(text).toMatch(/ORDER BY \(COALESCE\(CASE WHEN cb\.embedding IS NOT NULL/);
     expect(text).toMatch(new RegExp(`>= \\$\\d+`));
     expect(values).toEqual(expect.arrayContaining(["[0.1,0.2]", "web scraping", "%web scraping%", ["data"], SEMANTIC_MIN]));
@@ -97,16 +97,23 @@ describe("library queries", () => {
     const { pool, calls } = recorder([[], [{ total: "0" }]]);
     await listLibrary(pool, { q: "仅存在于要点中的词", page: 1 });
     const { text, values } = calls[0];
-    const ilikeMatch = text.match(/cb\.title ILIKE \$(\d+) OR cb\.summary ILIKE \$(\d+) OR cb\.summary_points::text ILIKE \$(\d+) OR EXISTS \(SELECT 1 FROM unnest\(cb\.tags\) tg WHERE tg ILIKE \$(\d+)\)/);
+    const ilikeMatch = text.match(/cb\.title ILIKE \$(\d+) OR cb\.summary ILIKE \$(\d+) OR cb\.summary_points::text ILIKE \$(\d+) OR cb\.build_notes::text ILIKE \$(\d+) OR EXISTS \(SELECT 1 FROM unnest\(cb\.tags\) tg WHERE tg ILIKE \$(\d+)\)/);
     expect(ilikeMatch).not.toBeNull();
-    const [, titleIdx, summaryIdx, pointsIdx, tagsIdx] = ilikeMatch!;
-    // Same escaped `%q%` parameter as the title/summary/tags legs — one ILIKE value, four columns.
+    const [, titleIdx, summaryIdx, pointsIdx, notesIdx, tagsIdx] = ilikeMatch!;
+    // Same escaped `%q%` parameter as the title/summary/points/tags legs — one ILIKE value, five columns.
     expect(pointsIdx).toBe(titleIdx);
     expect(pointsIdx).toBe(summaryIdx);
+    expect(pointsIdx).toBe(notesIdx);
     expect(pointsIdx).toBe(tagsIdx);
     expect(values[Number(pointsIdx) - 1]).toBe("%仅存在于要点中的词%");
     // No ranking change beyond the existing ILIKE-hit weight — a point-only match still scores +0.15, not more.
-    expect(text).toMatch(/CASE WHEN \(cb\.title ILIKE \$\d+ OR cb\.summary ILIKE \$\d+ OR cb\.summary_points::text ILIKE \$\d+ OR EXISTS \(SELECT 1 FROM unnest\(cb\.tags\) tg WHERE tg ILIKE \$\d+\)\) THEN 0\.15 ELSE 0 END/);
+    expect(text).toMatch(/CASE WHEN \(cb\.title ILIKE \$\d+ OR cb\.summary ILIKE \$\d+ OR cb\.summary_points::text ILIKE \$\d+ OR cb\.build_notes::text ILIKE \$\d+ OR EXISTS \(SELECT 1 FROM unnest\(cb\.tags\) tg WHERE tg ILIKE \$\d+\)\) THEN 0\.15 ELSE 0 END/);
+  });
+  it("matches a Chinese word that only appears in a build note", async () => {
+    const { pool, calls } = recorder([[], [{ total: "0" }]]);
+    await listLibrary(pool, { q: "踩坑", page: 1 });
+    // simple 配置会把一整串中文切成一个 token，中文搜索实际靠的是 ILIKE 这条腿
+    expect(calls[0].text).toMatch(/cb\.build_notes::text ILIKE \$\d+/);
   });
   it("listLibrary's hybrid score adds a small score weight only when cb.score is not null", async () => {
     const { pool, calls } = recorder([[], [{ total: "0" }]]);
