@@ -379,6 +379,23 @@ describe("encodeDecision / decodeDecision", () => {
     expect(decodeDecision(data)).not.toBeNull();
   });
 
+  it("throws (a caller bug) for an unparsable updatedAtIso instead of silently emitting NaN", () => {
+    expect(() => encodeDecision("keep", "cab_1", "not-a-date")).toThrow(/unparsable updatedAtIso/);
+  });
+
+  it("throws for a capability id containing the '|' separator", () => {
+    expect(() => encodeDecision("keep", "cab|1", "2026-01-15T12:30:00.000Z")).toThrow(/invalid capabilityId/);
+  });
+
+  it("throws for an empty capability id", () => {
+    expect(() => encodeDecision("keep", "", "2026-01-15T12:30:00.000Z")).toThrow(/invalid capabilityId/);
+  });
+
+  it("throws when the encoded result would exceed the 64-byte callback_data cap", () => {
+    const longId = "cab_" + "a".repeat(80);
+    expect(() => encodeDecision("keep", longId, "2026-01-15T12:30:00.000Z")).toThrow(/exceeds 64 bytes/);
+  });
+
   it("returns null for an unknown action code", () => {
     expect(decodeDecision("x|cab_1|123")).toBeNull();
   });

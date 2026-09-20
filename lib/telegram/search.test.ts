@@ -55,15 +55,15 @@ describe("handleSearch", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]!.chatId).toBe(1000);
     expect(sent[0]!.replyToMessageId).toBe(5);
-    expect(sent[0]!.text).toBe("SKL-0007 · grep 用法 · 技能 · 写代码 · https://caphub.agentjoey.ai/library/cab_1");
+    expect(sent[0]!.text).toBe('SKL-0007 · <a href="https://caphub.agentjoey.ai/library/cab_1">grep 用法</a> · 技能 · 写代码');
   });
 
-  it("a free-text query lists up to 5 hybrid-search hits with 编号 · 标题 · 类型 · 场景 and a link", async () => {
+  it("a free-text query lists up to 5 hybrid-search hits with 编号 · 标题(链接) · 类型 · 场景, the title linked instead of a raw URL", async () => {
     const { pool } = fakePool([card()], 1);
     const { api, sent } = fakeApi();
     const outcome = await handleSearch({ pool, api, config }, params);
     expect(outcome).toEqual({ kind: "results", total: 1, shown: 1 });
-    expect(sent[0]!.text).toContain("SKL-0007 · grep 用法 · 技能 · 写代码");
+    expect(sent[0]!.text).toContain('SKL-0007 · <a href="https://caphub.agentjoey.ai/library/cab_1">grep 用法</a> · 技能 · 写代码');
   });
 
   it("caps at SEARCH_RESULT_LIMIT and adds a web link when more results exist", async () => {
@@ -99,8 +99,10 @@ describe("handleSearch", () => {
     const { pool } = fakePool([card({ verdict: "pending", serial: null })], 1);
     const { api, sent } = fakeApi();
     await handleSearch({ pool, api, config }, params);
-    // The internal id only ever appears inside the web link's path, never as standalone text.
-    expect(sent[0]!.text.startsWith("- · grep 用法")).toBe(true);
+    // The internal id only ever appears inside the link's href, never as standalone text.
+    expect(sent[0]!.text.startsWith('- · <a href="https://caphub.agentjoey.ai/library/cab_1">grep 用法</a>')).toBe(true);
+    const withoutHref = sent[0]!.text.replace(/https:\/\/\S+/g, "");
+    expect(withoutHref).not.toContain("cab_1");
   });
 
   it("degrades to non-semantic search when no embedding key is configured (never throws)", async () => {

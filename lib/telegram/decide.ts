@@ -32,6 +32,11 @@ const TOAST = {
   keep: "已保留",
   discard: "已丢弃",
   rerun: "已重新排队",
+  // Shown when the requeue itself succeeded but clearing notified_at did not (see
+  // clearNotifiedAtWithRetry) — the rerun is still running, but the notify tick won't re-push
+  // its result (notified_at is still set), so the user must check the web UI instead of waiting
+  // on a Telegram message that may never arrive.
+  rerunNoAutoPush: "已重新排队，但结果可能不会自动推送，请去 web 查看",
   notOwner: "无权操作"
 } as const;
 
@@ -58,6 +63,30 @@ async function editToCurrentState(deps: HandleCallbackDeps, cb: CallbackDecoded,
 
 async function clearNotifiedAt(pool: Pool, capabilityId: string): Promise<void> {
   await pool.query("UPDATE caphub_v2.capabilities SET notified_at = NULL WHERE id = $1", [capabilityId]);
+}
+
+/**
+ * `clearNotifiedAt`, retried once on failure. Unlike {@link runSideEffect}'s other callers, a
+ * failure here is not cosmetic: if `notified_at` is never cleared, the rerun's eventual result
+ * is silently never pushed (selectCandidates in notify.ts only picks up unnotified cards), so
+ * the Telegram message is stuck on "已重新排队，分析中…" forever with no further sign of life.
+ * Returns whether it ultimately succeeded so the caller can fall back to a "check the web" toast
+ * instead of claiming a clean requeue.
+ */
+async function clearNotifiedAtWithRetry(deps: HandleCallbackDeps, capabilityId: string): Promise<boolean> {
+  try {
+    await clearNotifiedAt(deps.pool, capabilityId);
+    return true;
+  } catch (error) {
+    deps.log?.({ decide: "clear-notified-at-failed-retrying", capabilityId, error: error instanceof Error ? error.message : String(error) });
+  }
+  try {
+    await clearNotifiedAt(deps.pool, capabilityId);
+    return true;
+  } catch (error) {
+    deps.log?.({ decide: "clear-notified-at-failed", capabilityId, error: error instanceof Error ? error.message : String(error) });
+    return false;
+  }
 }
 
 /**
@@ -166,11 +195,17 @@ async function handleRerun(deps: HandleCallbackDeps, cb: CallbackDecoded, candid
   const result = await requestRerun(deps.pool, { captureId: candidate.captureId, pipeline: deps.pipeline }, "zh");
 
   if (result.ok) {
-    await safeAnswer(deps, cb, TOAST.rerun, signal);
+    // Clear notified_at (with one retry) *before* answering, so the toast can honestly say
+    // whether the eventual result will be auto-pushed — see clearNotifiedAtWithRetry.
+    const cleared = await clearNotifiedAtWithRetry(deps, cb.capabilityId);
     await runSideEffect(deps, cb, "requeue-edit-failed", () =>
       deps.api.editMessageText({ chatId: cb.chatId, messageId: cb.messageId, text: REQUEUE_TEXT, replyMarkup: NO_BUTTONS, signal }).then(() => undefined)
     );
-    await runSideEffect(deps, cb, "clear-notified-at-failed", () => clearNotifiedAt(deps.pool, cb.capabilityId));
+    if (!cleared) {
+      await safeAnswer(deps, cb, TOAST.rerunNoAutoPush, signal);
+      return { outcome: "failed", reason: "clear-notified-at-failed", capabilityId: cb.capabilityId };
+    }
+    await safeAnswer(deps, cb, TOAST.rerun, signal);
     return { outcome: "decided", action: "rerun", capabilityId: cb.capabilityId };
   }
 

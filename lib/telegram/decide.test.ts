@@ -141,6 +141,56 @@ describe("handleCallback", () => {
     expect(notifiedUpdate?.values).toEqual(["cab_1"]);
   });
 
+  it("reruns: clear-notified-at succeeds on the first retry after an initial failure", async () => {
+    let clearAttempts = 0;
+    const { pool, calls } = fakePool((text) => {
+      if (text === "BEGIN" || text === "COMMIT" || text === "ROLLBACK") return { rows: [] };
+      if (text.includes(`cb.capture_id AS "captureId"`)) return { rows: [candidateRow()] };
+      if (text.includes("FROM caphub_v2.scenarios")) return { rows: SCENARIO_ROWS };
+      if (text.startsWith("UPDATE caphub_v2.capabilities SET notified_at = NULL")) {
+        clearAttempts += 1;
+        if (clearAttempts === 1) throw Object.assign(new Error("connection terminated"), { code: "57P01" });
+        return { rows: [], rowCount: 1 };
+      }
+      if (text.startsWith("SELECT c.kind,")) return { rows: [{ kind: "image", purged: false, active: false }] };
+      if (text.startsWith("INSERT INTO caphub_v2.analysis_runs")) return { rows: [] };
+      return undefined;
+    });
+    const { api, answered, edited } = fakeApi();
+    const result = await handleCallback(deps(pool, api), cb({ action: "rerun" }));
+
+    expect(result).toEqual({ outcome: "decided", action: "rerun", capabilityId: "cab_1" });
+    expect(answered[0]).toMatchObject({ text: "已重新排队" });
+    expect(edited[0]).toMatchObject({ text: "已重新排队，分析中…" });
+    const clears = calls.filter((c) => c.text.startsWith("UPDATE caphub_v2.capabilities SET notified_at = NULL"));
+    expect(clears).toHaveLength(2);
+  });
+
+  it("reruns: clear-notified-at fails twice — the requeue still happened, but the outcome is 'failed' and the toast tells the user to check the web", async () => {
+    const { pool, calls } = fakePool((text) => {
+      if (text === "BEGIN" || text === "COMMIT" || text === "ROLLBACK") return { rows: [] };
+      if (text.includes(`cb.capture_id AS "captureId"`)) return { rows: [candidateRow()] };
+      if (text.includes("FROM caphub_v2.scenarios")) return { rows: SCENARIO_ROWS };
+      if (text.startsWith("UPDATE caphub_v2.capabilities SET notified_at = NULL")) {
+        throw Object.assign(new Error("connection terminated"), { code: "57P01" });
+      }
+      if (text.startsWith("SELECT c.kind,")) return { rows: [{ kind: "image", purged: false, active: false }] };
+      if (text.startsWith("INSERT INTO caphub_v2.analysis_runs")) return { rows: [] };
+      return undefined;
+    });
+    const { api, answered, edited } = fakeApi();
+    const result = await handleCallback(deps(pool, api), cb({ action: "rerun" }));
+
+    expect(result).toEqual({ outcome: "failed", reason: "clear-notified-at-failed", capabilityId: "cab_1" });
+    // The requeue (analysis_runs insert) and the message edit to the requeue text still happen —
+    // only the toast and the reported outcome change, since the eventual result may now never
+    // auto-push.
+    expect(edited[0]).toMatchObject({ text: "已重新排队，分析中…" });
+    expect(answered[0]).toMatchObject({ text: "已重新排队，但结果可能不会自动推送，请去 web 查看" });
+    const clears = calls.filter((c) => c.text.startsWith("UPDATE caphub_v2.capabilities SET notified_at = NULL"));
+    expect(clears).toHaveLength(2); // one attempt plus one retry, both failed
+  });
+
   it("conflict: a stale callback (someone decided elsewhere) gets a toast and the current-state card, no buttons", async () => {
     const { pool } = routedPool({ candidate: candidateRow({ verdict: "keep", updatedAt: new Date(T2) }) });
     const { api, answered, edited } = fakeApi();

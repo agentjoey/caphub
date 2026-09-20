@@ -73,6 +73,13 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>, ro
   const e = envSchema.parse(env);
   const missing = requiredFor(role, e).filter((k) => e[k] === undefined);
   if (missing.length) throw new Error(`${missing.join(", ")} required for ${role} (PIPELINE=${e.PIPELINE}, TELEGRAM_ENABLED=${e.TELEGRAM_ENABLED})`);
+  // Fail fast at boot rather than at runtime: a non-numeric TELEGRAM_OWNER_CHAT_ID would make
+  // `Number(...)` yield NaN downstream (scripts/worker.ts, lib/telegram/router.ts), classifying
+  // every update as not-owner with zero diagnostics — the bot would look dead with no error
+  // anywhere.
+  if (e.TELEGRAM_ENABLED && e.TELEGRAM_OWNER_CHAT_ID !== undefined && !Number.isSafeInteger(Number(e.TELEGRAM_OWNER_CHAT_ID))) {
+    throw new Error(`TELEGRAM_OWNER_CHAT_ID must be a valid integer chat id when TELEGRAM_ENABLED is true (got ${JSON.stringify(e.TELEGRAM_OWNER_CHAT_ID)})`);
+  }
   const s3 = S3_VARS.every((k) => e[k] !== undefined)
     ? { endpoint: e.S3_ENDPOINT!, region: e.S3_REGION!, accessKeyId: e.S3_ACCESS_KEY_ID!, secretAccessKey: e.S3_SECRET_ACCESS_KEY!, bucket: e.S3_BUCKET }
     : undefined;

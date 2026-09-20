@@ -281,10 +281,27 @@ export function classifyUpdate(update: unknown, opts: { ownerChatId: number }): 
 const ACTION_TO_CODE: Record<DecisionAction, string> = { keep: "k", discard: "d", rerun: "r", "rerun-capture": "rc" };
 const CODE_TO_ACTION: Record<string, DecisionAction> = { k: "keep", d: "discard", r: "rerun", rc: "rerun-capture" };
 
-/** Encodes a moderation decision as Telegram `callback_data`: `k|<capabilityId>|<epochMs>`. */
+/**
+ * Encodes a moderation decision as Telegram `callback_data`: `k|<capabilityId>|<epochMs>`.
+ * Mirrors {@link decodeDecision}'s validation on the way out: every argument here is our own
+ * data (a capability/capture id and its `updated_at`), so a failure is a caller bug, not
+ * untrusted input — this throws rather than silently emitting a `callback_data` that
+ * `decodeDecision` could never parse back (an unparsable date, an id containing the `|`
+ * separator, or a result over Telegram's 64-byte cap).
+ */
 export function encodeDecision(action: DecisionAction, capabilityId: string, updatedAtIso: string): string {
   const epochMs = Date.parse(updatedAtIso);
-  return `${ACTION_TO_CODE[action]}|${capabilityId}|${epochMs}`;
+  if (!Number.isSafeInteger(epochMs)) {
+    throw new Error(`encodeDecision: unparsable updatedAtIso ${JSON.stringify(updatedAtIso)}`);
+  }
+  if (!capabilityId || capabilityId.includes("|")) {
+    throw new Error(`encodeDecision: invalid capabilityId ${JSON.stringify(capabilityId)}`);
+  }
+  const data = `${ACTION_TO_CODE[action]}|${capabilityId}|${epochMs}`;
+  if (new TextEncoder().encode(data).length > CALLBACK_DATA_MAX_BYTES) {
+    throw new Error(`encodeDecision: callback_data exceeds ${CALLBACK_DATA_MAX_BYTES} bytes: ${data}`);
+  }
+  return data;
 }
 
 /**

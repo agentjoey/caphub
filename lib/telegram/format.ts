@@ -9,6 +9,15 @@ import type { DecisionAction } from "./router";
 /** Summaries are truncated to this many codepoints in the "pending" card. */
 export const PENDING_SUMMARY_MAX_LEN = 300;
 
+/**
+ * Telegram's hard limit on a message's text length. `formatResult` truncates its final rendered
+ * text to this defensively — `PENDING_SUMMARY_MAX_LEN` already bounds the summary, but an
+ * unbounded title, tags list, or scenarios set could otherwise still push the total past
+ * Telegram's limit and make the card unsendable (a 400 that would then, without this cap, retire
+ * the card via notify.ts's permanent-error handling instead of ever being seen).
+ */
+export const TELEGRAM_MESSAGE_MAX_LEN = 4096;
+
 export type ResultStatus = "keep" | "discard" | "pending" | "failed";
 
 /**
@@ -77,6 +86,11 @@ function libraryLink(id: string): string {
   return `${publicBaseUrl()}/library/${id}`;
 }
 
+/** An HTML anchor to a card's library page, labeled with `label` rather than showing the raw URL (and its internal id) as visible text. */
+function libraryLinkHtml(id: string, label: string): string {
+  return `<a href="${escapeHtml(libraryLink(id))}">${escapeHtml(label)}</a>`;
+}
+
 function metaLine(card: DecidedCardInput): string {
   return `类型：${escapeHtml(typeLabel(card.type, "zh"))} · 用法：${escapeHtml(usageLabel(card.usage, "zh"))}`;
 }
@@ -98,7 +112,7 @@ function formatKeep(card: DecidedCardInput): FormattedMessage {
     metaLine(card),
     scenariosLine(card.scenarioLabels),
     tagsLine(card.tags),
-    escapeHtml(libraryLink(card.id))
+    libraryLinkHtml(card.id, "详情")
   ];
   return { text: lines.join("\n") };
 }
@@ -108,7 +122,7 @@ function formatDiscard(card: DecidedCardInput): FormattedMessage {
     "🗑 已丢弃",
     `<b>${escapeHtml(card.title)}</b>`,
     escapeHtml(card.suggestedReason),
-    escapeHtml(libraryLink(card.id))
+    libraryLinkHtml(card.id, "详情")
   ];
   return { text: lines.join("\n") };
 }
@@ -158,10 +172,16 @@ function formatFailed(card: FailedCardInput): FormattedMessage {
  * `cap_…`, `run_…`) are never rendered as text, only the display serial (`SKL-0007`).
  */
 export function formatResult(card: FormatCardInput): FormattedMessage {
-  switch (card.status) {
-    case "keep": return formatKeep(card);
-    case "discard": return formatDiscard(card);
-    case "pending": return formatPending(card);
-    case "failed": return formatFailed(card);
-  }
+  const rendered = ((): FormattedMessage => {
+    switch (card.status) {
+      case "keep": return formatKeep(card);
+      case "discard": return formatDiscard(card);
+      case "pending": return formatPending(card);
+      case "failed": return formatFailed(card);
+    }
+  })();
+  // Defensive cap (see TELEGRAM_MESSAGE_MAX_LEN) — every formatter above already bounds its own
+  // inputs, but an unbounded tags/scenarios set (or a very long title) must never produce a
+  // message Telegram outright rejects as too long.
+  return { ...rendered, text: truncate(rendered.text, TELEGRAM_MESSAGE_MAX_LEN) };
 }

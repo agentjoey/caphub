@@ -61,6 +61,18 @@ describe("loadConfig worker", () => {
   it("requires telegram fields when enabled", () => {
     expect(() => loadConfig({ ...worker, TELEGRAM_ENABLED: "true" }, "worker")).toThrow(/TELEGRAM_BOT_TOKEN, TELEGRAM_OWNER_CHAT_ID/);
   });
+  it("fails fast on a non-numeric TELEGRAM_OWNER_CHAT_ID when enabled, instead of letting it become NaN downstream", () => {
+    expect(() =>
+      loadConfig({ ...worker, TELEGRAM_ENABLED: "true", TELEGRAM_BOT_TOKEN: "t", TELEGRAM_OWNER_CHAT_ID: "not-a-number" }, "worker")
+    ).toThrow(/TELEGRAM_OWNER_CHAT_ID must be a valid integer/);
+  });
+  it("accepts a numeric TELEGRAM_OWNER_CHAT_ID when enabled", () => {
+    const c = loadConfig({ ...worker, TELEGRAM_ENABLED: "true", TELEGRAM_BOT_TOKEN: "t", TELEGRAM_OWNER_CHAT_ID: "123456" }, "worker");
+    expect(c.telegram.ownerChatId).toBe("123456");
+  });
+  it("does not validate TELEGRAM_OWNER_CHAT_ID's format when telegram is disabled", () => {
+    expect(() => loadConfig({ ...worker, TELEGRAM_OWNER_CHAT_ID: "not-a-number" }, "worker")).not.toThrow();
+  });
 });
 
 describe("loadConfig script", () => {

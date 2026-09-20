@@ -44,17 +44,18 @@ function libraryQueryLink(query: string): string {
   return `${publicBaseUrl()}/library?q=${encodeURIComponent(query)}`;
 }
 
-/** One hit line: `编号 · 标题 · 类型 · 场景 · 链接`. Every card-derived value is escaped. */
+/** One hit line: `编号 · 标题(链接) · 类型 · 场景`. The title itself links to the card's library page (an HTML anchor, not a visible raw URL) so the internal id is never shown as text. Every card-derived value is escaped. */
 function renderHit(item: CapabilityRow, scenarioLabel: Map<string, string>): string {
   const serial = displaySerial(item.verdict, item.type, item.serial);
   const scenarioNames = item.scenarios.map((slug) => scenarioLabel.get(slug) ?? slug).map(escapeHtml).join("、") || "无";
+  const titleLink = `<a href="${escapeHtml(libraryLink(item.id))}">${escapeHtml(item.title)}</a>`;
   const parts = [
     serial ? escapeHtml(serial) : "-",
-    escapeHtml(item.title),
+    titleLink,
     escapeHtml(typeLabel(item.type, "zh")),
     scenarioNames
   ];
-  return `${parts.join(" · ")} · ${escapeHtml(libraryLink(item.id))}`;
+  return parts.join(" · ");
 }
 
 /**

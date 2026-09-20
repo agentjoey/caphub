@@ -34,9 +34,25 @@ export interface NotifyTickDeps {
   log?: (o: Record<string, unknown>) => void;
 }
 
-/** True for a transport failure (network error/timeout) or a 429 — both are transient and should back off, not fall back to a fresh send. */
+/** True for a transport failure (network error/timeout), a 429, or a 5xx — all transient and should back off/retry, not retire the card. */
 function isTransient(error: unknown): boolean {
-  return error instanceof TelegramError && (error.code === 0 || error.code === 429);
+  if (!(error instanceof TelegramError)) return false;
+  if (error.code === 0 || error.code === 429) return true;
+  return error.code >= 500 && error.code < 600;
+}
+
+/**
+ * True for a non-transient 4xx (e.g. 403 "bot was blocked by the user", 400 "chat not found",
+ * or 400 for a message over Telegram's length limit) — a permanent, card-local failure that will
+ * never succeed on retry, so the card must be retired rather than re-selected forever.
+ */
+function isPermanentClientError(error: unknown): error is TelegramError {
+  return error instanceof TelegramError && error.code >= 400 && error.code < 500 && error.code !== 429;
+}
+
+/** Telegram returns 400 "Bad Request: message is not modified" when an edit is byte-identical to the current message — this is a success (the message already reflects the intended state), not evidence the stored receipt is gone. */
+function isMessageNotModified(error: unknown): boolean {
+  return error instanceof TelegramError && error.code === 400 && error.description.toLowerCase().includes("message is not modified");
 }
 
 /** Postgres error code (e.g. '23505'), when the thrown value carries one — never the error message, which may embed row content. */
@@ -211,10 +227,13 @@ interface PushTarget {
 
 /**
  * Pushes (or edits) exactly one card's Telegram message, given already-rendered `text`/
- * `replyMarkup`. Returns "notified" on success, "skipped" for a card-local issue (nothing to
- * retry differently), or "error" for a transient Telegram-side failure (429 / network) that
- * should trigger backoff. `recordMessageId` is injected so the same delivery logic serves both
- * selection branches (a capability id vs. a capture id — see {@link recordMessageId} and
+ * `replyMarkup`. Returns "notified" on success, "retired" for a permanent, card-local failure
+ * (e.g. the owner blocked the bot, the chat is gone, or the message is too long) that will never
+ * succeed on retry and must not keep head-of-line-blocking the batch, "skipped" for some other
+ * card-local issue (nothing to retry differently, but also not confidently permanent), or
+ * "error" for a transient Telegram-side failure (429 / 5xx / network) that should trigger
+ * backoff. `recordMessageId` is injected so the same delivery logic serves both selection
+ * branches (a capability id vs. a capture id — see {@link recordMessageId} and
  * {@link recordMessageIdForCapture}).
  */
 async function deliver(
@@ -222,7 +241,7 @@ async function deliver(
   target: PushTarget,
   rendered: { text: string; replyMarkup?: InlineKeyboardMarkup },
   recordMessageId: (pool: Pool, id: string, messageId: number) => Promise<void>
-): Promise<"notified" | "skipped" | "error"> {
+): Promise<"notified" | "retired" | "skipped" | "error"> {
   const chatId = target.telegramChatId ?? deps.ownerChatId;
   const messageId = target.telegramMessageId ? Number(target.telegramMessageId) : null;
 
@@ -235,13 +254,20 @@ async function deliver(
       await deps.api.editMessageText({ chatId, messageId, text: rendered.text, replyMarkup });
       return "notified";
     } catch (error) {
+      if (isMessageNotModified(error)) {
+        // The message already shows the intended text/buttons (a rerun's edit — see decide.ts —
+        // can leave the receipt byte-identical to what this tick would send) — a no-op success,
+        // not evidence the stored receipt is gone.
+        return "notified";
+      }
       if (isTransient(error)) {
         deps.log?.({ notify: "edit-failed-transient", capability: target.id });
         return "error";
       }
       deps.log?.({ notify: "edit-failed-fallback-send", capability: target.id });
       // Fall through to a fresh send below — the stored receipt message is gone or can no
-      // longer be edited.
+      // longer be edited. A permanent client error here (e.g. the chat itself is gone) will
+      // reproduce on the send attempt below and be retired there.
     }
   }
 
@@ -252,6 +278,13 @@ async function deliver(
     if (isTransient(error)) {
       deps.log?.({ notify: "send-failed-transient", capability: target.id });
       return "error";
+    }
+    if (isPermanentClientError(error)) {
+      // Non-transient, non-429 4xx (owner blocked the bot, chat not found, message too long,
+      // etc.) will never succeed on retry — retiring it (the caller marks it notified) keeps it
+      // from head-of-line-blocking every newer card behind it in selectCandidates' batch.
+      deps.log?.({ notify: "send-failed-permanent-retired", capability: target.id, code: error.code, description: error.description });
+      return "retired";
     }
     deps.log?.({ notify: "send-failed", capability: target.id });
     return "skipped";
@@ -303,10 +336,10 @@ export async function runNotifyTick(deps: NotifyTickDeps, signal: AbortSignal): 
     }
 
     const outcome = await deliver(deps, candidate, rendered, recordMessageId);
-    if (outcome === "notified") {
+    if (outcome === "notified" || outcome === "retired") {
       try {
         await markNotified(deps.pool, candidate.id);
-        notified += 1;
+        if (outcome === "notified") notified += 1;
       } catch (error) {
         // The push already succeeded, but a transient pool error here must not throw out of
         // the tick (it would abort the rest of the batch) and must not be treated as a success
@@ -334,10 +367,10 @@ export async function runNotifyTick(deps: NotifyTickDeps, signal: AbortSignal): 
 
     const target: PushTarget = { id: failure.captureId, telegramChatId: failure.telegramChatId, telegramMessageId: failure.telegramMessageId };
     const outcome = await deliver(deps, target, rendered, recordMessageIdForCapture);
-    if (outcome === "notified") {
+    if (outcome === "notified" || outcome === "retired") {
       try {
         await markRunNotified(deps.pool, failure.runId);
-        notified += 1;
+        if (outcome === "notified") notified += 1;
       } catch (error) {
         deps.log?.({ notify: "mark-run-notified-failed", runId: failure.runId, code: dbErrorCode(error) });
         sawError = true;

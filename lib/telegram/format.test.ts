@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { decodeDecision } from "./router";
-import { formatResult, type DecidedCardInput, type FailedCardInput } from "./format";
+import { formatResult, TELEGRAM_MESSAGE_MAX_LEN, type DecidedCardInput, type FailedCardInput } from "./format";
 
 const base: DecidedCardInput = {
   status: "keep",
@@ -55,6 +55,11 @@ describe("formatResult — keep", () => {
     const withoutLink = out.text.replace(/https:\/\/\S+/g, "");
     expect(withoutLink).not.toContain("cab_deadbeefcafef00d");
   });
+
+  it("renders the web link as an HTML anchor labeled 详情, not visible raw URL text", () => {
+    const out = formatResult(base);
+    expect(out.text).toContain('<a href="https://caphub.agentjoey.ai/library/cab_deadbeefcafef00d">详情</a>');
+  });
 });
 
 describe("formatResult — discard", () => {
@@ -65,6 +70,11 @@ describe("formatResult — discard", () => {
     expect(out.text).toContain("内容过旧");
     expect(out.text).not.toContain("SKL-");
     expect(out.replyMarkup).toBeUndefined();
+  });
+
+  it("also links via an HTML anchor labeled 详情", () => {
+    const out = formatResult({ ...base, status: "discard" });
+    expect(out.text).toContain('<a href="https://caphub.agentjoey.ai/library/cab_deadbeefcafef00d">详情</a>');
   });
 });
 
@@ -117,5 +127,19 @@ describe("formatResult — failed", () => {
   it("falls back to a generic message for an unrecognised error code", () => {
     const out = formatResult({ ...failedBase, errorCode: "SOMETHING_WEIRD" });
     expect(out.text).toBe("❌ 分析失败 · 分析失败（SOMETHING_WEIRD）");
+  });
+});
+
+describe("formatResult — defensive message-length cap", () => {
+  it("truncates the final rendered text to TELEGRAM_MESSAGE_MAX_LEN even when tags/scenarios are unbounded", () => {
+    const manyTags = Array.from({ length: 2000 }, (_, i) => `标签${i}`);
+    const manyScenarios = Array.from({ length: 500 }, (_, i) => `场景${i}`);
+    const out = formatResult({ ...base, tags: manyTags, scenarioLabels: manyScenarios });
+    expect(Array.from(out.text).length).toBeLessThanOrEqual(TELEGRAM_MESSAGE_MAX_LEN);
+  });
+
+  it("leaves a normal-sized card untouched", () => {
+    const out = formatResult(base);
+    expect(Array.from(out.text).length).toBeLessThan(TELEGRAM_MESSAGE_MAX_LEN);
   });
 });

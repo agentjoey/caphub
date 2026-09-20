@@ -97,10 +97,21 @@ async function saveOffset(pool: Pool, offset: number): Promise<void> {
  * tolerate a handler throwing anyway, so a bug in one handler can never wedge the poll loop on a
  * single "poison" update — see the try/catch around this call in {@link runTelegramTick}.
  */
-async function dispatch(deps: TelegramLoopDeps, handlers: TelegramLoopHandlers, update: TelegramUpdate, signal: AbortSignal): Promise<void> {
+async function dispatch(
+  deps: TelegramLoopDeps,
+  handlers: TelegramLoopHandlers,
+  update: TelegramUpdate,
+  signal: AbortSignal,
+  ignoredCounts: Record<string, number>
+): Promise<void> {
   const classified = classifyUpdate(update as RouterUpdate, { ownerChatId: deps.ownerChatId });
   switch (classified.kind) {
     case "ignored":
+      // Silently dropped by design (not-owner, malformed callback, unsupported message shape,
+      // …) — tallied here and logged once per tick (see runTelegramTick) rather than per update,
+      // so a misconfigured TELEGRAM_OWNER_CHAT_ID (every update classifying as not-owner) still
+      // leaves a diagnostic trail instead of looking like a silently dead bot.
+      ignoredCounts[classified.reason] = (ignoredCounts[classified.reason] ?? 0) + 1;
       return;
     case "image":
     case "url":
@@ -162,10 +173,11 @@ export async function runTelegramTick(deps: TelegramLoopDeps, signal: AbortSigna
   }
 
   let processed = 0;
+  const ignoredCounts: Record<string, number> = {};
   for (const update of updates) {
     if (signal.aborted) break;
     try {
-      await dispatch(deps, handlers, update, signal);
+      await dispatch(deps, handlers, update, signal, ignoredCounts);
     } catch (error) {
       deps.log?.({ telegram: "dispatch-failed", updateId: update.update_id, error: errorMessage(error) });
     }
@@ -177,10 +189,12 @@ export async function runTelegramTick(deps: TelegramLoopDeps, signal: AbortSigna
       // it in this batch) may be reprocessed, which every handler tolerates (capture dedupes,
       // decide/requestRerun are idempotent under their own conflict checks).
       deps.log?.({ telegram: "save-offset-failed", updateId: update.update_id, error: errorMessage(error) });
+      if (Object.keys(ignoredCounts).length > 0) deps.log?.({ telegram: "ignored", counts: ignoredCounts });
       return processed > 0 ? { kind: "processed", count: processed } : { kind: "error", reason: "save-offset-failed" };
     }
     processed += 1;
   }
 
+  if (Object.keys(ignoredCounts).length > 0) deps.log?.({ telegram: "ignored", counts: ignoredCounts });
   return processed > 0 ? { kind: "processed", count: processed } : { kind: "idle" };
 }

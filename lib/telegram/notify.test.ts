@@ -135,6 +135,49 @@ describe("runNotifyTick", () => {
     expect(calls.some((c) => c.text.includes("UPDATE caphub_v2.capabilities SET notified_at"))).toBe(false);
   });
 
+  it("treats a 5xx as transient (keeps retrying, does not mark notified)", async () => {
+    const { pool, calls } = fakePool([candidateRow()]);
+    const api = fakeApi({ editMessageText: async () => { throw new TelegramError(500, "internal server error"); } });
+    const result = await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
+    expect(result).toBe("error");
+    expect(calls.some((c) => c.text.includes("UPDATE caphub_v2.capabilities SET notified_at"))).toBe(false);
+  });
+
+  it("treats an edit failing with 'message is not modified' as a success — no fresh send, no duplicate push", async () => {
+    const { pool, calls } = fakePool([candidateRow()]);
+    const api = fakeApi({ editMessageText: async () => { throw new TelegramError(400, "Bad Request: message is not modified"); } });
+    const result = await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
+    expect(result).toBe("notified");
+    expect(api.sent).toHaveLength(0);
+    const notifyUpdate = calls.find((c) => c.text.includes("UPDATE caphub_v2.capabilities SET notified_at"));
+    expect(notifyUpdate?.values).toEqual(["cab_1"]);
+  });
+
+  it("retires a card on a permanent (non-429) 4xx send failure — marks it notified without retrying, and logs once with the error code", async () => {
+    const { pool, calls } = fakePool([candidateRow({ telegramMessageId: null })]);
+    const logs: Record<string, unknown>[] = [];
+    const api = fakeApi({ sendMessage: async () => { throw new TelegramError(403, "Forbidden: bot was blocked by the user"); } });
+    const result = await runNotifyTick({ pool, api, ownerChatId: 1000, log: (o) => logs.push(o) }, new AbortController().signal);
+    // No successful push happened, so this is not counted as "notified" — but the card must
+    // still be retired (marked notified) so it stops starving newer cards in the batch.
+    expect(result).toBe("idle");
+    const notifyUpdate = calls.find((c) => c.text.includes("UPDATE caphub_v2.capabilities SET notified_at"));
+    expect(notifyUpdate?.values).toEqual(["cab_1"]);
+    expect(logs.some((l) => l.notify === "send-failed-permanent-retired" && l.capability === "cab_1" && l.code === 403)).toBe(true);
+  });
+
+  it("retires a stuck card via the failed-run edit-then-fallback path when the chat itself is gone (400 on both edit and send)", async () => {
+    const { pool, calls } = fakePool([candidateRow()]);
+    const api = fakeApi({
+      editMessageText: async () => { throw new TelegramError(400, "Bad Request: chat not found"); },
+      sendMessage: async () => { throw new TelegramError(400, "Bad Request: chat not found"); }
+    });
+    const result = await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
+    expect(result).toBe("idle");
+    const notifyUpdate = calls.find((c) => c.text.includes("UPDATE caphub_v2.capabilities SET notified_at"));
+    expect(notifyUpdate?.values).toEqual(["cab_1"]);
+  });
+
   it("keeps processing the rest of the batch when markNotified throws for one candidate, and reports 'error'", async () => {
     const rows = [candidateRow({ id: "cab_bad" }), candidateRow({ id: "cab_good" })];
     let calls = 0;
@@ -257,6 +300,15 @@ describe("runNotifyTick — failed-run-with-no-capability branch", () => {
     const result = await runNotifyTick({ pool: { query } as never, api, ownerChatId: 1000 }, new AbortController().signal);
     expect(result).toBe("notified");
     expect(api.edited).toHaveLength(2);
+  });
+
+  it("retires a failed-capture push on a permanent 4xx — marks the run notified (analysis_runs.notified_at) without retrying", async () => {
+    const { pool, calls } = fakePoolWithCaptureFailures([captureFailureRow({ telegramMessageId: null })]);
+    const api = fakeApi({ sendMessage: async () => { throw new TelegramError(400, "Bad Request: chat not found"); } });
+    const result = await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
+    expect(result).toBe("idle");
+    const runNotified = calls.find((c) => c.text.includes("UPDATE caphub_v2.analysis_runs SET notified_at"));
+    expect(runNotified?.values).toEqual(["run_1"]);
   });
 
   it("does not mark the run notified on a transient delivery error", async () => {

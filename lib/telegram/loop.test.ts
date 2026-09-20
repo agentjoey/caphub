@@ -150,6 +150,40 @@ describe("runTelegramTick", () => {
     expect(currentOffset()).toBe(11);
   });
 
+  it("counts ignored updates by reason and logs the counts once per tick (not once per update)", async () => {
+    const { pool, currentOffset } = fakePool();
+    const updates: TelegramUpdate[] = [
+      { update_id: 30, message: { message_id: 1, chat: { id: 9999 }, text: "hi" } }, // not-owner
+      { update_id: 31, message: { message_id: 2, chat: { id: 9999 }, text: "hi again" } }, // not-owner
+      { update_id: 32, message: { message_id: 3, chat: { id: OWNER }, sticker: {} } }, // unsupported
+      { update_id: 33, message: { message_id: 4, chat: { id: OWNER }, text: "/help" } } // not ignored
+    ];
+    const api = fakeGetUpdates([updates, []]);
+    const logs: Record<string, unknown>[] = [];
+    const deps = baseDeps({
+      pool,
+      api,
+      log: (o) => logs.push(o),
+      handlers: { handleCommand: (async () => ({ kind: "help" })) as never }
+    });
+    const result = await runTelegramTick(deps, new AbortController().signal);
+    expect(result).toEqual({ kind: "processed", count: 4 });
+    expect(currentOffset()).toBe(34);
+    const ignoredLogs = logs.filter((l) => l.telegram === "ignored");
+    expect(ignoredLogs).toHaveLength(1);
+    expect(ignoredLogs[0]!.counts).toEqual({ "not-owner": 2, unsupported: 1 });
+  });
+
+  it("logs nothing about ignored updates when there are none", async () => {
+    const { pool } = fakePool();
+    const updates: TelegramUpdate[] = [{ update_id: 40, message: { message_id: 1, chat: { id: OWNER }, text: "/help" } }];
+    const api = fakeGetUpdates([updates, []]);
+    const logs: Record<string, unknown>[] = [];
+    const deps = baseDeps({ pool, api, log: (o) => logs.push(o), handlers: { handleCommand: (async () => ({ kind: "help" })) as never } });
+    await runTelegramTick(deps, new AbortController().signal);
+    expect(logs.some((l) => l.telegram === "ignored")).toBe(false);
+  });
+
   it("a poison update (handler throws) is logged and the offset still advances, other updates in the batch still process", async () => {
     const { pool, currentOffset } = fakePool();
     const updates: TelegramUpdate[] = [
