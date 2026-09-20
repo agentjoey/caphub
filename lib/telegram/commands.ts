@@ -1,0 +1,204 @@
+import type { CapabilityType } from "../analysis/card";
+import { loadScenarios } from "../analysis/scenarios";
+import { typeLabel } from "../library/labels";
+import { listPending, libraryStats, type CapabilityRow } from "../library/queries";
+import { escapeHtml, type BotCommand, type TelegramApi } from "./api";
+import { publicBaseUrl } from "./capture";
+import { formatResult, type DecidedCardInput } from "./format";
+import { handleSearch, type SearchDeps, type SearchOutcome } from "./search";
+
+/** At most this many pending cards are pushed as individual messages; the rest get a web link. */
+export const PENDING_SHOW_LIMIT = 5;
+
+const TYPES: CapabilityType[] = ["skill", "experience", "plugin", "prompt", "other"];
+
+const HELP_TEXT = [
+  "Caphub 使用说明",
+  "· 发图 = 投递",
+  "· 发链接 = 投递",
+  "· /add 文字 = 投递（也可以回复一条消息发送 /add 投递）",
+  "· 直接打字 = 搜索",
+  "· 待处理卡片下方的按钮可以直接保留 / 丢弃 / 重跑分析"
+].join("\n");
+
+const ADD_USAGE_TEXT = "用法：/add <文字>，或回复一条消息发送 /add 投递";
+const FIND_USAGE_TEXT = "用法：/find <关键词>，直接打字也可以搜索";
+const NO_PENDING_TEXT = "目前没有待处理的卡片";
+const UNKNOWN_COMMAND_TEXT = "不认识这个命令，发送 /help 看看能做什么";
+const GENERIC_ERROR_TEXT = "出了点问题，请稍后重试";
+
+/** The five slash commands the bot registers with Telegram (`setMyCommands`). */
+export const COMMANDS: BotCommand[] = [
+  { command: "help", description: "查看使用说明" },
+  { command: "find", description: "搜索能力库" },
+  { command: "add", description: "投递一段文字" },
+  { command: "pending", description: "查看待处理卡片" },
+  { command: "stats", description: "查看统计信息" }
+];
+
+export type CommandDeps = SearchDeps;
+
+export interface CommandParams {
+  chatId: number;
+  messageId: number;
+  name: string;
+  arg: string;
+}
+
+export type CommandOutcome =
+  | { kind: "help" }
+  | { kind: "search"; result: SearchOutcome }
+  | { kind: "find-usage" }
+  | { kind: "add-usage" }
+  | { kind: "pending"; shown: number; total: number }
+  | { kind: "stats" }
+  | { kind: "unknown"; name: string }
+  | { kind: "failed"; command: string; reason: string };
+
+function libraryReviewLink(): string {
+  return `${publicBaseUrl()}/review`;
+}
+
+function toDecidedCardInput(row: CapabilityRow, scenarioLabel: Map<string, string>): DecidedCardInput {
+  return {
+    status: "pending",
+    id: row.id,
+    title: row.title,
+    type: row.type,
+    usage: row.usage,
+    suggestedVerdict: row.suggestedVerdict,
+    suggestedReason: row.suggestedReason,
+    summary: row.summary,
+    tags: row.tags,
+    scenarioLabels: row.scenarios.map((slug) => scenarioLabel.get(slug) ?? slug),
+    serial: row.serial,
+    updatedAt: row.updatedAt
+  };
+}
+
+/** Best-effort reply; a failed send here must not throw out of the command handler. */
+async function reply(deps: CommandDeps, chatId: number, text: string, replyToMessageId?: number): Promise<void> {
+  try {
+    await deps.api.sendMessage({ chatId, text, replyToMessageId });
+  } catch (error) {
+    console.error(JSON.stringify({ msg: "telegram command reply failed", chatId, error: error instanceof Error ? error.message : String(error) }));
+  }
+}
+
+async function handleHelp(deps: CommandDeps, params: CommandParams): Promise<CommandOutcome> {
+  await reply(deps, params.chatId, HELP_TEXT, params.messageId);
+  return { kind: "help" };
+}
+
+async function handleFind(deps: CommandDeps, params: CommandParams): Promise<CommandOutcome> {
+  const query = params.arg.trim();
+  if (query === "") {
+    await reply(deps, params.chatId, FIND_USAGE_TEXT, params.messageId);
+    return { kind: "find-usage" };
+  }
+  const result = await handleSearch(deps, { chatId: params.chatId, messageId: params.messageId, query });
+  return { kind: "search", result };
+}
+
+async function handleAdd(deps: CommandDeps, params: CommandParams): Promise<CommandOutcome> {
+  // A non-empty argument (or a reply-to-message) is turned into a `text-capture` update by
+  // router.ts's classifyUpdate *before* it ever reaches here — so reaching `handleAdd` at all
+  // means there was nothing to submit. This only routes/validates; the actual capture path is
+  // Task 3's handleCapture.
+  await reply(deps, params.chatId, ADD_USAGE_TEXT, params.messageId);
+  return { kind: "add-usage" };
+}
+
+/**
+ * Renders up to {@link PENDING_SHOW_LIMIT} pending cards, each as its own Telegram message with
+ * the same 保留/丢弃/重跑分析 buttons a push uses — via `formatResult`'s existing "pending"
+ * rendering, never rebuilt here.
+ */
+async function handlePending(deps: CommandDeps, params: CommandParams): Promise<CommandOutcome> {
+  try {
+    const { items, total } = await listPending(deps.pool, { page: 1 });
+    if (items.length === 0) {
+      await reply(deps, params.chatId, NO_PENDING_TEXT, params.messageId);
+      return { kind: "pending", shown: 0, total: 0 };
+    }
+
+    const scenarios = await loadScenarios(deps.pool);
+    const scenarioLabel = new Map(scenarios.map((s) => [s.slug, s.labelZh]));
+    const shown = items.slice(0, PENDING_SHOW_LIMIT);
+
+    for (const row of shown) {
+      const rendered = formatResult(toDecidedCardInput(row, scenarioLabel));
+      await deps.api.sendMessage({ chatId: params.chatId, text: rendered.text, replyMarkup: rendered.replyMarkup });
+    }
+    if (total > shown.length) {
+      await deps.api.sendMessage({
+        chatId: params.chatId,
+        text: `还有更多待处理卡片，去 web 看看：${escapeHtml(libraryReviewLink())}`
+      });
+    }
+    return { kind: "pending", shown: shown.length, total };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(JSON.stringify({ msg: "telegram /pending failed", chatId: params.chatId, error: message }));
+    await reply(deps, params.chatId, GENERIC_ERROR_TEXT, params.messageId);
+    return { kind: "failed", command: "pending", reason: message };
+  }
+}
+
+async function handleStats(deps: CommandDeps, params: CommandParams): Promise<CommandOutcome> {
+  try {
+    const stats = await libraryStats(deps.pool);
+    const lines = [
+      "📊 统计",
+      ...TYPES.map((type) => `${typeLabel(type, "zh")}：${stats.byType[type]}`),
+      `标签数：${stats.tagCount}`,
+      `待 Review：${stats.pending}`
+    ];
+    await reply(deps, params.chatId, lines.join("\n"), params.messageId);
+    return { kind: "stats" };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(JSON.stringify({ msg: "telegram /stats failed", chatId: params.chatId, error: message }));
+    await reply(deps, params.chatId, GENERIC_ERROR_TEXT, params.messageId);
+    return { kind: "failed", command: "stats", reason: message };
+  }
+}
+
+/**
+ * Dispatches a classified `{kind: "command"}` update (see router.ts). Every branch replies
+ * exactly once and this never throws — it runs inside the worker's poll loop.
+ */
+export async function handleCommand(deps: CommandDeps, params: CommandParams): Promise<CommandOutcome> {
+  const name = params.name.toLowerCase();
+  try {
+    switch (name) {
+      case "help":
+        return await handleHelp(deps, params);
+      case "find":
+        return await handleFind(deps, params);
+      case "add":
+        return await handleAdd(deps, params);
+      case "pending":
+        return await handlePending(deps, params);
+      case "stats":
+        return await handleStats(deps, params);
+      default:
+        await reply(deps, params.chatId, UNKNOWN_COMMAND_TEXT, params.messageId);
+        return { kind: "unknown", name };
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(JSON.stringify({ msg: "telegram command crashed", chatId: params.chatId, command: name, error: message }));
+    await reply(deps, params.chatId, GENERIC_ERROR_TEXT, params.messageId);
+    return { kind: "failed", command: name, reason: message };
+  }
+}
+
+/** `setMyCommands` at worker startup. Failures only log — a stale command list is never fatal. */
+export async function syncCommands(api: Pick<TelegramApi, "setMyCommands">): Promise<void> {
+  try {
+    await api.setMyCommands({ commands: COMMANDS });
+  } catch (error) {
+    console.error(JSON.stringify({ msg: "telegram setMyCommands failed", error: error instanceof Error ? error.message : String(error) }));
+  }
+}
