@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { NO_OVERLAP } from "../../../lib/analysis/card";
 import { loadScenarios } from "../../../lib/analysis/scenarios";
 import { AnalysisDetails } from "../../../components/capability/analysis-details";
+import { BuildNotes } from "../../../components/capability/build-notes";
 import { CollapsedCapturePreview } from "../../../components/capability/capture-preview";
 import { DeepAnalysisSection } from "../../../components/capability/deep-analysis";
 import { OpenQuestions } from "../../../components/capability/open-questions";
@@ -180,6 +181,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
               locale={locale}
             />
           )}
+          <BuildNotes notes={detail.buildNotes} locale={locale} />
           <DetailActions
             id={detail.id}
             captureId={detail.captureId}

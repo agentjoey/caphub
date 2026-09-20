@@ -204,6 +204,9 @@ export const dictEn: Dict = {
     saving: "Saving…",
     genericError: "Something went wrong, please retry"
   },
+  buildNotes: {
+    title: "Build notes"
+  },
   detailActions: {
     keep: "Keep",
     discard: "Discard",
