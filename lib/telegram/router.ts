@@ -9,23 +9,23 @@ export const CALLBACK_DATA_MAX_BYTES = 64;
 
 const IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
-interface ChatRef {
+export interface ChatRef {
   id: number;
 }
 
-interface PhotoSize {
+export interface PhotoSize {
   file_id: string;
   width: number;
   height: number;
   file_size?: number;
 }
 
-interface DocumentLike {
+export interface DocumentLike {
   file_id: string;
   mime_type?: string;
 }
 
-interface MessageLike {
+export interface MessageLike {
   message_id: number;
   chat: ChatRef;
   text?: string;
@@ -39,7 +39,7 @@ interface MessageLike {
   reply_to_message?: MessageLike;
 }
 
-interface CallbackQueryLike {
+export interface CallbackQueryLike {
   id: string;
   data?: string;
   message?: MessageLike;
@@ -72,21 +72,58 @@ export type ClassifiedUpdate =
 const URL_PATTERN = /^https?:\/\/\S+$/i;
 const COMMAND_PATTERN = /^\/([a-zA-Z0-9_]+)(?:@[a-zA-Z0-9_]+)?(?:[ \t]+([\s\S]*))?$/;
 
+// --- Runtime safety helpers -------------------------------------------------
+// classifyUpdate runs on raw, untrusted JSON straight off the wire (the worker's poll
+// loop). The exported types above describe the *shape we expect*, but nothing enforces
+// it at runtime, so every access below is guarded defensively — this function must
+// never throw, no matter how malformed the input is.
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function readChatId(value: unknown): number | undefined {
+  if (!isRecord(value)) return undefined;
+  const chat = value.chat;
+  if (!isRecord(chat)) return undefined;
+  return typeof chat.id === "number" ? chat.id : undefined;
+}
+
+function readMessageId(value: unknown): number | undefined {
+  if (!isRecord(value)) return undefined;
+  return typeof value.message_id === "number" ? value.message_id : undefined;
+}
+
+function readString(value: unknown, key: string): string | undefined {
+  if (!isRecord(value)) return undefined;
+  const v = value[key];
+  return typeof v === "string" ? v : undefined;
+}
+
+/** Splits on codepoints (not UTF-16 code units) so a cut never lands mid-surrogate-pair. */
 function truncate(text: string, maxLen: number): { text: string; truncated: boolean } {
-  if (text.length <= maxLen) return { text, truncated: false };
-  return { text: text.slice(0, maxLen), truncated: true };
+  const codepoints = Array.from(text);
+  if (codepoints.length <= maxLen) return { text, truncated: false };
+  return { text: codepoints.slice(0, maxLen).join(""), truncated: true };
 }
 
-function largestPhoto(photos: PhotoSize[]): PhotoSize | undefined {
-  return photos.reduce<PhotoSize | undefined>((best, current) => {
-    if (!best) return current;
-    return current.width * current.height > best.width * best.height ? current : best;
-  }, undefined);
+function largestPhoto(photos: unknown): PhotoSize | undefined {
+  if (!Array.isArray(photos)) return undefined;
+  let best: PhotoSize | undefined;
+  for (const candidate of photos) {
+    if (!isRecord(candidate)) continue;
+    const fileId = typeof candidate.file_id === "string" ? candidate.file_id : undefined;
+    if (!fileId) continue;
+    const width = typeof candidate.width === "number" ? candidate.width : 0;
+    const height = typeof candidate.height === "number" ? candidate.height : 0;
+    if (!best || width * height > best.width * best.height) {
+      best = { file_id: fileId, width, height };
+    }
+  }
+  return best;
 }
 
-function classifyText(message: MessageLike, text: string): ClassifiedUpdate {
-  const messageId = message.message_id;
-  const chatId = message.chat.id;
+function classifyText(message: Record<string, unknown>, text: string, messageId: number, chatId: number): ClassifiedUpdate {
   const trimmed = text.trim();
 
   if (trimmed === "") {
@@ -102,7 +139,9 @@ function classifyText(message: MessageLike, text: string): ClassifiedUpdate {
     const arg = (match[2] ?? "").trim();
 
     if (name === "add") {
-      const sourceText = arg !== "" ? arg : (message.reply_to_message?.text ?? message.reply_to_message?.caption ?? "").trim();
+      const replyTo = message.reply_to_message;
+      const replyText = (readString(replyTo, "text") ?? readString(replyTo, "caption") ?? "").trim();
+      const sourceText = arg !== "" ? arg : replyText;
       if (sourceText !== "") {
         const { text: capped, truncated } = truncate(sourceText, CAPTURE_TEXT_MAX_LEN);
         return { kind: "text-capture", text: capped, truncated, messageId, chatId };
@@ -126,20 +165,28 @@ function classifyText(message: MessageLike, text: string): ClassifiedUpdate {
   return { kind: "search", query: capped, truncated, messageId, chatId };
 }
 
-function classifyMessage(message: MessageLike): ClassifiedUpdate {
-  const messageId = message.message_id;
-  const chatId = message.chat.id;
+function classifyMessage(message: unknown): ClassifiedUpdate {
+  if (!isRecord(message)) return { kind: "ignored", reason: "unsupported" };
 
-  if (message.photo && message.photo.length > 0) {
-    const photo = largestPhoto(message.photo);
-    if (photo) {
-      return { kind: "image", fileId: photo.file_id, messageId, chatId, ...(message.caption !== undefined ? { caption: message.caption } : {}) };
-    }
+  const chatId = readChatId(message);
+  const messageId = readMessageId(message);
+  if (chatId === undefined || messageId === undefined) {
+    return { kind: "ignored", reason: "unsupported" };
   }
 
-  if (message.document) {
-    if (message.document.mime_type && IMAGE_MIME_TYPES.has(message.document.mime_type)) {
-      return { kind: "image", fileId: message.document.file_id, messageId, chatId, ...(message.caption !== undefined ? { caption: message.caption } : {}) };
+  const caption = readString(message, "caption");
+
+  const photo = largestPhoto(message.photo);
+  if (photo) {
+    return { kind: "image", fileId: photo.file_id, messageId, chatId, ...(caption !== undefined ? { caption } : {}) };
+  }
+
+  const document = message.document;
+  if (document !== undefined && document !== null) {
+    const mimeType = readString(document, "mime_type");
+    const fileId = readString(document, "file_id");
+    if (mimeType && fileId && IMAGE_MIME_TYPES.has(mimeType)) {
+      return { kind: "image", fileId, messageId, chatId, ...(caption !== undefined ? { caption } : {}) };
     }
     return { kind: "ignored", reason: "unsupported" };
   }
@@ -148,30 +195,43 @@ function classifyMessage(message: MessageLike): ClassifiedUpdate {
     return { kind: "ignored", reason: "unsupported" };
   }
 
-  if (typeof message.text === "string") {
-    return classifyText(message, message.text);
+  const text = message.text;
+  if (typeof text === "string") {
+    return classifyText(message, text, messageId, chatId);
   }
 
   return { kind: "ignored", reason: "unsupported" };
 }
 
-function classifyCallbackQuery(callbackQuery: CallbackQueryLike): ClassifiedUpdate {
+function classifyCallbackQuery(callbackQuery: unknown): ClassifiedUpdate {
+  if (!isRecord(callbackQuery)) return { kind: "ignored", reason: "unsupported" };
+
   const message = callbackQuery.message;
-  if (!message || typeof callbackQuery.data !== "string") {
+  const chatId = readChatId(message);
+  const messageId = readMessageId(message);
+  if (chatId === undefined || messageId === undefined) {
+    return { kind: "ignored", reason: "unsupported" };
+  }
+
+  const data = callbackQuery.data;
+  const callbackId = callbackQuery.id;
+  if (typeof data !== "string" || typeof callbackId !== "string") {
     return { kind: "ignored", reason: "bad-callback" };
   }
-  const decoded = decodeDecision(callbackQuery.data);
+
+  const decoded = decodeDecision(data);
   if (!decoded) {
     return { kind: "ignored", reason: "bad-callback" };
   }
+
   return {
     kind: "callback",
     action: decoded.action,
     capabilityId: decoded.capabilityId,
     updatedAt: decoded.updatedAt,
-    callbackId: callbackQuery.id,
-    chatId: message.chat.id,
-    messageId: message.message_id
+    callbackId,
+    chatId,
+    messageId
   };
 }
 
@@ -179,9 +239,21 @@ function classifyCallbackQuery(callbackQuery: CallbackQueryLike): ClassifiedUpda
  * Classifies an incoming Telegram update into exactly one actionable kind (or "ignored"
  * with a reason). Pure function: no network, no DB. `ownerChatId` gates every update —
  * anything from another chat is ignored regardless of shape.
+ *
+ * `update` is typed as `unknown` deliberately: this runs directly on raw JSON parsed from
+ * the Telegram API response, which is untrusted and may be arbitrarily malformed. This
+ * function is total — it never throws, for any input.
  */
-export function classifyUpdate(update: RouterUpdate, opts: { ownerChatId: number }): ClassifiedUpdate {
-  const chatId = update.message?.chat.id ?? update.callback_query?.message?.chat.id;
+export function classifyUpdate(update: unknown, opts: { ownerChatId: number }): ClassifiedUpdate {
+  if (!isRecord(update)) {
+    return { kind: "ignored", reason: "unsupported" };
+  }
+
+  const message = update.message;
+  const callbackQuery = update.callback_query;
+  const callbackMessage = isRecord(callbackQuery) ? callbackQuery.message : undefined;
+  const chatId = readChatId(message) ?? readChatId(callbackMessage);
+
   if (chatId === undefined) {
     return { kind: "ignored", reason: "unsupported" };
   }
@@ -189,11 +261,11 @@ export function classifyUpdate(update: RouterUpdate, opts: { ownerChatId: number
     return { kind: "ignored", reason: "not-owner" };
   }
 
-  if (update.callback_query) {
-    return classifyCallbackQuery(update.callback_query);
+  if (callbackQuery !== undefined && callbackQuery !== null) {
+    return classifyCallbackQuery(callbackQuery);
   }
-  if (update.message) {
-    return classifyMessage(update.message);
+  if (message !== undefined && message !== null) {
+    return classifyMessage(message);
   }
   return { kind: "ignored", reason: "unsupported" };
 }
