@@ -63,3 +63,24 @@ Human 确认后执行：三张较弱的卡置为 `superseded` 并记录替代者
 - 规划 / 事实 / 成文三步各重试一次时（11 次调用）仍会触发预算上限而失败——预算按设计生效。
 - `scenarioStats` / `allTags` 已按 active 收口，与其它统计一致。
 - 本轮未产出脚本截图，以 Human 真机走查为准。
+
+## 后续修复：深度分析长度上限扫描（2026-09-21）
+
+SKL-0031 连续三次深度分析失败：`plan` + 5 次 `search` + 第一次 `synthesize` 全部成功，
+最后一次 `synthesize` 两次尝试都被 schema 拒掉（`INVALID_OUTPUT` / `INVALID_JSON`），
+八次成功调用全部作废。根因是 M3.6 写 `deepAnalysisSchema` 时把**提示词目标值直接当成了 schema 硬上限**——
+约二十个字段零余量，而 `runStructured` 只给两次尝试，超一个字就整轮丢弃。
+M3.8 终审在 `summary_points` 上修过同一类问题，当时没有回扫深度分析。
+
+| 修复 | commit |
+|---|---|
+| `deepAnalysisSchema` 各字段给约 1.5 倍余量；`cases`/`feedback` 越界的 `source` 下标改为归零成 null（非整数、负数仍然拒绝）；数组条数上限保持严格 | `8ef57d0` |
+| 上一条把 `.transform` 直接挂在 schema 上，会让 `z.toJSONSchema` 抛错（"Transforms cannot be represented in JSON Schema"），等于让**每一次**深度分析在调用模型前就失败；改回仓库既有的 transform→pipe 写法，并补回归测试：`runStructured` 用到的三个深度 schema 都必须能渲染成 JSON Schema | `e2f5d90` |
+| 扫描其余「提示词目标 == schema 上限」的字段：`score_reason` 80→120、`overlap.reason` 80→120（静态与按轮生成的两处）、`open_questions` 单条 30→45、深度 `facts.text` 300→450。`score_reason` 这一条在 M3.5 回填时就已经害掉过一张卡 | `11c00c4` |
+| 部署后重跑 SKL-0031，仅剩一处不合格：`architecture.points` 里一条列举子技能名的 ASCII 串（73 字）撞上 90 以下的上限。字符上限对 ASCII 标识符列表和中文一视同仁，但两者信息密度差很多——points 上限提到 90，并把这条真实产出固化为回归用例 | `56d3cc7` |
+
+提示词的目标字数一律未变，动的只是拒绝阈值。
+
+**已知遗留**：`runStructured` 的尝试次数仍是 2（全管线共用）。SKL-0031 的第二次尝试是模型自己吐出了不合法 JSON
+（根对象在 `sources` 之前就闭合了），这类一次性抖动会吃掉一半的重试预算；加到 3 次需要同时抬高深度分析的调用预算
+（最坏路径 1+5+3+3=12 > 现在的 10），影响面超出本次修复，留待后续。
