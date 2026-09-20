@@ -1,0 +1,135 @@
+import { describe, expect, it } from "vitest";
+import { TelegramError } from "./errors";
+import { runNotifyTick, type NotifyTickDeps } from "./notify";
+
+const SCENARIO_ROWS = [
+  { slug: "coding", label_zh: "编程", label_en: "Coding", keywords: [] },
+  { slug: "automation", label_zh: "自动化", label_en: "Automation", keywords: [] }
+];
+
+function candidateRow(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: "cab_1", title: "示例标题", type: "skill", usage: "integrate",
+    suggestedVerdict: "keep", suggestedReason: "很实用", summary: "摘要",
+    tags: ["rag"], scenarios: ["coding"], serial: 7, verdict: "keep",
+    updatedAt: new Date("2026-09-20T00:00:00.000Z"),
+    telegramChatId: "1000", telegramMessageId: "500",
+    runState: "done", errorCode: null,
+    ...overrides
+  };
+}
+
+function fakePool(candidateRows: Array<Record<string, unknown>>) {
+  const calls: Array<{ text: string; values: unknown[] }> = [];
+  const query = async (text: string, values: unknown[] = []) => {
+    calls.push({ text, values });
+    if (text.includes("FROM caphub_v2.capabilities cb")) return { rows: candidateRows };
+    if (text.includes("FROM caphub_v2.scenarios")) return { rows: SCENARIO_ROWS };
+    if (text.includes("UPDATE caphub_v2.capabilities SET notified_at")) return { rows: [], rowCount: 1 };
+    if (text.includes("UPDATE caphub_v2.captures SET telegram_message_id")) return { rows: [], rowCount: 1 };
+    return { rows: [] };
+  };
+  return { calls, pool: { query } as never };
+}
+
+function fakeApi(overrides: Partial<NotifyTickDeps["api"]> = {}): NotifyTickDeps["api"] & { edited: unknown[]; sent: unknown[] } {
+  const edited: unknown[] = [];
+  const sent: unknown[] = [];
+  return {
+    editMessageText: async (params: never) => { edited.push(params); return true; },
+    sendMessage: async (params: never) => { sent.push(params); return { message_id: 777 }; },
+    ...overrides,
+    edited,
+    sent
+  } as unknown as NotifyTickDeps["api"] & { edited: unknown[]; sent: unknown[] };
+}
+
+describe("runNotifyTick", () => {
+  it("is idle when there is nothing to notify", async () => {
+    const { pool } = fakePool([]);
+    const api = fakeApi();
+    const result = await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
+    expect(result).toBe("idle");
+  });
+
+  it("edits the stored receipt for an auto-keep card and marks it notified", async () => {
+    const { pool, calls } = fakePool([candidateRow()]);
+    const api = fakeApi();
+    const result = await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
+    expect(result).toBe("notified");
+    expect(api.edited).toHaveLength(1);
+    expect(api.sent).toHaveLength(0);
+    const [edit] = api.edited as Array<{ chatId: unknown; messageId: unknown; text: string }>;
+    expect(edit.chatId).toBe("1000");
+    expect(edit.messageId).toBe(500);
+    expect(edit.text).toContain("✅ 已保留 · SKL-0007");
+    expect(edit.text).toContain("场景：编程");
+    const notifyUpdate = calls.find((c) => c.text.includes("UPDATE caphub_v2.capabilities SET notified_at"));
+    expect(notifyUpdate?.values).toEqual(["cab_1"]);
+  });
+
+  it("renders a discard, pending and failed card by status", async () => {
+    const rows = [
+      candidateRow({ id: "cab_discard", verdict: "discard", runState: "done" }),
+      candidateRow({ id: "cab_pending", verdict: "pending", serial: null, runState: "done" }),
+      candidateRow({ id: "cab_failed", runState: "failed", errorCode: "TIMEOUT" })
+    ];
+    const { pool } = fakePool(rows);
+    const api = fakeApi();
+    await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
+    const texts = (api.edited as Array<{ text: string }>).map((e) => e.text);
+    expect(texts.some((t) => t.startsWith("🗑 已丢弃"))).toBe(true);
+    expect(texts.some((t) => t.includes("建议：保留"))).toBe(true);
+    expect(texts.some((t) => t === "❌ 分析失败 · 模型响应超时")).toBe(true);
+  });
+
+  it("falls back to sendMessage when there is no stored receipt message id, and records the new id", async () => {
+    const { pool, calls } = fakePool([candidateRow({ telegramMessageId: null })]);
+    const api = fakeApi();
+    const result = await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
+    expect(result).toBe("notified");
+    expect(api.edited).toHaveLength(0);
+    expect(api.sent).toHaveLength(1);
+    const recorded = calls.find((c) => c.text.includes("UPDATE caphub_v2.captures SET telegram_message_id"));
+    expect(recorded?.values).toEqual(["cab_1", "777"]);
+  });
+
+  it("falls back to sendMessage when editing the stored receipt fails (message gone)", async () => {
+    const { pool } = fakePool([candidateRow()]);
+    const api = fakeApi({ editMessageText: async () => { throw new TelegramError(400, "message to edit not found"); } });
+    const result = await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
+    expect(result).toBe("notified");
+    expect(api.sent).toHaveLength(1);
+  });
+
+  it("skips a card on 429 without marking it notified, and reports 'error'", async () => {
+    const { pool, calls } = fakePool([candidateRow()]);
+    const api = fakeApi({ editMessageText: async () => { throw new TelegramError(429, "too many requests", 3); } });
+    const result = await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
+    expect(result).toBe("error");
+    expect(api.sent).toHaveLength(0);
+    expect(calls.some((c) => c.text.includes("UPDATE caphub_v2.capabilities SET notified_at"))).toBe(false);
+  });
+
+  it("skips a card on a network error without marking it notified, and reports 'error'", async () => {
+    const { pool, calls } = fakePool([candidateRow()]);
+    const api = fakeApi({ editMessageText: async () => { throw new TelegramError(0, "request timed out"); } });
+    const result = await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
+    expect(result).toBe("error");
+    expect(calls.some((c) => c.text.includes("UPDATE caphub_v2.capabilities SET notified_at"))).toBe(false);
+  });
+
+  it("keeps processing the rest of the batch after one card's formatting throws", async () => {
+    const rows = [
+      candidateRow({ id: "cab_bad", type: "not-a-real-type" }),
+      candidateRow({ id: "cab_good" })
+    ];
+    const { pool, calls } = fakePool(rows);
+    const api = fakeApi();
+    const result = await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
+    expect(result).toBe("notified");
+    expect(api.edited).toHaveLength(1);
+    const notifyUpdate = calls.find((c) => c.text.includes("UPDATE caphub_v2.capabilities SET notified_at"));
+    expect(notifyUpdate?.values).toEqual(["cab_good"]);
+  });
+});
