@@ -97,20 +97,26 @@ function isUniqueViolation(e: unknown): boolean {
  * scope (the triggering run's own, or the card's) rather than asking for one they can't
  * sensibly choose.
  *
+ * Returns whether it actually inserted a row (`true`) or swallowed a losing race (`false`) --
+ * scripts/backfill-enrichment.ts's `--apply` reads this to report a queued/already-queued split
+ * that reflects reality; every other call site (upsertCapability, decide(keep), editSuggestion)
+ * ignores it, since none of them have anything useful to do with either outcome.
+ *
  * Concurrency is a fire-and-forget INSERT, not a pre-check + insert: migration 011's
  * `analysis_runs_one_active_enrich` partial unique index (one active enrich run per capture) is
  * the only guard, and a losing race surfaces as 23505 here, swallowed as "already queued" rather
  * than treated as a failure of whatever write just triggered this (a card decision or upsert
  * must never fail because an enrich run was already queued for it).
  */
-export async function enqueueEnrichRun(pool: Pick<Pool, "query">, captureId: string, pipeline: Pipeline): Promise<void> {
+export async function enqueueEnrichRun(pool: Pick<Pool, "query">, captureId: string, pipeline: Pipeline): Promise<boolean> {
   try {
     await pool.query(
       "INSERT INTO caphub_v2.analysis_runs (id, capture_id, pipeline, state, kind) VALUES ($1, $2, $3, 'queued', 'enrich')",
       [newId("run"), captureId, pipeline]
     );
+    return true;
   } catch (e) {
-    if (isUniqueViolation(e)) return;
+    if (isUniqueViolation(e)) return false;
     throw e;
   }
 }

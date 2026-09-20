@@ -15,6 +15,7 @@ import {
 import { enrichPrompt, type EnrichSubject } from "./prompts";
 import { recordStep } from "./steps";
 import { runStructured, withTimeout, type StructuredCall } from "./structured";
+import { bumpTags } from "./tags";
 
 export const ENRICH_TIMEOUTS = { search: 60_000, reason: 120_000 } as const;
 /** Whole-run cap (design decision, M3.7 brief): 3 minutes, regardless of which step is in flight. */
@@ -41,6 +42,17 @@ export interface EnrichDeps {
    * a null result means "couldn't fetch" and is not itself a failure.
    */
   fetchCanonical(url: string, signal: AbortSignal): Promise<CanonicalResult>;
+  /**
+   * Best-effort: edits the card's already-sent Telegram message in place with its freshly
+   * enriched render (M3.7 controller ruling -- the whole point of this pass is that the phone
+   * card stops showing the pre-enrichment, process-narrating summary forever). Optional and
+   * injected from the telegram module (see lib/telegram/decide.ts's `editCardAfterEnrich`) so
+   * this layer never imports the bot client directly; a no-op when the capture was never pushed
+   * to Telegram (no stored chat/message id). Must never throw -- `runEnrichment` also wraps its
+   * call as belt-and-braces, but the contract is that this resolves even on failure, having
+   * logged it itself. Never reads or writes `notified_at`: an edit is not a push.
+   */
+  notifyEnriched?(capabilityId: string, signal: AbortSignal): Promise<void>;
 }
 
 /** Builds enrichment deps from config, or undefined when a required key is missing (mirrors createDeepAnalysisDeps). */
@@ -187,6 +199,26 @@ function mergeSourceFacts(modelFacts: SourceFacts, canonical: CanonicalResult): 
 }
 
 /**
+ * Fallback search query for a card whose `open_questions` is empty (see `runEnrichment`) --
+ * migration 011 defaults every backfilled card's `open_questions` to `'[]'`, so this is the
+ * normal path at go-live, not a corner case: without it, every one of those 44 cards would run
+ * zero searches. Mirrors the shape of the first pass's own query-building (prompts.ts's
+ * `searchQuery`: "what it is" plus hints) with what this pass has on hand instead of an
+ * `Extraction` -- the card's own title and type.
+ */
+function enrichFallbackQuery(capability: Pick<CapabilityRow, "title" | "type">): string {
+  return `${capability.title} ${capability.type}`.trim();
+}
+
+/** Order-insensitive tag-set equality, so a rewrite that keeps the same tags (just reordered) doesn't spuriously bump their counts. */
+function tagsEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const sortedA = [...a].sort();
+  const sortedB = [...b].sort();
+  return sortedA.every((t, i) => t === sortedB[i]);
+}
+
+/**
  * Runs the enrichment pass ("补充调研") for a leased `enrich` run: fetch the card's canonical
  * source (when it has one) → up to 2 Tavily searches targeting its open_questions → one
  * DeepSeek rewrite. On success, rewrites `summary`/`signals`/`playbook`/`source_facts`/`score`/
@@ -205,11 +237,26 @@ export async function runEnrichment(deps: EnrichDeps, lease: Lease, signal: Abor
 
     const canonical = capability.source_url ? await runFetch(deps, lease.runId, capability.source_url, t.signal) : null;
 
-    const questions = capability.open_questions.slice(0, ENRICH_MAX_SEARCHES);
+    // A card with no open_questions (every backfilled card, per migration 011's default -- see
+    // enrichFallbackQuery) still gets one search, built from its title/type, so this pass has
+    // something to work from beyond the canonical fetch.
+    const questions = capability.open_questions.length
+      ? capability.open_questions.slice(0, ENRICH_MAX_SEARCHES)
+      : [enrichFallbackQuery(capability)];
     const searchResults: Array<{ question: string; sources: SearchResult["sources"] }> = [];
     for (const question of questions) {
       const result = await runEnrichSearch(deps, lease.runId, question, budget, t.signal);
       searchResults.push({ question, sources: result.sources });
+    }
+
+    // Nothing new to work from -- the canonical fetch found nothing (or there was no source_url)
+    // and every search came back empty. Running the rewrite anyway would just have DeepSeek
+    // restate (or hallucinate over) the existing card while stamping enriched_at as though
+    // 补充调研 had actually happened. Skip it: finish the run as done and leave enriched_at NULL
+    // so a later rerun gets a genuine chance instead of this card being falsely marked enriched.
+    const hasNewMaterial = canonical !== null || searchResults.some((r) => r.sources.length > 0);
+    if (!hasNewMaterial) {
+      return { capabilityId: capability.id };
     }
 
     const pinned = capability.suggestion_by === "human";
@@ -257,6 +304,31 @@ export async function runEnrichment(deps: EnrichDeps, lease: Lease, signal: Abor
       // worth retrying (there's nothing left to enrich), but worth surfacing since it means the
       // run's provider calls above were spent for nothing.
       console.warn(JSON.stringify({ runId: lease.runId, enrichWriteBack: "no matching row (deleted mid-run?)", capabilityId: capability.id }));
+    } else {
+      // Mirrors pipeline.ts's own write path: bumpTags only when the write actually landed and
+      // the tags this run wrote actually changed (never for a pinned card, whose tags column the
+      // UPDATE above left untouched) -- otherwise topTags()'s "reuse existing tags" list never
+      // learns a tag this pass introduced, encouraging synonym drift across enrichment rewrites.
+      if (!pinned && !tagsEqual(capability.tags, rewritten.tags)) {
+        try {
+          await bumpTags(deps.pool, rewritten.tags);
+        } catch (error) {
+          console.warn(JSON.stringify({ runId: lease.runId, enrichBumpTagsFailed: error instanceof Error ? error.message : String(error), capabilityId: capability.id }));
+        }
+      }
+      // M3.7 controller ruling: the write-back above deliberately never touches notified_at (a
+      // background rewrite must never re-push), but that means the phone card would otherwise
+      // keep showing the pre-enrichment summary forever unless it's edited in place. Best-effort
+      // and non-fatal -- the enrich write-back above already succeeded regardless of whether this
+      // edit does; deps.notifyEnriched (lib/telegram/decide.ts's editCardAfterEnrich) is itself
+      // contracted not to throw, this try/catch is belt-and-braces only.
+      if (deps.notifyEnriched) {
+        try {
+          await deps.notifyEnriched(capability.id, t.signal);
+        } catch (error) {
+          console.warn(JSON.stringify({ runId: lease.runId, enrichNotifyFailed: error instanceof Error ? error.message : String(error), capabilityId: capability.id }));
+        }
+      }
     }
 
     return { capabilityId: capability.id };

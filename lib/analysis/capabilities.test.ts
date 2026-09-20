@@ -15,7 +15,7 @@ describe("upsertCapability", () => {
     const pool = {
       query: async (text: string) => {
         if (sql === "") sql = text; // capture the upsert only; ignore the follow-up serial UPDATE
-        return { rows: [{ id: "cab_1", verdict: "keep", previous_verdict: null, deleted: false, enriched_at: null }] };
+        return { rows: [{ id: "cab_1", verdict: "keep", previous_verdict: null, deleted: false }] };
       }
     };
     const out = await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card, verdict: "keep", verdictBy: "auto" });
@@ -24,16 +24,8 @@ describe("upsertCapability", () => {
     expect(sql).toContain("review_error = NULL");
     expect(sql).toContain("review_requested_at = NULL");
     expect(sql).toContain("scenarios = excluded.scenarios");
-    expect(sql).toContain("RETURNING id, verdict, deleted_at, enriched_at");
-    expect(out).toEqual({ id: "cab_1", verdict: "keep", previousVerdict: null, deleted: false, enrichedAt: null });
-  });
-
-  it("reports enrichedAt from the returned row when the card has already been enriched", async () => {
-    const pool = {
-      query: async () => ({ rows: [{ id: "cab_1", verdict: "keep", previous_verdict: "keep", deleted: false, enriched_at: "2026-09-19T00:00:00.000Z" }] })
-    };
-    const out = await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_2", card, verdict: "keep", verdictBy: "auto" });
-    expect(out.enrichedAt).toBe("2026-09-19T00:00:00.000Z");
+    expect(sql).toContain("RETURNING id, verdict, deleted_at");
+    expect(out).toEqual({ id: "cab_1", verdict: "keep", previousVerdict: null, deleted: false });
   });
 
   it("inserts score, score_reason and source_facts", async () => {

@@ -27,13 +27,17 @@
  * only the second is a sign something is actually wrong.
  *
  * Dry-run by default: prints every candidate card (serial code + title, in candidate order) plus
- * the total and an estimated model-call count (~4 calls per card -- 1 canonical fetch is not a
- * model call, up to 2 Tavily searches + 1 DeepSeek rewrite, see enrich.ts's ENRICH_BUDGET_LIMITS
- * comment for the same accounting), but enqueues nothing. `--apply` enqueues each candidate,
- * counting queued / already-queued (23505) / failed; a failing row is logged and does not abort
- * the rest of the batch. Modeled on scripts/reclassify-types.ts and scripts/find-duplicates.ts:
- * import.meta.url gate so tests can import this module without running `main()`, per-row
- * try/catch, non-zero exit when every attempted row failed.
+ * the total and an estimated model-call count (~3 calls per card -- 1 canonical fetch is not a
+ * model call; every one of these 44 backfilled cards has `open_questions = '[]'` per migration
+ * 011's default, so the fix-round-2 fallback means exactly 1 Tavily search, not up to 2, plus 1
+ * DeepSeek rewrite -- see enrich.ts's ENRICH_BUDGET_LIMITS comment and `ENRICH_MAX_SEARCHES`),
+ * but enqueues nothing. `--apply` enqueues each candidate, counting queued / already-queued
+ * (`enqueueEnrichRun` returned `false` -- a run was already queued/running for this capture,
+ * migration 011's one-active-enrich index) / failed; a failing row is logged and does not abort
+ * the rest of the batch. Re-running `--apply` is always safe: every already-queued row is
+ * reported, never double-enqueued. Modeled on scripts/reclassify-types.ts and
+ * scripts/find-duplicates.ts: import.meta.url gate so tests can import this module without
+ * running `main()`, per-row try/catch, non-zero exit when every attempted row failed.
  */
 import type { Pool } from "pg";
 import type { CapabilityType } from "../lib/analysis/card";
@@ -43,8 +47,13 @@ import { createPool } from "../lib/db/pool";
 import { formatSerial } from "../lib/library/serial";
 import { enqueueEnrichRun } from "../lib/queue/runs";
 
-/** ~1 canonical fetch (not model-metered) + up to 2 Tavily searches + 1 DeepSeek rewrite per card (enrich.ts). */
-export const ESTIMATED_CALLS_PER_CARD = 4;
+/**
+ * ~1 canonical fetch (not model-metered) + 1 Tavily search + 1 DeepSeek rewrite per card
+ * (enrich.ts). Every backfilled candidate here has `open_questions = '[]'` (migration 011's
+ * default -- these cards predate M3.7 entirely), so the fix-round-2 fallback always runs exactly
+ * 1 search, never up to `ENRICH_MAX_SEARCHES` (2): 3 model calls per card, not 4.
+ */
+export const ESTIMATED_CALLS_PER_CARD = 3;
 
 function parseArgs(args: string[]): { apply: boolean; limit: number | undefined } {
   const apply = args.includes("--apply");
@@ -82,12 +91,14 @@ export async function loadCandidates(pool: Pick<Pool, "query">, limit?: number):
   return rows;
 }
 
-/** True for a Postgres unique_violation (23505) -- same check as lib/queue/runs.ts's own (private) isUniqueViolation. */
-function isUniqueViolation(e: unknown): boolean {
-  return typeof e === "object" && e !== null && (e as { code?: unknown }).code === "23505";
-}
-
-export type EnqueueFn = (pool: Pick<Pool, "query">, captureId: string, pipeline: Pipeline) => Promise<void>;
+/**
+ * `enqueueEnrichRun`'s own return value -- `true` when it actually inserted a row, `false` when
+ * it swallowed a losing race (a 23505 -- migration 011's one-active-enrich index) as a no-op.
+ * `enqueueEnrichRun` never rejects for that case (it only rejects for a genuine failure), so this
+ * is what `runBackfill` below reads to tell "queued" from "already queued" -- see the module
+ * doc's note on why that split used to be unreachable in practice.
+ */
+export type EnqueueFn = (pool: Pick<Pool, "query">, captureId: string, pipeline: Pipeline) => Promise<boolean>;
 
 export interface BackfillResult {
   candidates: CandidateRow[];
@@ -117,15 +128,15 @@ export async function runBackfill(
     for (const row of candidates) {
       const label = formatSerial(row.type, row.serial) ?? row.title;
       try {
-        await enqueue(pool, row.captureId, row.pipeline);
-        queued += 1;
-        log({ captureId: row.captureId, label, queued: true });
-      } catch (error) {
-        if (isUniqueViolation(error)) {
+        const inserted = await enqueue(pool, row.captureId, row.pipeline);
+        if (inserted) {
+          queued += 1;
+          log({ captureId: row.captureId, label, queued: true });
+        } else {
           alreadyQueued += 1;
           log({ captureId: row.captureId, label, alreadyQueued: true });
-          continue;
         }
+      } catch (error) {
         failed += 1;
         log({ captureId: row.captureId, label, error: error instanceof Error ? error.message : String(error) });
       }

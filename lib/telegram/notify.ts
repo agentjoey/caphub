@@ -62,7 +62,7 @@ function isPermanentClientError(error: unknown): error is TelegramError {
 }
 
 /** Telegram returns 400 "Bad Request: message is not modified" when an edit is byte-identical to the current message — this is a success (the message already reflects the intended state), not evidence the stored receipt is gone. */
-function isMessageNotModified(error: unknown): boolean {
+export function isMessageNotModified(error: unknown): boolean {
   return error instanceof TelegramError && error.code === 400 && error.description.toLowerCase().includes("message is not modified");
 }
 

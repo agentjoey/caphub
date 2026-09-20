@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { handleCallback, type CallbackDecoded, type HandleCallbackDeps } from "./decide";
+import { describe, expect, it, vi } from "vitest";
+import { editCardAfterEnrich, handleCallback, type CallbackDecoded, type HandleCallbackDeps } from "./decide";
+import { TelegramError } from "./errors";
 import { formatResult, type TodoCardInput } from "./format";
 import { decodeDecision } from "./router";
 
@@ -577,5 +578,66 @@ describe("handleCallback — progress actions (pb/pd/px)", () => {
     expect(answered[0]).toMatchObject({ text: "卡片不存在或已删除" });
     expect(edited).toHaveLength(0);
     expect(calls.some((c) => c.text.startsWith("UPDATE caphub_v2.capabilities SET progress"))).toBe(false);
+  });
+});
+
+describe("editCardAfterEnrich (M3.7 controller ruling)", () => {
+  function fakeEnrichPool(candidate: Record<string, unknown> | null) {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const pool = {
+      query: async (text: string, values: unknown[] = []) => {
+        calls.push({ text, values });
+        if (text.includes("FROM caphub_v2.scenarios")) return { rows: SCENARIO_ROWS };
+        if (text.includes("cb.id = $1")) return { rows: candidate ? [candidate] : [] };
+        throw new Error(`unhandled query: ${text}`);
+      }
+    };
+    return { pool: pool as never, calls };
+  }
+
+  it("edits the card's stored Telegram message in place with the current rendered card", async () => {
+    const { pool } = fakeEnrichPool(candidateRow());
+    const { api, edited } = fakeApi();
+    await editCardAfterEnrich({ pool, api }, "cab_1");
+    expect(edited).toHaveLength(1);
+    expect(edited[0]).toMatchObject({ chatId: "1000", messageId: 500, replyMarkup: { inline_keyboard: [] } });
+  });
+
+  it("is a no-op when the capability has no stored chat/message id (never pushed)", async () => {
+    const { pool } = fakeEnrichPool(candidateRow({ telegramChatId: null, telegramMessageId: null }));
+    const { api, edited } = fakeApi();
+    await editCardAfterEnrich({ pool, api }, "cab_1");
+    expect(edited).toHaveLength(0);
+  });
+
+  it("is a no-op when the capability no longer exists", async () => {
+    const { pool } = fakeEnrichPool(null);
+    const { api, edited } = fakeApi();
+    await editCardAfterEnrich({ pool, api }, "cab_ghost");
+    expect(edited).toHaveLength(0);
+  });
+
+  it("treats Telegram's 'message is not modified' as success, not a failure to log", async () => {
+    const { pool } = fakeEnrichPool(candidateRow());
+    const api = { editMessageText: async () => { throw new TelegramError(400, "Bad Request: message is not modified"); } };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await expect(editCardAfterEnrich({ pool, api }, "cab_1")).resolves.toBeUndefined();
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("logs and swallows any other edit failure without throwing", async () => {
+    const { pool } = fakeEnrichPool(candidateRow());
+    const api = { editMessageText: async () => { throw new TelegramError(400, "Bad Request: chat not found"); } };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await expect(editCardAfterEnrich({ pool, api }, "cab_1")).resolves.toBeUndefined();
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

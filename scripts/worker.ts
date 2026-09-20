@@ -15,7 +15,7 @@ import { createObjectStore, type ObjectStore } from "../lib/storage/s3";
 import { createTelegramApi, type TelegramApi } from "../lib/telegram/api";
 import type { CaptureDeps } from "../lib/telegram/capture";
 import { syncCommands } from "../lib/telegram/commands";
-import type { HandleCallbackDeps } from "../lib/telegram/decide";
+import { editCardAfterEnrich, type HandleCallbackDeps } from "../lib/telegram/decide";
 import { runTelegramTick, type TelegramLoopDeps } from "../lib/telegram/loop";
 import { runNotifyTick, type NotifyTickDeps } from "../lib/telegram/notify";
 import type { SearchDeps } from "../lib/telegram/search";
@@ -174,6 +174,13 @@ async function main() {
     if (config.telegram.enabled) {
       if (mode === "daemon") {
         const wiring = buildTelegramWiring(config, pool, objects, log);
+        // M3.7 controller ruling: once Telegram is actually wired up (daemon mode, same gate as
+        // the poll loop/notify tick above), enrichment edits the card's already-sent message in
+        // place with its freshly enriched render — see lib/analysis/enrich.ts's
+        // `EnrichDeps.notifyEnriched` and lib/telegram/decide.ts's `editCardAfterEnrich`.
+        if (enrichDeps) {
+          enrichDeps.notifyEnriched = (capabilityId, signal) => editCardAfterEnrich({ pool, api: wiring.api }, capabilityId, signal);
+        }
         try {
           const me = await wiring.api.getMe();
           log({ telegram: "getMe", username: (me as { username?: string }).username ?? null, id: me.id });
@@ -260,7 +267,7 @@ async function main() {
               }
             }
             let reviewState: "idle" | "processed" = "idle";
-            if (deepState === "idle") {
+            if (enrichState === "idle" && deepState === "idle") {
               try {
                 reviewState = await runReviewTick({ pool, call: reviewCall, log }, controller.signal);
                 if (reviewState !== "idle") log({ reviewTick: reviewState });

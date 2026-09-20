@@ -6,7 +6,7 @@ import { getDict } from "../i18n";
 import { decide, requestDeepAnalysis, requestRerun, setProgress } from "../library/actions";
 import type { Progress } from "../library/labels";
 import type { InlineKeyboardMarkup, TelegramApi } from "./api";
-import { buildFormatInput, buildTodoFormatInput, loadCandidateById, type Candidate } from "./notify";
+import { buildFormatInput, buildTodoFormatInput, isMessageNotModified, loadCandidateById, type Candidate } from "./notify";
 import { formatResult } from "./format";
 import type { ClassifiedUpdate, DecisionAction } from "./router";
 
@@ -67,11 +67,45 @@ async function loadScenarioLabels(pool: Pool): Promise<Map<string, string>> {
   return new Map(scenarios.map((s) => [s.slug, s.labelZh]));
 }
 
+/** Shared by {@link editToCurrentState} and {@link editCardAfterEnrich} — renders a candidate's current verdict card and edits it in place at the given chat/message, with buttons stripped. */
+async function renderAndEditVerdictCard(
+  pool: Pool, api: Pick<TelegramApi, "editMessageText">,
+  chatId: number | string, messageId: number, candidate: Candidate, signal?: AbortSignal
+): Promise<void> {
+  const scenarioLabel = await loadScenarioLabels(pool);
+  const rendered = formatResult(buildFormatInput(candidate, scenarioLabel));
+  await api.editMessageText({ chatId, messageId, text: rendered.text, replyMarkup: NO_BUTTONS, signal });
+}
+
 /** Edits the Telegram message to a candidate's current rendered state, with buttons stripped (buttons are simply never re-sent). */
 async function editToCurrentState(deps: HandleCallbackDeps, cb: CallbackDecoded, candidate: Candidate, signal?: AbortSignal): Promise<void> {
-  const scenarioLabel = await loadScenarioLabels(deps.pool);
-  const rendered = formatResult(buildFormatInput(candidate, scenarioLabel));
-  await deps.api.editMessageText({ chatId: cb.chatId, messageId: cb.messageId, text: rendered.text, replyMarkup: NO_BUTTONS, signal });
+  await renderAndEditVerdictCard(deps.pool, deps.api, cb.chatId, cb.messageId, candidate, signal);
+}
+
+export interface EditCardAfterEnrichDeps {
+  pool: Pool;
+  api: Pick<TelegramApi, "editMessageText">;
+}
+
+/**
+ * Edits an already-sent Telegram card message in place with the capability's freshly enriched
+ * render (M3.7 controller ruling — see lib/analysis/enrich.ts's `EnrichDeps.notifyEnriched`, the
+ * only caller). A Telegram `editMessageText` does not notify, so this is not a re-push, and it
+ * never reads or writes `notified_at`. A no-op when the capability no longer exists or was never
+ * pushed to Telegram (no stored chat/message id) — that card is left exactly alone, per the
+ * brief's rule. A non-"message is not modified" edit failure is logged and swallowed: this runs
+ * after the enrich pass's own write-back has already succeeded, so a Telegram-side failure here
+ * must never be reported as an enrich failure.
+ */
+export async function editCardAfterEnrich(deps: EditCardAfterEnrichDeps, capabilityId: string, signal?: AbortSignal): Promise<void> {
+  const candidate = await loadCandidateById(deps.pool, capabilityId);
+  if (!candidate || !candidate.telegramChatId || !candidate.telegramMessageId) return;
+  try {
+    await renderAndEditVerdictCard(deps.pool, deps.api, candidate.telegramChatId, Number(candidate.telegramMessageId), candidate, signal);
+  } catch (error) {
+    if (isMessageNotModified(error)) return;
+    console.warn(JSON.stringify({ decide: "edit-card-after-enrich-failed", capabilityId, error: error instanceof Error ? error.message : String(error) }));
+  }
 }
 
 /** {@link editToCurrentState}'s counterpart for a `/todo` self-build card — re-renders via `buildTodoFormatInput`/`formatTodo` instead of the verdict-based `buildFormatInput`, with buttons stripped the same way. */

@@ -50,7 +50,7 @@ describe("runBackfill", () => {
   it("dry-run (apply=false) enqueues nothing and reports the candidates and estimated call count", async () => {
     const { pool } = fakeCandidatesPool([rowA, rowB]);
     const enqueued: unknown[] = [];
-    const enqueue = async (_p: unknown, captureId: string, pipeline: string) => { enqueued.push({ captureId, pipeline }); };
+    const enqueue = async (_p: unknown, captureId: string, pipeline: string) => { enqueued.push({ captureId, pipeline }); return true; };
     const result = await runBackfill(pool as never, enqueue, false, undefined, log);
     expect(enqueued).toEqual([]);
     expect(result).toEqual({
@@ -62,7 +62,7 @@ describe("runBackfill", () => {
   it("--apply calls the injected enqueue helper once per candidate with its captureId and pipeline", async () => {
     const { pool } = fakeCandidatesPool([rowA, rowB]);
     const enqueued: unknown[] = [];
-    const enqueue = async (_p: unknown, captureId: string, pipeline: string) => { enqueued.push({ captureId, pipeline }); };
+    const enqueue = async (_p: unknown, captureId: string, pipeline: string) => { enqueued.push({ captureId, pipeline }); return true; };
     const result = await runBackfill(pool as never, enqueue, true, undefined, log);
     expect(enqueued).toEqual([
       { captureId: "cap_a", pipeline: "mixed" },
@@ -73,11 +73,9 @@ describe("runBackfill", () => {
     expect(result.failed).toBe(0);
   });
 
-  it("counts a 23505 (unique_violation) as already-queued, not a failure", async () => {
+  it("counts an enqueue that reports false (already queued/running -- migration 011's one-active-enrich index) as already-queued, not a failure", async () => {
     const { pool } = fakeCandidatesPool([rowA, rowB]);
-    const enqueue = async (_p: unknown, captureId: string) => {
-      if (captureId === "cap_a") throw Object.assign(new Error("duplicate"), { code: "23505" });
-    };
+    const enqueue = async (_p: unknown, captureId: string) => captureId !== "cap_a";
     const result = await runBackfill(pool as never, enqueue, true, undefined, log);
     expect(result.queued).toBe(1);
     expect(result.alreadyQueued).toBe(1);
@@ -88,6 +86,7 @@ describe("runBackfill", () => {
     const { pool } = fakeCandidatesPool([rowA, rowB]);
     const enqueue = async (_p: unknown, captureId: string) => {
       if (captureId === "cap_a") throw new Error("boom");
+      return true;
     };
     const result = await runBackfill(pool as never, enqueue, true, undefined, log);
     expect(result.queued).toBe(1);
@@ -97,7 +96,7 @@ describe("runBackfill", () => {
 
   it("respects --limit by only loading that many candidates", async () => {
     const { pool, calls } = fakeCandidatesPool([rowA]);
-    const result = await runBackfill(pool as never, async () => {}, false, 1, log);
+    const result = await runBackfill(pool as never, async () => true, false, 1, log);
     expect(calls[0]?.values).toEqual([1]);
     expect(result.candidates).toEqual([rowA]);
   });

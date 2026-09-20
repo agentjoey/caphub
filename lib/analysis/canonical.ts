@@ -199,9 +199,19 @@ export async function fetchCanonical(url: string, options: FetchCanonicalOptions
 
     const repoMatch = parseGithubRepo(parsed);
     if (repoMatch) {
-      const repoResult = await fetchGithubRepo(repoMatch.owner, repoMatch.repo, options.fetch, t.signal, dnsLookup);
+      // fetchGithubRepo is expected to resolve to null on any failure, but a mid-stream body-read
+      // rejection (e.g. the README fetch's reader.read()) can still reject rather than resolve --
+      // wrapped here so that reaches the same degrade-to-plain-page path as every other failure
+      // mode, instead of escaping to this function's own outer catch and skipping it entirely.
+      let repoResult: CanonicalResult = null;
+      try {
+        repoResult = await fetchGithubRepo(repoMatch.owner, repoMatch.repo, options.fetch, t.signal, dnsLookup);
+      } catch {
+        repoResult = null;
+      }
       if (repoResult) return repoResult;
-      // Metadata fetch failed, was rate-limited, or the repo doesn't exist -- degrade to a plain page fetch.
+      // Metadata fetch failed, was rate-limited, a mid-stream read failed, or the repo doesn't
+      // exist -- degrade to a plain page fetch.
     }
     const page = await fetchPage(parsed, options.fetch, t.signal, dnsLookup);
     return page ? { kind: "page", url: parsed.toString(), title: page.title, text: page.text } : null;

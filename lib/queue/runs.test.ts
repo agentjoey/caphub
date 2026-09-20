@@ -94,17 +94,17 @@ describe("RunQueue.heartbeat", () => {
 });
 
 describe("enqueueEnrichRun", () => {
-  it("inserts a queued enrich run with the given capture and pipeline", async () => {
+  it("inserts a queued enrich run with the given capture and pipeline, reporting true", async () => {
     const params: unknown[][] = [];
     const pool = { query: async (_t: string, v: unknown[] = []) => { params.push(v); return { rows: [] }; } };
-    await enqueueEnrichRun(pool as never, "cap_1", "mixed");
+    await expect(enqueueEnrichRun(pool as never, "cap_1", "mixed")).resolves.toBe(true);
     expect(params[0][1]).toBe("cap_1");
     expect(params[0][2]).toBe("mixed");
   });
 
-  it("swallows a unique_violation (23505) as an already-queued run instead of throwing", async () => {
+  it("swallows a unique_violation (23505) as an already-queued run instead of throwing, reporting false", async () => {
     const pool = { query: async () => { throw Object.assign(new Error("duplicate"), { code: "23505" }); } };
-    await expect(enqueueEnrichRun(pool as never, "cap_1", "mixed")).resolves.toBeUndefined();
+    await expect(enqueueEnrichRun(pool as never, "cap_1", "mixed")).resolves.toBe(false);
   });
 
   it("rethrows any other error", async () => {

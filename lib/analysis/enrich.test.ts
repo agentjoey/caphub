@@ -46,6 +46,7 @@ function deps(opts: {
   const calls: string[] = [];
   const steps: Array<{ step: string; ok: boolean; error: string | null; output: string | null }> = [];
   const updates: Array<{ text: string; values: unknown[] }> = [];
+  const tagBumps: string[][] = [];
   const capability = opts.capability === undefined ? capabilityRow : opts.capability;
   const reasonUsage = opts.reasonUsage ?? { inputTokens: 10, outputTokens: 10 };
   const searchUsage = opts.searchUsage ?? { inputTokens: 5, outputTokens: 5 };
@@ -62,6 +63,10 @@ function deps(opts: {
       if (text.startsWith("UPDATE caphub_v2.capabilities SET")) {
         updates.push({ text, values });
         return { rows: [], rowCount: opts.writeBackRowCount ?? 1 };
+      }
+      if (text.includes("INSERT INTO caphub_v2.tags")) {
+        tagBumps.push(values[0] as string[]);
+        return { rows: [] };
       }
       return { rows: [] };
     }
@@ -89,7 +94,7 @@ function deps(opts: {
       return opts.canonical === undefined ? canonicalRepo : opts.canonical;
     }
   };
-  return { d, calls, steps, updates };
+  return { d, calls, steps, updates, tagBumps };
 }
 
 describe("runEnrichment", () => {
@@ -131,15 +136,33 @@ describe("runEnrichment", () => {
     expect(updates).toHaveLength(1);
   });
 
-  it("caps searches at 2 even when the card has 3 open_questions, and skips search entirely when there are none", async () => {
+  it("caps searches at 2 even when the card has 3 open_questions", async () => {
     const { d: dThree, calls: callsThree } = deps({ capability: { ...capabilityRow, open_questions: ["q1", "q2", "q3"] } });
     await runEnrichment(dThree, lease, new AbortController().signal);
     expect(callsThree.filter((c) => c.startsWith("search:"))).toHaveLength(2);
+  });
 
-    const { d: dNone, calls: callsNone, steps: stepsNone } = deps({ capability: { ...capabilityRow, open_questions: [] } });
-    await runEnrichment(dNone, lease, new AbortController().signal);
-    expect(callsNone.some((c) => c.startsWith("search:"))).toBe(false);
-    expect(stepsNone.some((s) => s.step === "search")).toBe(false);
+  it("falls back to one search built from the card's title/type when open_questions is empty (fix round 2)", async () => {
+    const { d, calls, steps } = deps({ capability: { ...capabilityRow, open_questions: [] } });
+    await runEnrichment(d, lease, new AbortController().signal);
+    const searchCalls = calls.filter((c) => c.startsWith("search:"));
+    expect(searchCalls).toEqual([`search:${capabilityRow.title} ${capabilityRow.type}`]);
+    expect(steps.filter((s) => s.step === "search")).toHaveLength(1);
+  });
+
+  it("skips the rewrite entirely and leaves enriched_at unset when neither the canonical fetch nor any search turns up new material", async () => {
+    const { d, calls, updates } = deps({
+      capability: { ...capabilityRow, open_questions: [] },
+      canonical: null
+    });
+    d.search.search = async (query: string) => {
+      calls.push(`search:${query}`);
+      return { value: { sources: [] }, usage: { inputTokens: 0, outputTokens: 0 } };
+    };
+    const out = await runEnrichment(d, lease, new AbortController().signal);
+    expect(out).toEqual({ capabilityId: "cab_1" });
+    expect(calls).not.toContain("reason");
+    expect(updates).toHaveLength(0);
   });
 
   it("merges the canonical fetch's repo facts into source_facts as authoritative, setting as_of", async () => {
@@ -215,6 +238,59 @@ describe("runEnrichment", () => {
       signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })), { once: true });
     });
     await expect(runEnrichment(d, lease, new AbortController().signal, { runTimeoutMs: 5 })).rejects.toMatchObject({ code: "TIMEOUT" });
+  });
+
+  it("bumps the rewritten tags when they changed (default: rewrittenValue's tags differ from capabilityRow's)", async () => {
+    const { d, tagBumps } = deps();
+    await runEnrichment(d, lease, new AbortController().signal);
+    expect(tagBumps).toEqual([["cli", "automation"]]);
+  });
+
+  it("does not bump tags when the rewrite left them unchanged (order-insensitive)", async () => {
+    const { d, tagBumps } = deps({ rewrittenOverride: { ...rewrittenValue, tags: ["cli"] } });
+    await runEnrichment(d, lease, new AbortController().signal);
+    expect(tagBumps).toEqual([]);
+  });
+
+  it("never bumps tags for a pinned (suggestion_by = 'human') card, even though the CASE keeps its stored tags", async () => {
+    const pinnedCapability = { ...capabilityRow, suggestion_by: "human" as const, tags: ["human-tag"] };
+    const { d, tagBumps } = deps({
+      capability: pinnedCapability,
+      rewrittenOverride: { ...rewrittenValue, type: pinnedCapability.type, usage: pinnedCapability.usage, tags: ["should-be-ignored"] }
+    });
+    await runEnrichment(d, lease, new AbortController().signal);
+    expect(tagBumps).toEqual([]);
+  });
+
+  it("edits the Telegram message in place via notifyEnriched after a successful write-back", async () => {
+    const { d } = deps();
+    const notifyEnriched = vi.fn(async (_capabilityId: string, _signal: AbortSignal) => {});
+    d.notifyEnriched = notifyEnriched;
+    await runEnrichment(d, lease, new AbortController().signal);
+    expect(notifyEnriched).toHaveBeenCalledTimes(1);
+    expect(notifyEnriched.mock.calls[0][0]).toBe("cab_1");
+  });
+
+  it("does not call notifyEnriched when the rewrite was skipped (no new material)", async () => {
+    const { d } = deps({ capability: { ...capabilityRow, open_questions: [] }, canonical: null });
+    d.search.search = async () => ({ value: { sources: [] }, usage: { inputTokens: 0, outputTokens: 0 } });
+    const notifyEnriched = vi.fn(async () => {});
+    d.notifyEnriched = notifyEnriched;
+    await runEnrichment(d, lease, new AbortController().signal);
+    expect(notifyEnriched).not.toHaveBeenCalled();
+  });
+
+  it("logs and swallows a notifyEnriched failure without failing the run (the enrich write-back already succeeded)", async () => {
+    const { d } = deps();
+    d.notifyEnriched = async () => { throw new Error("telegram down"); };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const out = await runEnrichment(d, lease, new AbortController().signal);
+      expect(out).toEqual({ capabilityId: "cab_1" });
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("treats a single search query's failure as non-fatal: the run still completes", async () => {
