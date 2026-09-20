@@ -5,7 +5,8 @@ import { upsertCapability } from "./capabilities";
 const card: Card = {
   title: "t", type: "prompt", summary: "s", signals: ["a", "b"], suggested_verdict: "keep", suggested_reason: "r",
   confidence: 0.9, usage: "integrate", playbook: { kind: "integrate", install: [], repo: null, prompt_text: "p" }, tags: ["x"], source_url: null,
-  scenarios: ["coding"], score: 4, score_reason: "r", source_facts: {}, overlap: { relation: "none", target: null, reason: "" }
+  scenarios: ["coding"], score: 4, score_reason: "r", source_facts: {}, overlap: { relation: "none", target: null, reason: "" },
+  open_questions: []
 };
 
 describe("upsertCapability", () => {
@@ -101,6 +102,22 @@ describe("upsertCapability", () => {
     expect(sql).toMatch(/type_by = CASE WHEN caphub_v2\.capabilities\.type_by = 'human' THEN 'human' ELSE excluded\.type_by END/);
   });
 
+  it("inserts open_questions and overwrites it on rerun", async () => {
+    let sql = "";
+    let params: unknown[] = [];
+    const pool = {
+      query: async (text: string, values: unknown[] = []) => {
+        if (sql === "") { sql = text; params = values; }
+        return { rows: [{ id: "cab_1", verdict: "keep", previous_verdict: null, deleted: false }] };
+      }
+    };
+    const open_questions = ["是否需要登录才能用", "免费额度上限是多少"];
+    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card: { ...card, open_questions }, verdict: "keep", verdictBy: "auto" });
+    expect(sql).toContain("open_questions");
+    expect(sql).toContain("open_questions = excluded.open_questions");
+    expect(params).toContain(JSON.stringify(open_questions));
+  });
+
   it("never evaluates nextval() in the INSERT's VALUES, so a conflicting re-run can't burn a serial", async () => {
     const calls: string[] = [];
     const pool = {
@@ -112,7 +129,7 @@ describe("upsertCapability", () => {
     await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card, verdict: "keep", verdictBy: "auto" });
     const [upsertSql, followUpSql] = calls;
     // VALUES always passes a literal NULL for serial; nextval() never appears in the INSERT list.
-    expect(upsertSql).toMatch(/VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11, \$12,[\s\S]*?\n\s*NULL, \$18, \$19, \$20, \$21\)/);
+    expect(upsertSql).toMatch(/VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11, \$12,[\s\S]*?\n\s*NULL, \$18, \$19, \$20, \$21, \$22\)/);
     expect(upsertSql.split("VALUES")[1]).not.toContain("nextval");
     // ON CONFLICT keeps whatever serial the row already has.
     expect(upsertSql).toContain("serial = coalesce(caphub_v2.capabilities.serial, excluded.serial)");

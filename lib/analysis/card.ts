@@ -149,7 +149,16 @@ export const cardObjectSchema = z.object({
   score: z.number().int().min(1).max(5),
   score_reason: z.string().min(1).max(80),
   source_facts: sourceFactsSchema.default({}),
-  overlap: overlapSchema.default(NO_OVERLAP)
+  overlap: overlapSchema.default(NO_OVERLAP),
+  /**
+   * 0-3 things the first pass couldn't determine from the input and that need checking --
+   * each an open question about the capability itself (e.g. "是否需要登录才能用"), never about
+   * how the analysis went. Design decision 4 (M3.7 plan): the second pass uses these as its
+   * search targets; whatever is still unresolved after that stays on the card as a "待核实"
+   * list rather than being folded into `summary` (design decision 5 keeps process narration
+   * out of the summary entirely).
+   */
+  open_questions: z.array(z.string().max(30)).max(3).default([])
 });
 
 export function refineCard<T extends {

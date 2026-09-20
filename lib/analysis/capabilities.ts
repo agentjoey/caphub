@@ -30,14 +30,15 @@ export async function upsertCapability(
      ), upsert AS (
        INSERT INTO caphub_v2.capabilities
          (id, capture_id, run_id, title, type, summary, signals, suggested_verdict, suggested_reason, confidence,
-          verdict, verdict_by, verdict_at, usage, playbook, tags, source_url, scenarios, serial, score, score_reason, source_facts, overlap)
+          verdict, verdict_by, verdict_at, usage, playbook, tags, source_url, scenarios, serial, score, score_reason, source_facts, overlap, open_questions)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CASE WHEN $12::text IS NULL THEN NULL ELSE now() END, $13, $14, $15, $16, $17,
-         NULL, $18, $19, $20, $21)
+         NULL, $18, $19, $20, $21, $22)
        ON CONFLICT (capture_id) DO UPDATE SET
          run_id = excluded.run_id, title = excluded.title, summary = excluded.summary,
          signals = excluded.signals, suggested_verdict = excluded.suggested_verdict, suggested_reason = excluded.suggested_reason,
          confidence = excluded.confidence, usage = excluded.usage, playbook = excluded.playbook, tags = excluded.tags,
          source_url = excluded.source_url, scenarios = excluded.scenarios, source_facts = excluded.source_facts,
+         open_questions = excluded.open_questions,
          -- overlap is always overwritten by a rerun's fresh judgement, unlike verdict/type/score
          -- above: it isn't a human-editable field (see migration 010), so there is nothing to
          -- preserve.
@@ -65,7 +66,8 @@ export async function upsertCapability(
     [newId("cab"), row.captureId, row.runId, stripNul(c.title), c.type, stripNul(c.summary), jsonStringifyStripNul(c.signals),
       c.suggested_verdict, stripNul(c.suggested_reason), c.confidence, row.verdict, row.verdictBy, c.usage, jsonStringifyStripNul(c.playbook),
       c.tags.map(stripNul), c.source_url === null ? null : stripNul(c.source_url), c.scenarios.map(stripNul),
-      c.score, stripNul(c.score_reason), jsonStringifyStripNul(c.source_facts), jsonStringifyStripNul(c.overlap)]);
+      c.score, stripNul(c.score_reason), jsonStringifyStripNul(c.source_facts), jsonStringifyStripNul(c.overlap),
+      jsonStringifyStripNul(c.open_questions)]);
   const out = r.rows[0];
   // Brand-new (or previously-non-keep, now-keep, still-serial-less) rows get their serial
   // assigned here, after the upsert, instead of via nextval() in VALUES — the WHERE clause

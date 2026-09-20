@@ -116,6 +116,29 @@ describe("reasonPrompt", () => {
     expect(prompt).toMatch(/overlap\.target 必须为 null/);
   });
 
+  it("tells summary to describe the capability itself, not the analysis process", () => {
+    const prompt = reasonPrompt({ material, extraction: null, sources: [], similar: [], existingTags: [], scenarios });
+    expect(prompt).toMatch(/summary 写这个能力本身/);
+    expect(prompt).toMatch(/它是什么、解决什么问题、怎么用、边界\/局限在哪/);
+    expect(prompt).toContain("经联网核实");
+    expect(prompt).toContain("未直接证实");
+    expect(prompt).toContain("待实测");
+  });
+
+  it("confines provenance/confidence to exactly one signals entry, never the summary", () => {
+    const prompt = reasonPrompt({ material, extraction: null, sources: [], similar: [], existingTags: [], scenarios });
+    expect(prompt).toMatch(/signals 给 2–3 条价值信号，其中恰好一条专门讲来源可信度/);
+    expect(prompt).toMatch(/不得写进 summary/);
+  });
+
+  it("asks for 0-3 open_questions, each ≤30 chars, about the capability rather than the analysis", () => {
+    const prompt = reasonPrompt({ material, extraction: null, sources: [], similar: [], existingTags: [], scenarios });
+    expect(prompt).toMatch(/open_questions 列出 0–3 条/);
+    expect(prompt).toMatch(/每条不超过 30 字/);
+    expect(prompt).toMatch(/不能是关于这次分析过程本身的问题/);
+    expect(prompt).toMatch(/下一轮补充调研的检索目标/);
+  });
+
   it("forbids guessing source facts: only fill a field the sources explicitly state", () => {
     const prompt = reasonPrompt({ material, extraction: null, sources: [], similar: [], existingTags: [], scenarios });
     expect(prompt).toMatch(/source_facts/);

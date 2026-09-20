@@ -9,7 +9,7 @@ const valid = {
   usage: "integrate", playbook: { kind: "integrate", install: ["npm i -D @axe-core/playwright"], repo: null, prompt_text: null },
   tags: ["testing", "accessibility"], source_url: null, scenarios: [],
   score: 4, score_reason: "有仓库和安装命令，可复现性高", source_facts: {},
-  overlap: { relation: "none", target: null, reason: "" }
+  overlap: { relation: "none", target: null, reason: "" }, open_questions: []
 };
 
 describe("isValidTag", () => {
@@ -163,6 +163,28 @@ describe("cardSchema", () => {
       expect(jsonSchema.properties?.score_reason).toMatchObject({ type: "string", maxLength: 80 });
       expect(jsonSchema.properties?.source_facts).toMatchObject({ type: "object" });
     });
+  });
+});
+
+describe("cardSchema open_questions", () => {
+  it("defaults to [] when omitted", () => {
+    const { open_questions: _oq, ...withoutOpenQuestions } = valid as typeof valid & { open_questions: string[] };
+    expect(cardSchema.parse(withoutOpenQuestions).open_questions).toEqual([]);
+  });
+  it("accepts up to 3 items, each up to 30 chars", () => {
+    const open_questions = ["是否需要登录才能用", "免费额度上限是多少", "导出格式有哪些"];
+    expect(cardSchema.parse({ ...valid, open_questions }).open_questions).toEqual(open_questions);
+    expect(cardSchema.parse({ ...valid, open_questions: ["a".repeat(30)] }).open_questions).toEqual(["a".repeat(30)]);
+  });
+  it("rejects a 4th item", () => {
+    expect(() => cardSchema.parse({ ...valid, open_questions: ["a", "b", "c", "d"] })).toThrow();
+  });
+  it("rejects an item over 30 chars", () => {
+    expect(() => cardSchema.parse({ ...valid, open_questions: ["a".repeat(31)] })).toThrow();
+  });
+  it("stays representable as JSON Schema for providers", () => {
+    const jsonSchema = z.toJSONSchema(cardSchema) as { properties?: Record<string, unknown> };
+    expect(jsonSchema.properties?.open_questions).toMatchObject({ type: "array", maxItems: 3 });
   });
 });
 
