@@ -23,6 +23,14 @@ describe("reviewCapability", () => {
     expect(update.values).toEqual(["cab_1", JSON.stringify({ agrees: false, points: ["p"] })]);
   });
 
+  it("includes summary_points in the card object handed to the reviewer, so it can judge whether summary omits/exaggerates against the full structured summary, not just the ~120-char lead", async () => {
+    const { pool, sql } = makePool({ run_id: "run_1", card: { title: "t" }, reason_output: { title: "t" } });
+    const call = { provider: "deepseek", model: "d", invoke: async () => ({ value: { agrees: true, points: [] }, usage: { inputTokens: 1, outputTokens: 1 } }) };
+    await reviewCapability({ pool, call }, "cab_1", new AbortController().signal);
+    const select = sql.find((q) => q.text.startsWith("SELECT cb.run_id"))!;
+    expect(select.text).toMatch(/'summary_points', cb\.summary_points/);
+  });
+
   it("throws CAPABILITY_NOT_FOUND when the capability row is missing", async () => {
     const { pool } = makePool(null);
     const call = { provider: "deepseek", model: "d", invoke: async () => { throw new Error("should not be called"); } };

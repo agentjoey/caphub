@@ -1,6 +1,6 @@
 import type { Pool } from "pg";
 import { formatSerial } from "../library/serial";
-import type { CapabilityType } from "./card";
+import type { CapabilityType, SummaryPoint } from "./card";
 import { toVectorLiteral } from "./embedding";
 
 const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
@@ -62,13 +62,23 @@ function oneLine(summary: string): string {
   return summary.length > ONE_LINE_LEN ? `${summary.slice(0, ONE_LINE_LEN)}…` : summary;
 }
 
-interface CandidateRow { id: string; title: string; type: CapabilityType; summary: string; tags: string[]; serial: number | null }
-
-function toCandidate(row: CandidateRow): SimilarCandidate {
-  return { id: row.id, code: formatSerial(row.type, row.serial), title: row.title, type: row.type, summary: oneLine(row.summary), tags: row.tags };
+/**
+ * Joins the prose lead with its structured points' text (M3.8: most of a card's substance now
+ * lives in `summary_points`, not `summary` -- see queries.ts's ILIKE fix) before truncating to
+ * the one-line blurb, so overlap judgement isn't working from just the ~120-char lead.
+ */
+function fullSummaryText(summary: string, points: SummaryPoint[] | null | undefined): string {
+  const pointsText = (points ?? []).map((p) => p.text).filter(Boolean).join(" ");
+  return [summary, pointsText].filter(Boolean).join(" ");
 }
 
-const CANDIDATE_COLUMNS = "id, title, type, summary, tags, serial";
+interface CandidateRow { id: string; title: string; type: CapabilityType; summary: string; summary_points: SummaryPoint[] | null; tags: string[]; serial: number | null }
+
+function toCandidate(row: CandidateRow): SimilarCandidate {
+  return { id: row.id, code: formatSerial(row.type, row.serial), title: row.title, type: row.type, summary: oneLine(fullSummaryText(row.summary, row.summary_points)), tags: row.tags };
+}
+
+const CANDIDATE_COLUMNS = "id, title, type, summary, summary_points, tags, serial";
 
 /** Kept, active capabilities resembling `text`, excluding the capture currently being analysed. */
 export async function findSimilar(pool: Pick<Pool, "query">, text: string, captureId: string, limit = 5): Promise<SimilarCandidate[]> {
@@ -104,7 +114,7 @@ export async function similarByEmbedding(
   const limit = input.limit ?? 5;
   if ("capabilityId" in input) {
     const r = await pool.query<CandidateRow>(
-      `SELECT c.id, c.title, c.type, c.summary, c.tags, c.serial
+      `SELECT c.id, c.title, c.type, c.summary, c.summary_points, c.tags, c.serial
        FROM caphub_v2.capabilities c, caphub_v2.capabilities self
        WHERE self.id = $1 AND self.embedding IS NOT NULL
          AND c.id <> $1 AND c.verdict = 'keep' AND c.deleted_at IS NULL AND c.status = 'active' AND c.embedding IS NOT NULL

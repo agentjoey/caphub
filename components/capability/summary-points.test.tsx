@@ -63,6 +63,24 @@ describe("SummaryBody", () => {
     expect(items[0].querySelector("b")).toBeNull();
   });
 
+  it("drops malformed points (non-string label/text, or a non-object entry) instead of throwing", () => {
+    const malformed = [
+      { label: "定位", text: "解决X问题" },
+      { label: 42, text: "数字标签" },
+      { label: "缺文字" },
+      null,
+      "not an object",
+      { label: "限制", text: null }
+    ] as never;
+    const { container } = render(<SummaryBody summary="摘要文字" points={malformed} />);
+    const items = container.querySelectorAll(".summary-points li");
+    // Only the well-formed point (定位) and the one with a valid text but no valid label survive
+    // -- everything else drops the malformed field(s) to "" and is filtered out since text === "".
+    expect(items.length).toBe(2);
+    expect(items[0].textContent).toBe("定位。 解决X问题");
+    expect(items[1].textContent).toBe("数字标签");
+  });
+
   it("puts the caller's class on the prose lead only, so points keep their own rhythm", () => {
     const { container } = render(<SummaryBody summary="摘要文字" points={points} className="detail-summary" />);
     expect(container.querySelector("p")?.className).toContain("detail-summary");

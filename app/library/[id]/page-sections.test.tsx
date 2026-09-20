@@ -213,6 +213,48 @@ describe("library detail page sections", () => {
     expect(at("深度分析")).toBeLessThan(at("一句话总结"));
   });
 
+  describe("detail.sourceUrl vs 怎么用's playbook repo link (dedup)", () => {
+    // Pre-existing bug (not from M3.8): the repo/source link rendered twice -- once inside 怎么用's
+    // playbook block, once again as the standalone detail.sourceUrl line right below it.
+    // sourceFacts is cleared in these fixtures — SourceFacts renders its own repo_url link in a
+    // separate .panel (source-facts-panel), which would otherwise be indistinguishable here from
+    // 怎么用's link when both happen to share the same URL text.
+    it("suppresses the standalone source line when it duplicates the playbook's repo link", async () => {
+      const { container } = await renderDetail({
+        playbook: { kind: "integrate", install: [], repo: "https://github.com/a/b", prompt_text: null },
+        sourceUrl: "https://github.com/a/b", sourceFacts: {}
+      });
+      const links = Array.from(container.querySelectorAll(".panel a")).filter((a) => a.textContent === "https://github.com/a/b");
+      expect(links).toHaveLength(1);
+      expect(container.querySelector(".detail-source")).toBeNull();
+    });
+
+    it("still normalizes a trailing slash before comparing", async () => {
+      const { container } = await renderDetail({
+        playbook: { kind: "integrate", install: [], repo: "https://github.com/a/b", prompt_text: null },
+        sourceUrl: "https://github.com/a/b/", sourceFacts: {}
+      });
+      expect(container.querySelector(".detail-source")).toBeNull();
+    });
+
+    it("still shows the standalone source line when it differs from the playbook's repo link", async () => {
+      const { container } = await renderDetail({
+        playbook: { kind: "integrate", install: [], repo: "https://github.com/a/b", prompt_text: null },
+        sourceUrl: "https://example.com/write-up", sourceFacts: {}
+      });
+      expect(container.querySelector(".detail-source")).toBeTruthy();
+      expect(container.querySelector(".detail-source")!.textContent).toBe("https://example.com/write-up");
+    });
+
+    it("still shows the standalone source line for a reference/experience playbook (no repo link to dedupe against)", async () => {
+      const { container } = await renderDetail({
+        playbook: { kind: "reference", points: ["要点一"] },
+        sourceUrl: "https://example.com/article", sourceFacts: {}
+      });
+      expect(container.querySelector(".detail-source")).toBeTruthy();
+    });
+  });
+
   it("shows the progress control only for reference cards", async () => {
     const integrate = await renderDetail({ usage: "integrate" });
     expect(integrate.container.querySelector(".progress-control")).toBeNull();

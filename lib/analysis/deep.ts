@@ -9,7 +9,7 @@ import { jsonStringifyStripNul } from "../text/sanitize";
 import { RunBudget } from "./budget";
 import {
   deepAnalysisSchema, deepFactsSchema, deepPlanSchema,
-  type CapabilityType, type DeepAnalysis, type DeepSource, type Playbook, type SearchResult
+  type CapabilityType, type DeepAnalysis, type DeepSource, type Playbook, type SearchResult, type SummaryPoint
 } from "./card";
 import { deepFactsPrompt, deepPlanPrompt, deepSynthesizePrompt, type DeepSubject } from "./prompts";
 import { recordStep } from "./steps";
@@ -47,7 +47,7 @@ export function createDeepAnalysisDeps(config: Config, pool: Pool): DeepAnalysis
 }
 
 interface CapabilityRow {
-  id: string; title: string; type: CapabilityType; summary: string; tags: string[];
+  id: string; title: string; type: CapabilityType; summary: string; summary_points: SummaryPoint[]; tags: string[];
   source_url: string | null; playbook: Playbook; updated_at: string;
 }
 
@@ -61,7 +61,7 @@ interface CapabilityRow {
  */
 async function loadCapability(pool: Pick<Pool, "query">, captureId: string): Promise<CapabilityRow | null> {
   const row = (await pool.query<CapabilityRow>(
-    "SELECT id, title, type, summary, tags, source_url, playbook, updated_at FROM caphub_v2.capabilities WHERE capture_id = $1 AND verdict = 'keep' AND deleted_at IS NULL",
+    "SELECT id, title, type, summary, summary_points, tags, source_url, playbook, updated_at FROM caphub_v2.capabilities WHERE capture_id = $1 AND verdict = 'keep' AND deleted_at IS NULL",
     [captureId]
   )).rows[0];
   return row ?? null;
@@ -113,7 +113,7 @@ export async function runDeepAnalysis(deps: DeepAnalysisDeps, lease: Lease, sign
     const capability = await loadCapability(deps.pool, lease.captureId);
     if (!capability) throw Object.assign(new Error("CAPABILITY_NOT_FOUND"), { code: "CAPABILITY_NOT_FOUND" });
     const subject: DeepSubject = {
-      title: capability.title, type: capability.type, summary: capability.summary,
+      title: capability.title, type: capability.type, summary: capability.summary, summary_points: capability.summary_points,
       tags: capability.tags, source_url: capability.source_url, playbook: capability.playbook
     };
     const budget = new RunBudget(DEEP_BUDGET_LIMITS);

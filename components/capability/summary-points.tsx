@@ -24,8 +24,11 @@ export function SummaryBody({
   className?: string;
 }) {
   const lead = summary.trim();
+  // `points` is stored jsonb (see the doc comment above) -- a malformed row (missing/non-string
+  // `label`/`text`) is read defensively here, like deep_analysis's readers, and dropped rather
+  // than throwing and 500-ing the page.
   const shown = (points ?? [])
-    .map((p) => ({ label: summaryPointLabel(p.label), text: p.text.trim() }))
+    .map((p) => ({ label: summaryPointLabel(typeof p?.label === "string" ? p.label : ""), text: typeof p?.text === "string" ? p.text.trim() : "" }))
     // A label with no sentence behind it is a lead-in to nothing — dropped rather than rendered
     // as a stray bold fragment. A sentence with no label still carries its idea, so it stays.
     .filter((p) => p.text !== "");

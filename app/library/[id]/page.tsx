@@ -7,7 +7,7 @@ import { CollapsedCapturePreview } from "../../../components/capability/capture-
 import { DeepAnalysisSection } from "../../../components/capability/deep-analysis";
 import { OpenQuestions } from "../../../components/capability/open-questions";
 import { OverlapNotice } from "../../../components/capability/overlap-notice";
-import { PlaybookView } from "../../../components/capability/playbook-view";
+import { PlaybookView, repoUrl } from "../../../components/capability/playbook-view";
 import { ProgressControl } from "../../../components/capability/progress-control";
 import { ScoreBadge } from "../../../components/capability/score-badge";
 import { SourceFacts } from "../../../components/capability/source-facts";
@@ -44,6 +44,15 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   // than assume every row was written by the current analysis code.
   const overlap = detail.overlap?.relation ? detail.overlap : NO_OVERLAP;
   const cardScenarios = scenarios.filter((s) => detail.scenarios.includes(s.slug));
+  // 怎么用's playbook already shows the repo/source link for an `integrate` card (PlaybookView) --
+  // the standalone `detail.sourceUrl` line right below it is then a duplicate of the exact same
+  // URL (pre-existing bug, not from this branch; see .agent/screens/m3_8/after/library-demo-cab-1-1440.png).
+  // Normalized trivially (trailing slash) before comparing, since that's the only variance seen
+  // between the two: `playbook.repo` is the raw value the model wrote, `detail.sourceUrl` is a
+  // separately-sourced field that can carry (or drop) a trailing slash for the same link.
+  const normalizeUrl = (url: string) => url.replace(/\/+$/, "");
+  const playbookUrl = detail.playbook.kind === "integrate" && detail.playbook.repo ? repoUrl(detail.playbook.repo) : null;
+  const sourceUrlIsDuplicate = playbookUrl !== null && normalizeUrl(playbookUrl) === normalizeUrl(detail.sourceUrl ?? "");
   // A completed deep analysis is content the owner asked to read first (walkthrough decision);
   // the trigger/running/failed states are a call to action, not content, so they stay put — only
   // `Boolean(detail.deepAnalysis)` promotes the section, never runState alone.
@@ -132,7 +141,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           <section className="panel">
             <h2 className="panel-title">{dict.detail.howToUse}</h2>
             <PlaybookView playbook={detail.playbook} type={detail.type} locale={locale} />
-            {detail.sourceUrl && (
+            {detail.sourceUrl && !sourceUrlIsDuplicate && (
               // detail.sourceUrl is model-supplied (analysis's source_url) and the zod schema
               // accepts any z.string().url() value, including javascript:/data: — only render an
               // anchor when it parses as http/https (see safeHttpUrl).

@@ -73,6 +73,24 @@ describe("findSimilar", () => {
     expect(out.summary).toBe(`${"一".repeat(60)}…`);
     expect(out.code).toBeNull();
   });
+
+  it("selects summary_points and folds their text into the candidate blurb (M3.8: most of a card's substance now lives in summary_points, so overlap judgement can't start from just the ~120-char summary lead)", async () => {
+    let sql = "";
+    const pool = {
+      query: async (text: string) => {
+        sql = text;
+        return {
+          rows: [{
+            id: "cab_1", title: "t", type: "skill", summary: "引子", tags: [], serial: null,
+            summary_points: [{ label: "定位", text: "解决X问题" }, { label: "限制", text: "仅支持Y" }]
+          }]
+        };
+      }
+    };
+    const [out] = await findSimilar(pool as never, "claude code", "cap_self");
+    expect(sql).toContain("summary_points");
+    expect(out.summary).toBe("引子 解决X问题 仅支持Y");
+  });
 });
 
 describe("similarByEmbedding", () => {
@@ -91,6 +109,7 @@ describe("similarByEmbedding", () => {
     expect(sql).toContain("self.embedding IS NOT NULL");
     expect(sql).toContain("c.id <> $1");
     expect(sql).toContain("ORDER BY c.embedding <=> self.embedding");
+    expect(sql).toContain("c.summary_points");
     expect(values).toEqual(["cab_self", 5]);
     expect(out).toEqual([{ id: "cab_2", code: "TOL-0009", title: "Existing Tool", type: "tool", summary: "一个已有工具", tags: ["cli"] }]);
   });

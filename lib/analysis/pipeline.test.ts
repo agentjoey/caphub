@@ -62,11 +62,11 @@ function deps(kind: Kind, opts: {
     // The two SimilarCandidate lookups share the same SELECT column list, and only diverge
     // further into the WHERE clause: findSimilar's text search matches on `to_tsquery`, while
     // similarByEmbedding's directly-supplied-embedding form matches on `<=> $1::vector` instead.
-    if (text.startsWith("SELECT id, title, type, summary, tags, serial FROM caphub_v2.capabilities")) {
+    if (text.startsWith("SELECT id, title, type, summary, summary_points, tags, serial FROM caphub_v2.capabilities")) {
       if (text.includes("to_tsquery")) return { rows: opts.textSimilar ?? [] };
       if (text.includes("<=> $1::vector")) return { rows: opts.materialEmbeddingSimilar ?? [] };
     }
-    if (text.startsWith("SELECT c.id, c.title, c.type, c.summary, c.tags, c.serial")) return { rows: opts.embeddingSimilar ?? [] };
+    if (text.startsWith("SELECT c.id, c.title, c.type, c.summary, c.summary_points, c.tags, c.serial")) return { rows: opts.embeddingSimilar ?? [] };
     if (text.includes("INSERT INTO caphub_v2.capabilities")) {
       // values: [id, captureId, runId, title, type, summary, signals, suggested_verdict,
       //          suggested_reason, confidence, verdict, verdictBy, usage, playbook, tags, source_url]
@@ -200,31 +200,31 @@ describe("runPipeline", () => {
   it("excludes its own capture from the similar-capability lookup", async () => {
     const { d, sql } = deps("text");
     await runPipeline(d, { runId: "run_sim", captureId: "cap_sim", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
-    const similar = sql.find((q) => q.text.startsWith("SELECT id, title, type, summary, tags, serial FROM caphub_v2.capabilities"))!;
+    const similar = sql.find((q) => q.text.startsWith("SELECT id, title, type, summary, summary_points, tags, serial FROM caphub_v2.capabilities"))!;
     expect(similar.values[2]).toBe("cap_sim");
   });
 
   it("falls back to the text-based similar search when this capture has no capability row yet (its first run)", async () => {
     const { d, sql } = deps("text", { existingCapability: null });
     await runPipeline(d, { runId: "run_first", captureId: "cap_first", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
-    expect(sql.some((q) => q.text.startsWith("SELECT id, title, type, summary, tags, serial FROM caphub_v2.capabilities"))).toBe(true);
-    expect(sql.some((q) => q.text.startsWith("SELECT c.id, c.title, c.type, c.summary, c.tags, c.serial"))).toBe(false);
+    expect(sql.some((q) => q.text.startsWith("SELECT id, title, type, summary, summary_points, tags, serial FROM caphub_v2.capabilities"))).toBe(true);
+    expect(sql.some((q) => q.text.startsWith("SELECT c.id, c.title, c.type, c.summary, c.summary_points, c.tags, c.serial"))).toBe(false);
   });
 
   it("falls back to the text-based similar search on a rerun whose capability row has no embedding yet", async () => {
     const { d, sql } = deps("text", { existingCapability: { id: "cab_existing", hasEmbedding: false } });
     await runPipeline(d, { runId: "run_no_embed", captureId: "cap_no_embed", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
-    expect(sql.some((q) => q.text.startsWith("SELECT id, title, type, summary, tags, serial FROM caphub_v2.capabilities"))).toBe(true);
-    expect(sql.some((q) => q.text.startsWith("SELECT c.id, c.title, c.type, c.summary, c.tags, c.serial"))).toBe(false);
+    expect(sql.some((q) => q.text.startsWith("SELECT id, title, type, summary, summary_points, tags, serial FROM caphub_v2.capabilities"))).toBe(true);
+    expect(sql.some((q) => q.text.startsWith("SELECT c.id, c.title, c.type, c.summary, c.summary_points, c.tags, c.serial"))).toBe(false);
   });
 
   it("uses the vector similar search (not the text one) on a rerun whose capability row already has an embedding", async () => {
     const { d, sql, calls } = deps("text", { existingCapability: { id: "cab_existing", hasEmbedding: true } });
     await runPipeline(d, { runId: "run_embed", captureId: "cap_embed", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
-    const vectorCall = sql.find((q) => q.text.startsWith("SELECT c.id, c.title, c.type, c.summary, c.tags, c.serial"));
+    const vectorCall = sql.find((q) => q.text.startsWith("SELECT c.id, c.title, c.type, c.summary, c.summary_points, c.tags, c.serial"));
     expect(vectorCall).toBeDefined();
     expect(vectorCall!.values).toEqual(["cab_existing", 5]);
-    expect(sql.some((q) => q.text.startsWith("SELECT id, title, type, summary, tags, serial FROM caphub_v2.capabilities"))).toBe(false);
+    expect(sql.some((q) => q.text.startsWith("SELECT id, title, type, summary, summary_points, tags, serial FROM caphub_v2.capabilities"))).toBe(false);
     // Already has its own stored embedding -- no need to also compute a material query embedding.
     expect(calls).not.toContain("embed");
   });

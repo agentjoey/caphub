@@ -9,7 +9,7 @@ export async function reviewCapability(deps: { pool: Pool; call: StructuredCall 
   const row = (await deps.pool.query<{ run_id: string; card: unknown; reason_output: unknown }>(
     `SELECT cb.run_id,
             jsonb_build_object(
-              'title', cb.title, 'type', cb.type, 'summary', cb.summary, 'signals', cb.signals,
+              'title', cb.title, 'type', cb.type, 'summary', cb.summary, 'summary_points', cb.summary_points, 'signals', cb.signals,
               'suggested_verdict', cb.suggested_verdict, 'suggested_reason', cb.suggested_reason,
               'confidence', cb.confidence, 'usage', cb.usage, 'playbook', cb.playbook,
               'tags', cb.tags, 'source_url', cb.source_url

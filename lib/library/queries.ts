@@ -180,7 +180,7 @@ export function listLibrary(pool: Q, f: LibraryFilter, search: LibrarySearchCont
     const semanticSim = `(1 - (cb.embedding <=> $${vecIdx}::vector))`;
     const ftsMatch = `cb.search @@ websearch_to_tsquery('simple', $${qIdx})`;
     const scenarioMatch = `cb.scenarios && $${scenIdx}::text[]`;
-    const ilikeMatch = `(cb.title ILIKE $${ilikeIdx} OR cb.summary ILIKE $${ilikeIdx} OR EXISTS (SELECT 1 FROM unnest(cb.tags) tg WHERE tg ILIKE $${ilikeIdx}))`;
+    const ilikeMatch = `(cb.title ILIKE $${ilikeIdx} OR cb.summary ILIKE $${ilikeIdx} OR cb.summary_points::text ILIKE $${ilikeIdx} OR EXISTS (SELECT 1 FROM unnest(cb.tags) tg WHERE tg ILIKE $${ilikeIdx}))`;
     const semanticCandidate = `(cb.embedding IS NOT NULL AND $${vecIdx}::vector IS NOT NULL AND ${semanticSim} >= $${minIdx})`;
 
     clauses.push(`(${semanticCandidate} OR ${ftsMatch} OR ${scenarioMatch} OR ${ilikeMatch})`);

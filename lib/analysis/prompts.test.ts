@@ -225,6 +225,17 @@ describe("deepSynthesizePrompt", () => {
     expect(prompt).toContain("原始检索结果：无。");
     expect(prompt).toMatch(/cases 必须是空数组/);
   });
+
+  it("renders a （无） placeholder for 摘要要点 when the subject has no summary_points", () => {
+    const prompt = deepSynthesizePrompt(subject, [], []);
+    expect(prompt).toContain("摘要要点：（无）");
+  });
+
+  it("folds the subject's summary_points into the deep-analysis subject text, not just the ~120-char summary lead (M3.8: most of a card's substance now lives in summary_points)", () => {
+    const withPoints = { ...subject, summary_points: [{ label: "定位", text: "自适应反爬抓取库" }, { label: "限制", text: "仅支持 Python" }] };
+    const prompt = deepSynthesizePrompt(withPoints, [], []);
+    expect(prompt).toContain("摘要要点：**定位。** 自适应反爬抓取库 **限制。** 仅支持 Python");
+  });
 });
 
 describe("enrichPrompt", () => {

@@ -88,10 +88,25 @@ describe("library queries", () => {
     const { text, values } = calls[0];
     expect(text).toMatch(/1 - \(cb\.embedding <=> \$\d+::vector\)/);
     expect(text).toMatch(/cb\.scenarios && \$\d+::text\[\]/);
-    expect(text).toMatch(/cb\.title ILIKE \$\d+ OR cb\.summary ILIKE \$\d+ OR EXISTS \(SELECT 1 FROM unnest\(cb\.tags\) tg WHERE tg ILIKE \$\d+\)/);
+    expect(text).toMatch(/cb\.title ILIKE \$\d+ OR cb\.summary ILIKE \$\d+ OR cb\.summary_points::text ILIKE \$\d+ OR EXISTS \(SELECT 1 FROM unnest\(cb\.tags\) tg WHERE tg ILIKE \$\d+\)/);
     expect(text).toMatch(/ORDER BY \(COALESCE\(CASE WHEN cb\.embedding IS NOT NULL/);
     expect(text).toMatch(new RegExp(`>= \\$\\d+`));
     expect(values).toEqual(expect.arrayContaining(["[0.1,0.2]", "web scraping", "%web scraping%", ["data"], SEMANTIC_MIN]));
+  });
+  it("listLibrary's ILIKE leg covers summary_points, not just title/summary/tags — a card whose only match is inside a point must still surface (M3.8 fix: most prose moved into summary_points, and FTS's `simple` config can't match a CJK substring, so this leg is the only one that can find it)", async () => {
+    const { pool, calls } = recorder([[], [{ total: "0" }]]);
+    await listLibrary(pool, { q: "仅存在于要点中的词", page: 1 });
+    const { text, values } = calls[0];
+    const ilikeMatch = text.match(/cb\.title ILIKE \$(\d+) OR cb\.summary ILIKE \$(\d+) OR cb\.summary_points::text ILIKE \$(\d+) OR EXISTS \(SELECT 1 FROM unnest\(cb\.tags\) tg WHERE tg ILIKE \$(\d+)\)/);
+    expect(ilikeMatch).not.toBeNull();
+    const [, titleIdx, summaryIdx, pointsIdx, tagsIdx] = ilikeMatch!;
+    // Same escaped `%q%` parameter as the title/summary/tags legs — one ILIKE value, four columns.
+    expect(pointsIdx).toBe(titleIdx);
+    expect(pointsIdx).toBe(summaryIdx);
+    expect(pointsIdx).toBe(tagsIdx);
+    expect(values[Number(pointsIdx) - 1]).toBe("%仅存在于要点中的词%");
+    // No ranking change beyond the existing ILIKE-hit weight — a point-only match still scores +0.15, not more.
+    expect(text).toMatch(/CASE WHEN \(cb\.title ILIKE \$\d+ OR cb\.summary ILIKE \$\d+ OR cb\.summary_points::text ILIKE \$\d+ OR EXISTS \(SELECT 1 FROM unnest\(cb\.tags\) tg WHERE tg ILIKE \$\d+\)\) THEN 0\.15 ELSE 0 END/);
   });
   it("listLibrary's hybrid score adds a small score weight only when cb.score is not null", async () => {
     const { pool, calls } = recorder([[], [{ total: "0" }]]);

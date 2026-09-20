@@ -231,8 +231,10 @@ function tagsLine(tags: string[]): string {
  * before assembly, like every other card-derived value here.
  */
 function summaryPointsBlock(points: SummaryPoint[] | undefined): string | null {
+  // `points` is stored jsonb -- read defensively (like deep_analysis's readers) so a malformed
+  // row (missing/non-string `label`/`text`) is dropped rather than throwing and 500-ing the page.
   const lines = (points ?? [])
-    .map((p) => ({ label: summaryPointLabel(p.label), text: p.text.trim() }))
+    .map((p) => ({ label: summaryPointLabel(typeof p?.label === "string" ? p.label : ""), text: typeof p?.text === "string" ? p.text.trim() : "" }))
     .filter((p) => p.text !== "")
     .map((p) => (p.label === "" ? escapeHtml(p.text) : `<b>${escapeHtml(p.label)}</b> ${escapeHtml(p.text)}`));
   return lines.length > 0 ? lines.join("\n") : null;

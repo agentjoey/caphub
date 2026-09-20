@@ -405,6 +405,21 @@ describe("formatResult — summary points (M3.8)", () => {
     expect(out.text).toContain("<b>&lt;b&gt;x。</b> a &amp; &lt;script&gt;");
   });
 
+  it("drops malformed points (non-string label/text, or a non-object entry) instead of throwing", () => {
+    const malformed = [
+      { label: "定位", text: "自适应反爬抓取库" },
+      { label: 42, text: "数字标签" },
+      { label: "缺文字" },
+      null,
+      "not an object",
+      { label: "限制", text: null }
+    ] as never;
+    const out = formatResult({ ...base, status: "pending", summaryPoints: malformed });
+    expect(out.text).toContain("<b>定位。</b> 自适应反爬抓取库\n数字标签");
+    expect(out.text).not.toContain("缺文字");
+    expect(out.text).not.toContain("限制");
+  });
+
   it("renders the points on a todo card too", () => {
     const out = formatResult({ ...todoBase, summaryPoints: points });
     expect(out.text).toContain("<b>定位。</b> 自适应反爬抓取库");

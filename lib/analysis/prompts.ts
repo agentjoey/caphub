@@ -114,7 +114,7 @@ export function backfillScorePrompt(input: {
 
 /** The subset of an existing CapabilityCard a deep-analysis run is triggered against. */
 export interface DeepSubject {
-  title: string; type: CapabilityType; summary: string; tags: string[];
+  title: string; type: CapabilityType; summary: string; summary_points?: Card["summary_points"]; tags: string[];
   source_url: string | null; playbook: Card["playbook"];
 }
 
@@ -123,6 +123,10 @@ function deepSubjectText(subject: DeepSubject): string {
     `标题：${subject.title}`,
     `类型：${subject.type}`,
     `摘要：${subject.summary}`,
+    // M3.8: most of a card's substance moved out of `summary` and into `summary_points` (see
+    // queries.ts's ILIKE fix) -- without this, deep analysis would start from just the ~120-char
+    // lead instead of the full card description.
+    `摘要要点：${(subject.summary_points ?? []).length ? (subject.summary_points ?? []).map((p) => `**${p.label}。** ${p.text}`).join(" ") : "（无）"}`,
     `标签：${subject.tags.join(", ") || "（无）"}`,
     `已有来源链接：${subject.source_url ?? "（无）"}`,
     `Playbook：${JSON.stringify(subject.playbook)}`

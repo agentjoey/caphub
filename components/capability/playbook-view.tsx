@@ -2,7 +2,8 @@ import type { CapabilityType, Playbook } from "../../lib/analysis/card";
 import { format, getDict, type Locale } from "../../lib/i18n";
 import { CopyButton } from "./copy-button";
 
-function repoUrl(repo: string): string {
+/** Exported so the detail page can compare 怎么用's own repo link against `detail.sourceUrl` and suppress a duplicate (AJ-… -- pre-existing bug, see page.tsx). */
+export function repoUrl(repo: string): string {
   return repo.startsWith("https://") ? repo : `https://github.com/${repo}`;
 }
 

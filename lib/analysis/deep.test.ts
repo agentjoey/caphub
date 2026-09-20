@@ -5,7 +5,7 @@ import { DEEP_BUDGET_LIMITS, runDeepAnalysis, type DeepAnalysisDeps } from "./de
 const lease = { runId: "run_1", captureId: "cap_1", pipeline: "mixed" as const, ownerToken: "t" };
 
 const capabilityRow = {
-  id: "cab_1", title: "Some Tool", type: "tool", summary: "A tool.", tags: ["cli"],
+  id: "cab_1", title: "Some Tool", type: "tool", summary: "A tool.", summary_points: [] as Array<{ label: string; text: string }>, tags: ["cli"],
   source_url: null, playbook: { kind: "reference", points: ["p"] }, updated_at: "2026-09-01T00:00:00.000Z"
 };
 
@@ -38,6 +38,7 @@ function deps(opts: {
   hangPlanUntilAborted?: boolean;
 } = {}) {
   const calls: string[] = [];
+  const prompts: string[] = [];
   const steps: Array<{ step: string; ok: boolean; error: string | null }> = [];
   const updates: Array<{ values: unknown[] }> = [];
   const capability = opts.capability === undefined ? capabilityRow : opts.capability;
@@ -49,7 +50,7 @@ function deps(opts: {
 
   const pool = {
     query: async (text: string, values: unknown[] = []) => {
-      if (text.startsWith("SELECT id, title, type, summary, tags, source_url, playbook, updated_at FROM caphub_v2.capabilities")) {
+      if (text.startsWith("SELECT id, title, type, summary, summary_points, tags, source_url, playbook, updated_at FROM caphub_v2.capabilities")) {
         return { rows: capability ? [capability] : [] };
       }
       if (text.includes("INSERT INTO caphub_v2.analysis_steps")) {
@@ -69,6 +70,7 @@ function deps(opts: {
     reason: {
       provider: "deepseek", model: "d",
       invoke: async (input: StructuredInput, signal: AbortSignal) => {
+        prompts.push(input.prompt);
         if (input.schemaName === "deep_plan") {
           calls.push("plan");
           if (opts.hangPlanUntilAborted) {
@@ -96,7 +98,7 @@ function deps(opts: {
       }
     }
   };
-  return { d, calls, steps, updates };
+  return { d, calls, prompts, steps, updates };
 }
 
 describe("runDeepAnalysis", () => {
@@ -162,7 +164,7 @@ describe("runDeepAnalysis", () => {
     let capturedQuery = "";
     const pool = {
       query: async (text: string) => {
-        if (text.startsWith("SELECT id, title, type, summary, tags, source_url, playbook, updated_at FROM caphub_v2.capabilities")) {
+        if (text.startsWith("SELECT id, title, type, summary, summary_points, tags, source_url, playbook, updated_at FROM caphub_v2.capabilities")) {
           capturedQuery = text;
           return { rows: [] }; // simulates a discarded/deleted card: the row exists but no longer matches
         }
@@ -223,6 +225,25 @@ describe("runDeepAnalysis", () => {
     const { d, calls } = deps({ analysisValues: [badAnalysis, badAnalysis] });
     await expect(runDeepAnalysis(d, lease, new AbortController().signal)).rejects.toMatchObject({ code: "INVALID_OUTPUT" });
     expect(calls.filter((c) => c === "synthesize-final")).toHaveLength(2);
+  });
+
+  it("includes the capability's summary_points in the subject text sent to every reasoning call, not just the ~120-char summary lead (M3.8: most of a card's substance now lives in summary_points)", async () => {
+    const capabilityWithPoints = {
+      ...capabilityRow,
+      summary_points: [{ label: "定位", text: "自适应反爬抓取库" }, { label: "限制", text: "仅支持 Python" }]
+    };
+    const { d, prompts } = deps({ capability: capabilityWithPoints });
+    await runDeepAnalysis(d, lease, new AbortController().signal);
+    expect(prompts.length).toBeGreaterThan(0);
+    for (const prompt of prompts) {
+      expect(prompt).toContain("摘要要点：**定位。** 自适应反爬抓取库 **限制。** 仅支持 Python");
+    }
+  });
+
+  it("renders a （无） placeholder for 摘要要点 when the capability has no summary_points (e.g. not yet re-enriched since migration 012)", async () => {
+    const { d, prompts } = deps({ capability: { ...capabilityRow, summary_points: [] } });
+    await runDeepAnalysis(d, lease, new AbortController().signal);
+    expect(prompts[0]).toContain("摘要要点：（无）");
   });
 
   it("treats a single query's search failure as non-fatal: the other queries and synthesize still run", async () => {
