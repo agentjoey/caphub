@@ -47,7 +47,7 @@ export interface BotCommand {
 export interface TelegramApi {
   getMe(signal?: AbortSignal): Promise<TelegramUser>;
   getUpdates(params: { offset?: number; timeout: number; signal?: AbortSignal }): Promise<TelegramUpdate[]>;
-  sendMessage(params: { chatId: number | string; text: string; replyMarkup?: InlineKeyboardMarkup; signal?: AbortSignal }): Promise<TelegramMessage>;
+  sendMessage(params: { chatId: number | string; text: string; replyMarkup?: InlineKeyboardMarkup; replyToMessageId?: number; signal?: AbortSignal }): Promise<TelegramMessage>;
   editMessageText(params: { chatId: number | string; messageId: number; text: string; replyMarkup?: InlineKeyboardMarkup; signal?: AbortSignal }): Promise<TelegramMessage | true>;
   answerCallbackQuery(params: { callbackQueryId: string; text?: string; showAlert?: boolean; signal?: AbortSignal }): Promise<true>;
   getFile(params: { fileId: string; signal?: AbortSignal }): Promise<TelegramFile>;
@@ -129,9 +129,11 @@ export function createTelegramApi(opts: { token: string; fetch?: typeof fetch; t
       return callApi<TelegramUpdate[]>("getUpdates", { offset, timeout }, httpTimeoutMs, signal);
     },
 
-    sendMessage({ chatId, text, replyMarkup, signal }) {
+    sendMessage({ chatId, text, replyMarkup, replyToMessageId, signal }) {
       return callApi<TelegramMessage>("sendMessage", {
-        chat_id: chatId, text, parse_mode: "HTML", ...(replyMarkup ? { reply_markup: replyMarkup } : {})
+        chat_id: chatId, text, parse_mode: "HTML",
+        ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+        ...(replyToMessageId !== undefined ? { reply_to_message_id: replyToMessageId } : {})
       }, defaultTimeoutMs, signal);
     },
 

@@ -43,6 +43,17 @@ describe("createTelegramApi", () => {
     expect(out).toEqual({ message_id: 7 });
   });
 
+  it("sendMessage sends reply_to_message_id when given", async () => {
+    let body: Record<string, unknown> = {};
+    const fetchFn = (async (_u: string, i: RequestInit) => {
+      body = JSON.parse(i.body as string);
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 8 } }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const api = createTelegramApi({ token: TOKEN, fetch: fetchFn });
+    await api.sendMessage({ chatId: 555, text: "hi", replyToMessageId: 42 });
+    expect(body).toMatchObject({ chat_id: 555, text: "hi", reply_to_message_id: 42 });
+  });
+
   it("editMessageText sends chat_id, message_id, text and reply_markup", async () => {
     let body: Record<string, unknown> = {};
     const fetchFn = (async (_u: string, i: RequestInit) => {

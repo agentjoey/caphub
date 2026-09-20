@@ -74,6 +74,24 @@ export async function submitCapture(
   }
 }
 
+/**
+ * Links a capture to the Telegram reply message ("已收到，分析中…") sent for it, so a later
+ * worker step (Task 4) can edit that same message into the analysis result. This is separate
+ * from the `telegram` field on {@link CaptureInput} — that records the *origin* of a capture
+ * (unused by the Telegram path, which always submits as anonymous `source: "telegram"` and
+ * links the receipt only after a successful, non-duplicate submit).
+ */
+export async function recordTelegramReceipt(
+  pool: Pool,
+  captureId: string,
+  receipt: { chatId: number; messageId: number }
+): Promise<void> {
+  await pool.query(
+    "UPDATE caphub_v2.captures SET telegram_chat_id = $2, telegram_message_id = $3 WHERE id = $1",
+    [captureId, String(receipt.chatId), String(receipt.messageId)]
+  );
+}
+
 export interface RecentCapture {
   id: string; kind: "image" | "text" | "url"; createdAt: string;
   runState: "queued" | "running" | "done" | "failed" | null;
