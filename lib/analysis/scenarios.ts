@@ -1,6 +1,6 @@
 import type { Pool } from "pg";
 import { z } from "zod";
-import { capabilityTypeSchema, cardObjectSchema, refineCard, type CapabilityType } from "./card";
+import { capabilityTypeSchema, cardObjectSchema, NO_OVERLAP, overlapRelationSchema, refineCard, type CapabilityType } from "./card";
 
 export interface Scenario {
   slug: string;
@@ -40,6 +40,20 @@ export function scenariosResultSchemaFor(slugs: readonly [string, ...string[]]) 
 }
 
 /**
+ * `overlap` field for a known set of candidate serial codes (e.g. `["TOL-0009", "SKL-0012"]`,
+ * from that run's similar-card lookup -- see similar.ts's similarByEmbedding/findSimilar):
+ * `target` becomes a plain nullable enum of exactly those codes, so a model citing a code
+ * outside the candidate list fails validation and goes through the existing invalid-output
+ * retry path (same pattern as `scenariosFieldFor`, but no dedup/array shape is needed here).
+ * With no candidates at all, `target` can only ever be `null` (there is nothing to point at,
+ * so `relation` must end up "none" -- enforced by `refineCard`, re-applied below).
+ */
+function overlapFieldFor(codes: string[]) {
+  const target = codes.length > 0 ? z.enum(codes as [string, ...string[]]).nullable() : z.null();
+  return z.object({ relation: overlapRelationSchema, target, reason: z.string().max(80) }).default(NO_OVERLAP);
+}
+
+/**
  * cardSchema narrowed to a real, non-empty scenario slug list: `scenarios` becomes a
  * required enum of `slugs`, 1–3 entries, deduped. Built from `cardObjectSchema` (not
  * `cardSchema`) because `.extend()` isn't available on the ZodEffects `superRefine`
@@ -53,14 +67,18 @@ export function scenariosResultSchemaFor(slugs: readonly [string, ...string[]]) 
  * disobedient model's mismatched playbook fail validation and go through the existing
  * invalid-output retry path, instead of a post-hoc type swap silently storing a card whose type
  * and playbook shape disagree.
+ *
+ * `overlapCandidates`, when given, narrows `overlap.target` the same way -- see
+ * {@link overlapFieldFor}.
  */
-export function cardSchemaFor(slugs: string[], pinnedType?: CapabilityType) {
+export function cardSchemaFor(slugs: string[], pinnedType?: CapabilityType, overlapCandidates: string[] = []) {
   if (slugs.length === 0) throw new Error("cardSchemaFor requires at least one scenario slug");
   const nonEmpty = slugs as [string, ...string[]];
   return cardObjectSchema
     .extend({
       scenarios: scenariosFieldFor(nonEmpty),
-      type: pinnedType ? z.literal(pinnedType) : capabilityTypeSchema
+      type: pinnedType ? z.literal(pinnedType) : capabilityTypeSchema,
+      overlap: overlapFieldFor(overlapCandidates)
     })
     .superRefine(refineCard);
 }

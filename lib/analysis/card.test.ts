@@ -8,7 +8,8 @@ const valid = {
   suggested_verdict: "keep", suggested_reason: "有可执行命令", confidence: 0.9,
   usage: "integrate", playbook: { kind: "integrate", install: ["npm i -D @axe-core/playwright"], repo: null, prompt_text: null },
   tags: ["testing", "accessibility"], source_url: null, scenarios: [],
-  score: 4, score_reason: "有仓库和安装命令，可复现性高", source_facts: {}
+  score: 4, score_reason: "有仓库和安装命令，可复现性高", source_facts: {},
+  overlap: { relation: "none", target: null, reason: "" }
 };
 
 describe("isValidTag", () => {
@@ -162,6 +163,38 @@ describe("cardSchema", () => {
       expect(jsonSchema.properties?.score_reason).toMatchObject({ type: "string", maxLength: 80 });
       expect(jsonSchema.properties?.source_facts).toMatchObject({ type: "object" });
     });
+  });
+});
+
+describe("cardSchema overlap", () => {
+  it("defaults overlap to none/null/empty-reason when omitted", () => {
+    expect(cardSchema.parse(valid).overlap).toEqual({ relation: "none", target: null, reason: "" });
+  });
+  it("accepts an explicit none overlap with a null target", () => {
+    const overlap = { relation: "none", target: null, reason: "库里没有相似能力" };
+    expect(cardSchema.parse({ ...valid, overlap }).overlap).toEqual(overlap);
+  });
+  it("accepts each non-none relation paired with a non-null target", () => {
+    for (const relation of ["duplicate", "upgrade", "superseded", "complement"] as const) {
+      const overlap = { relation, target: "TOL-0009", reason: "理由" };
+      expect(cardSchema.parse({ ...valid, overlap }).overlap).toEqual(overlap);
+    }
+  });
+  it("rejects relation 'none' paired with a non-null target", () => {
+    expect(() => cardSchema.parse({ ...valid, overlap: { relation: "none", target: "TOL-0009", reason: "r" } })).toThrow(/target/);
+  });
+  it("rejects a non-none relation paired with a null target", () => {
+    expect(() => cardSchema.parse({ ...valid, overlap: { relation: "duplicate", target: null, reason: "r" } })).toThrow(/target/);
+  });
+  it("rejects an unknown relation value", () => {
+    expect(() => cardSchema.parse({ ...valid, overlap: { relation: "unrelated", target: null, reason: "r" } })).toThrow();
+  });
+  it("rejects an overlap reason over 80 chars", () => {
+    expect(() => cardSchema.parse({ ...valid, overlap: { relation: "duplicate", target: "TOL-0009", reason: "a".repeat(81) } })).toThrow();
+  });
+  it("stays representable as JSON Schema for providers", () => {
+    const jsonSchema = z.toJSONSchema(cardSchema) as { properties?: Record<string, unknown> };
+    expect(jsonSchema.properties?.overlap).toMatchObject({ type: "object" });
   });
 });
 

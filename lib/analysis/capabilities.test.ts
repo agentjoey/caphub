@@ -5,7 +5,7 @@ import { upsertCapability } from "./capabilities";
 const card: Card = {
   title: "t", type: "prompt", summary: "s", signals: ["a", "b"], suggested_verdict: "keep", suggested_reason: "r",
   confidence: 0.9, usage: "integrate", playbook: { kind: "integrate", install: [], repo: null, prompt_text: "p" }, tags: ["x"], source_url: null,
-  scenarios: ["coding"], score: 4, score_reason: "r", source_facts: {}
+  scenarios: ["coding"], score: 4, score_reason: "r", source_facts: {}, overlap: { relation: "none", target: null, reason: "" }
 };
 
 describe("upsertCapability", () => {
@@ -60,6 +60,34 @@ describe("upsertCapability", () => {
     expect(sql).toMatch(/score_reason = CASE WHEN caphub_v2\.capabilities\.verdict_by = 'human' THEN caphub_v2\.capabilities\.score_reason ELSE excluded\.score_reason END/);
   });
 
+  it("inserts overlap", async () => {
+    let sql = "";
+    let params: unknown[] = [];
+    const pool = {
+      query: async (text: string, values: unknown[] = []) => {
+        if (sql === "") { sql = text; params = values; }
+        return { rows: [{ id: "cab_1", verdict: "keep", previous_verdict: null, deleted: false }] };
+      }
+    };
+    const overlap: Card["overlap"] = { relation: "duplicate", target: "TOL-0009", reason: "与 TOL-0009 功能重复" };
+    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card: { ...card, overlap }, verdict: "keep", verdictBy: "auto" });
+    expect(sql).toContain("overlap");
+    expect(params).toContain(JSON.stringify(overlap));
+  });
+
+  it("always overwrites overlap on a rerun, unlike verdict/type/score which can be human-pinned", async () => {
+    let sql = "";
+    const pool = {
+      query: async (text: string) => {
+        if (sql === "") sql = text;
+        return { rows: [{ id: "cab_1", verdict: "keep", previous_verdict: "keep", deleted: false }] };
+      }
+    };
+    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_2", card, verdict: "keep", verdictBy: "auto" });
+    expect(sql).toContain("overlap = excluded.overlap");
+    expect(sql).not.toMatch(/overlap = CASE WHEN/);
+  });
+
   it("a human-pinned type is not overwritten by this run's card, mirroring how verdict is preserved", async () => {
     let sql = "";
     const pool = {
@@ -84,7 +112,7 @@ describe("upsertCapability", () => {
     await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card, verdict: "keep", verdictBy: "auto" });
     const [upsertSql, followUpSql] = calls;
     // VALUES always passes a literal NULL for serial; nextval() never appears in the INSERT list.
-    expect(upsertSql).toMatch(/VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11, \$12,[\s\S]*?\n\s*NULL, \$18, \$19, \$20\)/);
+    expect(upsertSql).toMatch(/VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11, \$12,[\s\S]*?\n\s*NULL, \$18, \$19, \$20, \$21\)/);
     expect(upsertSql.split("VALUES")[1]).not.toContain("nextval");
     // ON CONFLICT keeps whatever serial the row already has.
     expect(upsertSql).toContain("serial = coalesce(caphub_v2.capabilities.serial, excluded.serial)");
@@ -129,7 +157,8 @@ describe("upsertCapability", () => {
       ...card,
       title: "t\u0000itle", summary: "s\u0000ummary", signals: ["a\u0000", "b"], suggested_reason: "r\u0000eason",
       playbook: { kind: "integrate", install: [], repo: null, prompt_text: "p\u0000" }, tags: ["x\u0000"], source_url: "https://a.b/\u0000",
-      scenarios: ["coding\u0000"], score_reason: "s\u0000core reason", source_facts: { license: "M\u0000IT" }
+      scenarios: ["coding\u0000"], score_reason: "s\u0000core reason", source_facts: { license: "M\u0000IT" },
+      overlap: { relation: "duplicate", target: "TOL-0009", reason: "重\u0000复" }
     };
     await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card: dirty, verdict: "keep", verdictBy: "auto" });
     for (const p of params) {
@@ -146,5 +175,6 @@ describe("upsertCapability", () => {
     expect(params[16]).toEqual(["coding"]);
     expect(params[18]).toBe("score reason");
     expect(JSON.parse(params[19] as string)).toEqual({ license: "MIT" });
+    expect(JSON.parse(params[20] as string)).toEqual({ relation: "duplicate", target: "TOL-0009", reason: "重复" });
   });
 });

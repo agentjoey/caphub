@@ -110,6 +110,53 @@ describe("cardSchemaFor", () => {
     expect(() => schema.parse({ ...withoutScore, scenarios: ["coding"] })).toThrow();
     expect(schema.parse({ ...valid, scenarios: ["coding"] }).source_facts).toEqual({});
   });
+
+  describe("overlap", () => {
+    it("defaults overlap to none/null when omitted, with no candidates offered", () => {
+      const schema = cardSchemaFor(slugs);
+      expect(schema.parse({ ...valid, scenarios: ["coding"] }).overlap).toEqual({ relation: "none", target: null, reason: "" });
+    });
+
+    it("accepts a target that is one of the given candidate codes", () => {
+      const schema = cardSchemaFor(slugs, undefined, ["TOL-0009", "SKL-0012"]);
+      const overlap = { relation: "duplicate", target: "TOL-0009", reason: "与已有工具重复" };
+      expect(schema.parse({ ...valid, scenarios: ["coding"], overlap }).overlap).toEqual(overlap);
+    });
+
+    it("rejects a target outside the given candidate list (goes through the invalid-output retry path)", () => {
+      const schema = cardSchemaFor(slugs, undefined, ["TOL-0009"]);
+      expect(() => schema.parse({
+        ...valid, scenarios: ["coding"],
+        overlap: { relation: "duplicate", target: "SKL-0012", reason: "r" }
+      })).toThrow();
+    });
+
+    it("rejects any non-null target when there are no candidates at all", () => {
+      const schema = cardSchemaFor(slugs);
+      expect(() => schema.parse({
+        ...valid, scenarios: ["coding"],
+        overlap: { relation: "duplicate", target: "TOL-0009", reason: "r" }
+      })).toThrow();
+    });
+
+    it("still enforces relation=none <=> target=null via refineCard, even with candidates offered", () => {
+      const schema = cardSchemaFor(slugs, undefined, ["TOL-0009"]);
+      expect(() => schema.parse({
+        ...valid, scenarios: ["coding"],
+        overlap: { relation: "none", target: "TOL-0009", reason: "r" }
+      })).toThrow(/target/);
+      expect(() => schema.parse({
+        ...valid, scenarios: ["coding"],
+        overlap: { relation: "duplicate", target: null, reason: "r" }
+      })).toThrow(/target/);
+    });
+
+    it("stays representable as JSON Schema for providers, with target as a plain enum", () => {
+      const schema = cardSchemaFor(slugs, undefined, ["TOL-0009", "SKL-0012"]);
+      const jsonSchema = z.toJSONSchema(schema) as { properties?: { overlap?: { properties?: Record<string, unknown> } } };
+      expect(jsonSchema.properties?.overlap?.properties?.target).toBeDefined();
+    });
+  });
 });
 
 describe("scenariosResultSchemaFor", () => {

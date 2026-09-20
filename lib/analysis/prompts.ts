@@ -2,6 +2,7 @@ import { INTERFACE_TAGS, RESERVED_TAGS, type CapabilityType, type Extraction, ty
 import type { Material } from "./material";
 import type { Scenario } from "./scenarios";
 import { scenariosPromptList } from "./scenarios";
+import type { SimilarCandidate } from "./similar";
 
 /**
  * Shared scoring rubric wording, used both in the pipeline's `reasonPrompt` (score assigned
@@ -37,7 +38,7 @@ export function searchQuery(extraction: Extraction | null, material: Material): 
 
 export function reasonPrompt(input: {
   material: Material; extraction: Extraction | null; sources: SearchResult["sources"];
-  similar: Array<{ id: string; title: string; tags: string[] }>; existingTags: string[]; scenarios: Scenario[];
+  similar: SimilarCandidate[]; existingTags: string[]; scenarios: Scenario[];
   /**
    * When a human has already hand-set this capability's `type` (via 改建议), a rerun must
    * honor it rather than let the model re-derive (and possibly revert) it — see
@@ -59,13 +60,18 @@ export function reasonPrompt(input: {
     `原始输入：\n${materialText}`,
     input.extraction ? `视觉提取结果：\n${JSON.stringify(input.extraction)}` : "",
     input.sources.length ? `联网来源（已截断）：\n${input.sources.map((s, i) => `[${i + 1}] ${s.title} ${s.url}\n${s.content}`).join("\n\n")}` : "联网来源：无",
-    input.similar.length ? `库里已有的相似能力（判断是否重叠）：\n${input.similar.map((s) => `- ${s.title} [${s.tags.join(", ")}]`).join("\n")}` : "库里没有相似能力。",
+    input.similar.length
+      ? `库里已有的相似能力（候选相似卡，编号 · 标题 · 类型 · 一句话，用于判断是否重叠）：\n${input.similar.map((s) => `${s.code ?? "（无编号）"} · ${s.title} · ${s.type} · ${s.summary}`).join("\n")}`
+      : "库里没有相似能力。",
     `已有标签（优先复用，找到贴切的就不要新造）：${input.existingTags.join(", ") || "（空）"}`,
     `候选应用场景（slug（中文名：关键词…））：${scenariosPromptList(input.scenarios)}`,
     "请输出 CapabilityCard：title ≤ 30 字的一句话；type；summary 是对整个分析的完整摘要（结论 + 依据，≤ 300 字）；signals 给 2–3 条价值信号（如解决什么场景、与库内谁重叠、来源可信度）；suggested_verdict 与 suggested_reason；confidence 是你对该建议的把握（0–1）；usage 在 integrate（可直接拿来用）与 reference（值得借鉴后自研）之间选；playbook 按 usage/type 给可执行内容：integrate 给 install 命令、repo、prompt 全文；reference 给借鉴要点；experience 类型必须把核心内容本身写进 content；" +
       `tags 给 1–6 个标签，每个必须是英文小写单词或用连字符连接的短语（如 web-scraping、time-series），不能是中文，不能是空格分隔的多词（"Web Scraping" 不合法，要写成 web-scraping），也不能是 ${RESERVED_TAGS.join("、")} 这类类型/用途词；已有贴切的标签要复用，不要为同一含义新造近义词；当能力的接入方式明确时，必须使用这四个固定标签中的一个或多个（${INTERFACE_TAGS.join("、")}），不要自造近义词（例如 mcp-server、python-library、cli-tool、skill 都不允许）；接入方式标签与主题标签共用 1–6 个标签的名额，不额外增加数量；` +
       "scenarios 从候选应用场景的 slug 中选出 1–3 个这个能力最可能被用在的应用场景，按贴切程度排列，只能用给出的 slug，不要自造；" +
       "source_url 给最可信的来源链接或 null。",
+    input.similar.length
+      ? `overlap 判断本卡与上面「候选相似卡」列表中最相关的一张的关系：relation 在 none（无关）、duplicate（与对方重复）、upgrade（本卡是对方的升级版）、superseded（本卡已被对方取代）、complement（与对方互补）之间选；target 必须原样填写候选列表里给出的编号（如 TOL-0009），relation 为 none 时 target 必须为 null；严禁引用候选列表以外的编号；reason 用一句不超过 80 字的中文说明判断依据。`
+      : "候选相似卡列表为空，overlap.relation 必须填 none，overlap.target 必须为 null，reason 说明库里暂无相似能力。",
     `score 给这个能力对 Joey 的 AI 价值打 1–5 分整数，${SCORE_RUBRIC}score_reason 用一句不超过 80 字的中文说明打分依据。`,
     "source_facts 是关于来源的客观事实（repo_url、stars、last_update、license、homepage），只能填写「联网来源」中明确写出的内容；某一项在来源里没有明确出现就留空（不要填、不要猜），禁止推测 star 数与更新时间（last_update）这类你不确定的数字或日期；如果联网来源为空或完全没提到这些事实，source_facts 整体留空对象即可。as_of 填写你依据的来源信息的日期（若来源本身没有日期，可留空）。"
   ].filter(Boolean).join("\n\n");

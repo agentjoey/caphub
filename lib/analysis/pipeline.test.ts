@@ -4,7 +4,7 @@ import { createPipelineDeps, runPipeline, type PipelineDeps } from "./pipeline";
 const card = {
   title: "t", type: "prompt", summary: "s", signals: ["a", "b"], suggested_verdict: "keep", suggested_reason: "r",
   confidence: 0.9, usage: "integrate", playbook: { kind: "integrate", install: [], repo: null, prompt_text: "p" }, tags: ["x"], source_url: null,
-  scenarios: ["coding"], score: 4, score_reason: "r", source_facts: {}
+  scenarios: ["coding"], score: 4, score_reason: "r", source_facts: {}, overlap: { relation: "none", target: null, reason: "" }
 };
 const pendingCard = { ...card, confidence: 0.5 };
 const experienceCard = { ...card, type: "experience", playbook: { kind: "experience", content: "做法本身", when_to_use: "何时用" } };
@@ -12,7 +12,11 @@ const extraction = { what: "w", visible_text: "", commands: [], prompt_text: nul
 
 type Kind = "image" | "text" | "url";
 
-function deps(kind: Kind, opts: { reasonValue?: unknown; failTagBump?: boolean; pinnedType?: string } = {}) {
+function deps(kind: Kind, opts: {
+  reasonValue?: unknown; failTagBump?: boolean; pinnedType?: string;
+  existingCapability?: { id: string; hasEmbedding: boolean } | null;
+  textSimilar?: Array<Record<string, unknown>>; embeddingSimilar?: Array<Record<string, unknown>>;
+} = {}) {
   const calls: string[] = [];
   const sql: Array<{ text: string; values: unknown[]; client?: boolean }> = [];
   let reasonPromptSeen = "";
@@ -22,6 +26,9 @@ function deps(kind: Kind, opts: { reasonValue?: unknown; failTagBump?: boolean; 
     if (opts.failTagBump && text.includes("INSERT INTO caphub_v2.tags")) throw Object.assign(new Error("duplicate"), { code: "21000" });
     if (text.startsWith("SELECT type FROM caphub_v2.capabilities WHERE capture_id")) {
       return { rows: opts.pinnedType ? [{ type: opts.pinnedType }] : [] };
+    }
+    if (text.startsWith("SELECT id, embedding IS NOT NULL AS has_embedding")) {
+      return { rows: opts.existingCapability === undefined ? [] : opts.existingCapability === null ? [] : [{ id: opts.existingCapability.id, has_embedding: opts.existingCapability.hasEmbedding }] };
     }
     if (text.startsWith("SELECT kind, object_key")) {
       return {
@@ -38,7 +45,8 @@ function deps(kind: Kind, opts: { reasonValue?: unknown; failTagBump?: boolean; 
     if (text.startsWith("SELECT slug, label_zh, label_en, keywords FROM caphub_v2.scenarios")) {
       return { rows: [{ slug: "coding", label_zh: "编程", label_en: "Coding", keywords: ["code"] }] };
     }
-    if (text.startsWith("SELECT id, title, tags FROM caphub_v2.capabilities")) return { rows: [] };
+    if (text.startsWith("SELECT id, title, type, summary, tags, serial FROM caphub_v2.capabilities")) return { rows: opts.textSimilar ?? [] };
+    if (text.startsWith("SELECT c.id, c.title, c.type, c.summary, c.tags, c.serial")) return { rows: opts.embeddingSimilar ?? [] };
     if (text.includes("INSERT INTO caphub_v2.capabilities")) {
       // values: [id, captureId, runId, title, type, summary, signals, suggested_verdict,
       //          suggested_reason, confidence, verdict, verdictBy, usage, playbook, tags, source_url]
@@ -107,8 +115,58 @@ describe("runPipeline", () => {
   it("excludes its own capture from the similar-capability lookup", async () => {
     const { d, sql } = deps("text");
     await runPipeline(d, { runId: "run_sim", captureId: "cap_sim", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
-    const similar = sql.find((q) => q.text.startsWith("SELECT id, title, tags FROM caphub_v2.capabilities"))!;
+    const similar = sql.find((q) => q.text.startsWith("SELECT id, title, type, summary, tags, serial FROM caphub_v2.capabilities"))!;
     expect(similar.values[2]).toBe("cap_sim");
+  });
+
+  it("falls back to the text-based similar search when this capture has no capability row yet (its first run)", async () => {
+    const { d, sql } = deps("text", { existingCapability: null });
+    await runPipeline(d, { runId: "run_first", captureId: "cap_first", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
+    expect(sql.some((q) => q.text.startsWith("SELECT id, title, type, summary, tags, serial FROM caphub_v2.capabilities"))).toBe(true);
+    expect(sql.some((q) => q.text.startsWith("SELECT c.id, c.title, c.type, c.summary, c.tags, c.serial"))).toBe(false);
+  });
+
+  it("falls back to the text-based similar search on a rerun whose capability row has no embedding yet", async () => {
+    const { d, sql } = deps("text", { existingCapability: { id: "cab_existing", hasEmbedding: false } });
+    await runPipeline(d, { runId: "run_no_embed", captureId: "cap_no_embed", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
+    expect(sql.some((q) => q.text.startsWith("SELECT id, title, type, summary, tags, serial FROM caphub_v2.capabilities"))).toBe(true);
+    expect(sql.some((q) => q.text.startsWith("SELECT c.id, c.title, c.type, c.summary, c.tags, c.serial"))).toBe(false);
+  });
+
+  it("uses the vector similar search (not the text one) on a rerun whose capability row already has an embedding", async () => {
+    const { d, sql } = deps("text", { existingCapability: { id: "cab_existing", hasEmbedding: true } });
+    await runPipeline(d, { runId: "run_embed", captureId: "cap_embed", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
+    const vectorCall = sql.find((q) => q.text.startsWith("SELECT c.id, c.title, c.type, c.summary, c.tags, c.serial"));
+    expect(vectorCall).toBeDefined();
+    expect(vectorCall!.values).toEqual(["cab_existing", 5]);
+    expect(sql.some((q) => q.text.startsWith("SELECT id, title, type, summary, tags, serial FROM caphub_v2.capabilities"))).toBe(false);
+  });
+
+  it("passes only the candidates' serial codes into the reason prompt's overlap section, and only those into the schema's valid targets", async () => {
+    const { d, reasonPrompt } = deps("text", {
+      textSimilar: [{ id: "cab_2", title: "Existing Tool", type: "tool", summary: "一个已有工具", tags: [], serial: 9 }]
+    });
+    const withOverlap = { ...card, overlap: { relation: "duplicate", target: "TOL-0009", reason: "功能重复" } };
+    const { d: d2 } = deps("text", {
+      reasonValue: withOverlap,
+      textSimilar: [{ id: "cab_2", title: "Existing Tool", type: "tool", summary: "一个已有工具", tags: [], serial: 9 }]
+    });
+    await runPipeline(d, { runId: "run_overlap_prompt", captureId: "cap_overlap_prompt", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
+    expect(reasonPrompt()).toContain("TOL-0009");
+    const out = await runPipeline(d2, { runId: "run_overlap_ok", captureId: "cap_overlap_ok", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
+    expect(out.verdict).toBe("keep");
+  });
+
+  it("fails the run (invalid output, retried) when the model cites an overlap target outside the candidate list", async () => {
+    const badOverlap = { ...card, overlap: { relation: "duplicate", target: "TOL-9999", reason: "功能重复" } };
+    const { d, calls } = deps("text", {
+      reasonValue: badOverlap,
+      textSimilar: [{ id: "cab_2", title: "Existing Tool", type: "tool", summary: "一个已有工具", tags: [], serial: 9 }]
+    });
+    await expect(
+      runPipeline(d, { runId: "run_overlap_bad", captureId: "cap_overlap_bad", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal)
+    ).rejects.toMatchObject({ code: "INVALID_OUTPUT" });
+    expect(calls.filter((c) => c === "reason")).toHaveLength(2);
   });
 
   it("throws CAPTURE_NOT_FOUND with a code when the capture row is missing", async () => {

@@ -13,7 +13,7 @@ import { extractionSchema, type CapabilityType, type Extraction } from "./card";
 import { prepareMaterial, type MaterialDeps } from "./material";
 import { reasonPrompt, searchQuery, visionPrompt } from "./prompts";
 import { cardSchemaFor, loadScenarios } from "./scenarios";
-import { findSimilar } from "./similar";
+import { findSimilar, similarByEmbedding, type SimilarCandidate } from "./similar";
 import { recordStep } from "./steps";
 import { runStructured, withTimeout, type StructuredCall } from "./structured";
 import { bumpTags, topTags } from "./tags";
@@ -62,6 +62,33 @@ async function loadPinnedType(pool: Pick<Pool, "query">, captureId: string): Pro
     "SELECT type FROM caphub_v2.capabilities WHERE capture_id = $1 AND type_by = 'human'", [captureId]
   )).rows[0];
   return row?.type ?? null;
+}
+
+/**
+ * This capture's existing capability row, if any, and whether it already has an embedding.
+ * A brand-new capture (its first analysis run) has no capability row yet, so `null` here always
+ * means "use the text-based similar.ts fallback" (see `loadSimilar` below) -- the embedding
+ * worker tick only ever runs against a capability row that already exists.
+ */
+async function loadExistingCapability(pool: Pick<Pool, "query">, captureId: string): Promise<{ id: string; hasEmbedding: boolean } | null> {
+  const row = (await pool.query<{ id: string; has_embedding: boolean }>(
+    "SELECT id, embedding IS NOT NULL AS has_embedding FROM caphub_v2.capabilities WHERE capture_id = $1", [captureId]
+  )).rows[0];
+  return row ? { id: row.id, hasEmbedding: row.has_embedding } : null;
+}
+
+/**
+ * Candidate cards for both the "similar capabilities" prompt context and overlap-relation
+ * detection. Prefers the vector search (similarByEmbedding) once this capture's capability row
+ * has an embedding -- i.e. from its second analysis run onward, after the embedding worker tick
+ * has caught up -- and falls back to the existing text-based search (findSimilar) otherwise, so
+ * a capture's very first run (no capability row, hence no embedding) still gets candidates.
+ */
+async function loadSimilar(
+  pool: Pick<Pool, "query">, existing: { id: string; hasEmbedding: boolean } | null, seed: string, captureId: string
+): Promise<SimilarCandidate[]> {
+  if (existing?.hasEmbedding) return similarByEmbedding(pool, { capabilityId: existing.id });
+  return findSimilar(pool, seed, captureId);
 }
 
 async function runSearch(deps: PipelineDeps, runId: string, query: string, budget: RunBudget, signal: AbortSignal) {
@@ -122,10 +149,16 @@ export async function runPipeline(deps: PipelineDeps, lease: Lease, signal: Abor
 
   const search = await runSearch(deps, lease.runId, searchQuery(extraction, material), budget, signal);
   const similarSeed = extraction?.what ?? (material.kind === "text" ? material.text : material.kind === "url" ? material.text ?? material.url : "");
-  const [similar, existingTags, scenarios, pinnedType] = await Promise.all([
-    findSimilar(deps.pool, similarSeed, lease.captureId), topTags(deps.pool), loadScenarios(deps.pool), loadPinnedType(deps.pool, lease.captureId)
+  const [existing, existingTags, scenarios, pinnedType] = await Promise.all([
+    loadExistingCapability(deps.pool, lease.captureId), topTags(deps.pool), loadScenarios(deps.pool), loadPinnedType(deps.pool, lease.captureId)
   ]);
+  const similar = await loadSimilar(deps.pool, existing, similarSeed, lease.captureId);
   if (!scenarios.length) throw new Error("no scenarios configured in caphub_v2.scenarios; cannot run reason step");
+
+  // overlap.target is narrowed to exactly the serial codes offered in the prompt's candidate
+  // list (see prompts.ts's reasonPrompt and scenarios.ts's cardSchemaFor/overlapFieldFor) --
+  // a candidate with no serial yet (formatSerial returns null) can be shown but never cited.
+  const overlapCandidates = similar.map((s) => s.code).filter((code): code is string => code !== null);
 
   // The pinned type is enforced at the schema layer (cardSchemaFor narrows `type` to a
   // z.literal of it), not by mutating `card.type` after parsing: `refineCard` is what checks
@@ -136,7 +169,8 @@ export async function runPipeline(deps: PipelineDeps, lease: Lease, signal: Abor
   const card = await runStructured({
     pool: deps.pool, runId: lease.runId, step: "reason", call: deps.reason,
     prompt: reasonPrompt({ material, extraction, sources: search.sources, similar, existingTags, scenarios, pinnedType }),
-    schemaName: "capability_card", schema: cardSchemaFor(scenarios.map((s) => s.slug), pinnedType ?? undefined), budget, timeoutMs: TIMEOUTS.reason, signal
+    schemaName: "capability_card", schema: cardSchemaFor(scenarios.map((s) => s.slug), pinnedType ?? undefined, overlapCandidates),
+    budget, timeoutMs: TIMEOUTS.reason, signal
   });
   // Belt-and-braces only: validation above already guarantees card.type === pinnedType when
   // pinnedType is set (z.literal), so this is a no-op assignment, not the enforcement itself.

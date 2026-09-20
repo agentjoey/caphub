@@ -104,6 +104,29 @@ export const sourceFactsSchema = z.object({
 });
 export type SourceFacts = z.infer<typeof sourceFactsSchema>;
 
+export const overlapRelationSchema = z.enum(["none", "duplicate", "upgrade", "superseded", "complement"]);
+export type OverlapRelation = z.infer<typeof overlapRelationSchema>;
+
+/**
+ * Whether this card overlaps with an existing kept capability in the library, judged during
+ * the reason step against a candidate list of nearby cards (see similar.ts's
+ * similarByEmbedding/findSimilar, and scenarios.ts's cardSchemaFor, which narrows `target` to
+ * the exact serial codes offered in that run's prompt candidate list). `target` here is left as
+ * a bare string so the static schema (used by tests, seed data and scripts with no live
+ * candidate list) stays usable; the live pipeline always builds the per-run enum instead.
+ * `relation`/`target` agreement ("none" iff target is null) is enforced in {@link refineCard},
+ * alongside its other cross-field checks, the same way `type`/`playbook` coherence is.
+ */
+export const overlapSchema = z.object({
+  relation: overlapRelationSchema,
+  target: z.string().max(40).nullable(),
+  reason: z.string().max(80)
+});
+export type Overlap = z.infer<typeof overlapSchema>;
+
+/** No overlap with anything in the library -- the default for a brand-new, unrelated card. */
+export const NO_OVERLAP: Overlap = { relation: "none", target: null, reason: "" };
+
 /**
  * The bare object shape, without the cross-field superRefine below. Exported so
  * `cardSchemaFor` can `.extend()` a field (ZodObject supports this; the ZodEffects
@@ -125,10 +148,14 @@ export const cardObjectSchema = z.object({
   /** AI-assigned value score, 1 (drop) – 5 (integrate now); see prompts.ts's rubric. */
   score: z.number().int().min(1).max(5),
   score_reason: z.string().min(1).max(80),
-  source_facts: sourceFactsSchema.default({})
+  source_facts: sourceFactsSchema.default({}),
+  overlap: overlapSchema.default(NO_OVERLAP)
 });
 
-export function refineCard<T extends { type: CapabilityType; usage: "integrate" | "reference"; playbook: Playbook }>(
+export function refineCard<T extends {
+  type: CapabilityType; usage: "integrate" | "reference"; playbook: Playbook;
+  overlap: { relation: OverlapRelation; target: string | null };
+}>(
   card: T,
   ctx: z.RefinementCtx
 ): void {
@@ -145,6 +172,12 @@ export function refineCard<T extends { type: CapabilityType; usage: "integrate" 
     if (card.usage === "reference" && card.playbook.kind !== "reference") {
       ctx.addIssue({ code: "custom", path: ["playbook"], message: "reference usage requires reference playbook" });
     }
+  }
+  if (card.overlap.relation === "none" && card.overlap.target !== null) {
+    ctx.addIssue({ code: "custom", path: ["overlap", "target"], message: "relation 'none' requires target to be null" });
+  }
+  if (card.overlap.relation !== "none" && card.overlap.target === null) {
+    ctx.addIssue({ code: "custom", path: ["overlap", "target"], message: "a relation other than 'none' requires a non-null target" });
   }
 }
 

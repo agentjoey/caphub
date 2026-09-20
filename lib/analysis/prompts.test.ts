@@ -95,6 +95,27 @@ describe("reasonPrompt", () => {
     expect(prompt).toMatch(/1[–-]2 分/);
   });
 
+  it("lists similar-card candidates as 编号 · 标题 · 类型 · 一句话, for overlap judging", () => {
+    const similar = [{ id: "cab_1", code: "TOL-0009", title: "已有工具", type: "tool" as const, summary: "一句话摘要", tags: ["cli"] }];
+    const prompt = reasonPrompt({ material, extraction: null, sources: [], similar, existingTags: [], scenarios });
+    expect(prompt).toContain("TOL-0009 · 已有工具 · tool · 一句话摘要");
+  });
+
+  it("asks for the overlap relation to the most related candidate, with a ≤80-char reason, and forbids citing codes outside the list", () => {
+    const similar = [{ id: "cab_1", code: "TOL-0009", title: "已有工具", type: "tool" as const, summary: "一句话摘要", tags: [] }];
+    const prompt = reasonPrompt({ material, extraction: null, sources: [], similar, existingTags: [], scenarios });
+    expect(prompt).toMatch(/overlap/);
+    expect(prompt).toMatch(/none|duplicate|upgrade|superseded|complement/);
+    expect(prompt).toMatch(/不超过 80 字/);
+    expect(prompt).toMatch(/严禁引用候选列表以外的编号/);
+  });
+
+  it("tells the model overlap must be none/null when there are no similar candidates", () => {
+    const prompt = reasonPrompt({ material, extraction: null, sources: [], similar: [], existingTags: [], scenarios });
+    expect(prompt).toMatch(/overlap\.relation 必须填 none/);
+    expect(prompt).toMatch(/overlap\.target 必须为 null/);
+  });
+
   it("forbids guessing source facts: only fill a field the sources explicitly state", () => {
     const prompt = reasonPrompt({ material, extraction: null, sources: [], similar: [], existingTags: [], scenarios });
     expect(prompt).toMatch(/source_facts/);
