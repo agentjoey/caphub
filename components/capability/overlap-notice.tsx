@@ -47,6 +47,10 @@ export function OverlapNotice({
     try {
       const result = await supersedeOverlapTargetAction(id);
       if (result.ok) {
+        // The server action clears this card's own overlap.relation atomically with marking the
+        // other card superseded (same DB transaction), so dismiss immediately here too rather
+        // than waiting on router.refresh()'s round trip — same reasoning as ignore() below.
+        setDismissed(true);
         setState("idle");
         router.refresh();
         return;

@@ -36,13 +36,24 @@ describe("OverlapNotice", () => {
     expect(screen.getByRole("button", { name: "把 TOL-0009 标为被本卡替代" })).toBeTruthy();
   });
 
-  it("marks the other card superseded without touching this card's own lock token", async () => {
+  it("marks the other card superseded without touching this card's own lock token, and dismisses the notice immediately", async () => {
     supersedeOverlapTargetAction.mockResolvedValue({ ok: true, updatedAt: "2026-09-19T00:00:05.000Z" });
     render(<OverlapNotice id="cab_1" updatedAt={T} overlap={overlap} />);
     fireEvent.click(screen.getByRole("button", { name: "把 TOL-0009 标为被本卡替代" }));
     await waitFor(() => expect(supersedeOverlapTargetAction).toHaveBeenCalledOnce());
     expect(supersedeOverlapTargetAction).toHaveBeenCalledWith("cab_1");
     await waitFor(() => expect(refresh).toHaveBeenCalled());
+    // The action resolves this card's own overlap in the same DB transaction as marking the
+    // other card superseded, so the notice must not keep nagging once it succeeds.
+    await waitFor(() => expect(screen.queryByText("疑似与 TOL-0009 重复 · 同类工具")).toBeNull());
+  });
+
+  it("keeps the notice visible when the other card's status write fails (conflict)", async () => {
+    supersedeOverlapTargetAction.mockResolvedValue({ ok: false, reason: "CONFLICT", message: "已在别处处理" });
+    render(<OverlapNotice id="cab_1" updatedAt={T} overlap={overlap} />);
+    fireEvent.click(screen.getByRole("button", { name: "把 TOL-0009 标为被本卡替代" }));
+    await waitFor(() => expect(screen.getByText("已在别处处理")).toBeTruthy());
+    expect(screen.getByText("疑似与 TOL-0009 重复 · 同类工具")).toBeTruthy();
   });
 
   it("ignoring dismisses the notice and adopts the new lock token", async () => {

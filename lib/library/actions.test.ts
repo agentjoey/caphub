@@ -335,18 +335,36 @@ describe("supersedeOverlapTarget", () => {
     expect(calls.length).toBe(0);
   });
 
-  it("marks the other card superseded by this one, without touching this card's own row", async () => {
+  it("marks the other card superseded by this one, and clears this card's own overlap relation in the same transaction", async () => {
     const { pool, calls } = fakePool((t) =>
       t.startsWith("SELECT overlap") ? { rows: [{ overlap: { relation: "duplicate", target: "TOL-0009", reason: "same tool" } }] }
       : t.startsWith("SELECT id FROM caphub_v2.capabilities WHERE serial") ? { rows: [{ id: "cab_2" }] }
-      : t.startsWith("UPDATE caphub_v2.capabilities") ? { rows: [{ updated_at: new Date(T) }] }
+      : t.startsWith("UPDATE caphub_v2.capabilities SET status = 'superseded'") ? { rows: [{ updated_at: new Date(T) }] }
+      : t.startsWith("UPDATE caphub_v2.capabilities SET overlap") ? { rows: [] }
       : { rows: [] });
     const r = await supersedeOverlapTarget(pool, { id: "cab_1" });
     expect(r).toEqual({ ok: true, updatedAt: T });
-    const upd = calls.find((c) => c.text.startsWith("UPDATE caphub_v2.capabilities"))!;
-    expect(upd.text).toMatch(/status = 'superseded'/);
-    expect(upd.values).toEqual(["cab_2", "cab_1", "same tool"]);
+    const statusUpd = calls.find((c) => c.text.startsWith("UPDATE caphub_v2.capabilities SET status = 'superseded'"))!;
+    expect(statusUpd.values).toEqual(["cab_2", "cab_1", "same tool"]);
     expect(calls.some((c) => c.text.includes("FOR UPDATE"))).toBe(true);
+    const overlapUpd = calls.find((c) => c.text.startsWith("UPDATE caphub_v2.capabilities SET overlap"))!;
+    expect(overlapUpd.text).toMatch(/jsonb_set\(overlap, '\{relation\}', '"none"'\)/);
+    expect(overlapUpd.values).toEqual(["cab_1"]);
+    // Both writes must happen inside the same tx() (BEGIN..COMMIT), never as two independent pool calls.
+    expect(calls[0].text).toBe("BEGIN");
+    expect(calls[calls.length - 1].text).toBe("COMMIT");
+  });
+
+  it("leaves this card's overlap untouched (and does not clear it) when the other card's status write fails", async () => {
+    const { pool, calls } = fakePool((t) =>
+      t.startsWith("SELECT overlap") ? { rows: [{ overlap: { relation: "duplicate", target: "TOL-0009", reason: "same tool" } }] }
+      : t.startsWith("SELECT id FROM caphub_v2.capabilities WHERE serial") ? { rows: [{ id: "cab_2" }] }
+      : t.startsWith("UPDATE caphub_v2.capabilities SET status = 'superseded'") ? { rows: [] } // simulates the write failing/conflicting
+      : t.startsWith("SELECT 1") ? { rows: [{ "?column?": 1 }] } // missingOrConflict's probe finds the target row still there
+      : { rows: [] });
+    const r = await supersedeOverlapTarget(pool, { id: "cab_1" });
+    expect(r).toMatchObject({ ok: false, reason: "CONFLICT" });
+    expect(calls.some((c) => c.text.startsWith("UPDATE caphub_v2.capabilities SET overlap"))).toBe(false);
   });
 
   it("rejects a source card with no overlap finding", async () => {

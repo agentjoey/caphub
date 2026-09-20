@@ -306,6 +306,20 @@ export function supersedeOverlapTarget(pool: Pool, input: { id: string }, locale
       `UPDATE caphub_v2.capabilities SET status = 'superseded', superseded_by = $2, status_at = now(), status_note = $3, updated_at = now()
        WHERE id = $1 RETURNING updated_at`,
       [target.id, input.id, overlap.reason || null]);
-    return { ok: true, updatedAt: iso(r.rows[0].updated_at) };
+    const row = r.rows[0];
+    // The FOR UPDATE lock above should make this unreachable in practice (nothing else can
+    // delete/rewrite the target row concurrently), but guard it anyway rather than dereference
+    // an absent row -- and, crucially, skip clearing this card's own overlap below when it does
+    // happen, so a failed write to the other card can never leave this one silently un-nagging.
+    if (!row) return missingOrConflict(db, target.id, locale);
+    // Same transaction as the write above (ruling, fix round 1): resolving this card's own
+    // overlap notice is the human's confirmation that they acted on it, so it must land
+    // atomically with the other card actually being marked superseded -- never one without the
+    // other. Only `relation` is cleared; `target`/`reason` are left as an audit trail of what was
+    // resolved, which costs nothing extra here (jsonb_set touches one key).
+    await db.query(
+      `UPDATE caphub_v2.capabilities SET overlap = jsonb_set(overlap, '{relation}', '"none"') WHERE id = $1`,
+      [input.id]);
+    return { ok: true, updatedAt: iso(row.updated_at) };
   });
 }
