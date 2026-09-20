@@ -14,7 +14,10 @@
 2. **只提示，不自动生效**：模型给出关系与理由，**不动旧卡**。Human 在详情页或 Telegram 确认后，旧卡才被标记。
 3. **有效性状态**：`active`（有效，默认）/ `deprecated`（失效）/ `superseded`（被替代，记录替代者）。能力库**默认隐藏**非 active 的卡，提供「含失效」开关筛选出来；记录永远保留，不删除。手工也能直接把一张卡置为失效。
 4. **深度分析**：Human 手工触发，彻底档（预算 8 次调用 / 400k tokens）：先由 DeepSeek 规划 4–6 条检索式 → Tavily 多路检索（官方文档、仓库、讨论区、对比文章）→ DeepSeek 分两段综合。产出结构化的架构、技术实现、适用场景、真实案例、用户反馈与风险，存为详情页独立版块。web 与 Telegram 都能触发，完成后推送。
-5. **不在本期**：自动替代、定期重新比对、深度分析的自动刷新、把深度分析结果并入摘要或评分。
+5. **深度分析的产出形态**（Human 追加）：产出必须是**可扫读的结构化短句**，不是大段文章。模型输出受长度约束：每节先给一句 ≤ 80 字的结论，再给 3–5 条 ≤ 40 字的要点；案例与口碑是条目数组且每条标注来源下标；不允许整段散文。UI 按可折叠分区呈现，顶部一条「一句话结论 + 最适合场景 + 最大风险 + 来源数」的摘要条，默认只展开第一节，手机上单栏。
+6. **深度分析标识**（Human 追加）：做过深度分析的卡在列表行、详情页标题旁、Telegram 卡片上都带一个标识（🔬 已深挖），能力库可按「已深度分析」筛选。
+
+7. **不在本期**：自动替代、定期重新比对、深度分析的自动刷新、把深度分析结果并入摘要或评分。
 
 ## 需要 Human 授权
 
@@ -86,7 +89,15 @@ CREATE UNIQUE INDEX analysis_runs_one_active_deep
 - [ ] `runDeepAnalysis(deps, lease, signal)`：
   1. plan：DeepSeek 结构化输出 4–6 条检索式（覆盖官方文档 / 仓库 / 讨论区与口碑 / 同类对比），记为 `plan` step；
   2. search：逐条 Tavily 检索（≤ 6 次），每次记 `search` step，内容截断沿用既有上限；
-  3. synthesize：DeepSeek 两段综合（先事实归并，再成文），记 `synthesize` step，输出 `DeepAnalysis`：`architecture`、`implementation`、`use_cases[]`、`cases[]`（真实案例，带来源）、`feedback`（口碑与争议）、`risks[]`、`sources[]`（标题 + 链接）。
+  3. synthesize：DeepSeek 两段综合（先事实归并，再成文），记 `synthesize` step，输出 `DeepAnalysis`。
+- [ ] `DeepAnalysis` 的 schema 必须强制「可扫读」（设计决定 5），用长度上限把散文挡在外面：
+  - `headline`：≤ 40 字的一句话结论；
+  - `architecture` / `implementation`：`{ summary ≤ 80 字, points: 3–5 条，每条 ≤ 40 字 }`；
+  - `use_cases`：3–5 条 `{ title ≤ 20 字, detail ≤ 60 字 }`；
+  - `cases`：0–4 条 `{ title ≤ 30 字, detail ≤ 60 字, source: sources 的下标 }`，没有公开案例就给空数组；
+  - `feedback`：`{ positive: 0–3 条 ≤ 40 字, negative: 0–3 条 ≤ 40 字 }`；
+  - `risks`：2–4 条，每条 ≤ 50 字；
+  - `sources`：`{ title, url }` 列表，`cases` 的 `source` 必须落在这个列表内。
 - [ ] 预算：8 次调用 / 400k tokens，超出即失败并记原因；单次运行整体超时 5 分钟。
 - [ ] 结论必须能对上来源：`cases`/`feedback` 的每一项要么带 `sources[]` 下标，要么明说「未找到公开案例」。prompt 里写死这条。
 - [ ] 队列：`RunQueue` 支持按 `kind` 取任务；worker tick 先处理普通分析，再处理深度分析（同一租约机制，深度分析租约 6 分钟）。
@@ -98,7 +109,15 @@ CREATE UNIQUE INDEX analysis_runs_one_active_deep
 **Files:** `lib/library/actions.ts`、`app/actions.ts`、`app/library/[id]/page.tsx`、新增 `components/capability/deep-analysis.tsx`、`lib/telegram/{format,decide,router,notify}.ts`
 
 - [ ] `requestDeepAnalysis(pool, { captureId }, locale)`：仅对 `verdict='keep'` 且未删除的卡；已有进行中的深度分析 → CONFLICT（沿用唯一索引 23505 处理）；入队 `kind='deep'`。
-- [ ] 详情页新增「深度分析」版块：未生成时显示按钮与一句成本说明（约 6–8 次检索与分析调用）；进行中显示状态；失败显示原因与重试；完成后按 架构 / 技术实现 / 适用场景 / 案例 / 口碑与争议 / 风险 / 来源 分区渲染，并标注「依据 X 时的卡片内容」。
+- [ ] 详情页新增「深度分析」版块：未生成时显示按钮与一句成本说明（约 6–8 次检索与分析调用）；进行中显示状态；失败显示原因与重试。
+- [ ] 完成后的呈现（设计决定 5，重点是别糊一大片字）：
+  - 顶部摘要条：`headline` + 三个 chip（最适合场景取 `use_cases[0].title`、最大风险取 `risks[0]` 截断、来源数）；
+  - 六个可折叠分区（架构 / 技术实现 / 适用场景 / 案例 / 口碑与争议 / 风险），每节标题旁给条目数，默认只展开「架构」；
+  - 每节先显示 `summary` 再列要点，要点用列表不用段落；案例与口碑的每条末尾带来源角标 `[1]`，点角标跳到来源；
+  - 来源列表折叠在最后，显示「标题 · 域名」；
+  - 空字段整节不渲染（例如没有公开案例就不显示案例节，而不是显示空标题）；
+  - 底部一行小字：依据 X 时的卡片内容；手机上单栏、分区全部默认折叠。
+- [ ] 标识（设计决定 6）：`deep_analysis IS NOT NULL` 的卡在列表行与详情页标题旁显示 🔬 已深挖徽标，Telegram 卡片加一行 `🔬 已深挖`；能力库新增「已深度分析」筛选开关（与「含失效」并列）。
 - [ ] Telegram：卡片增加 `🔬 深度分析` 按钮（callback `da`），触发后回执「已排队」；完成后推送一条摘要（架构一句话 + 适用场景 + 风险要点 + 详情链接），全文只在 web 看。
 - [ ] `/help` 与命令说明同步更新。
 - [ ] 测试：触发的合法性与冲突、UI 三态渲染、Telegram 按钮与推送文案、深度分析结果为空字段时的降级渲染。
@@ -112,5 +131,5 @@ CREATE UNIQUE INDEX analysis_runs_one_active_deep
 ## Self-review
 
 - AJ-295：向量候选（T1）、关系判定与 schema（T1）、人工确认与状态（T2）、默认隐藏与筛选（T2）。
-- AJ-299：管线与预算（T3）、触发与展示、Telegram（T4）、成本记录（T5）。
+- AJ-299：管线与预算（T3）、schema 层的可扫读约束（T3）、折叠式呈现与摘要条（T4）、已深挖徽标与筛选（T4）、Telegram（T4）、成本记录（T5）。
 - 风险：模型引用不存在的编号（schema 限定候选集 + 重试）；深度分析成本失控（预算 + 唯一索引 + 手工触发）；状态写的是另一张卡（T2 明确要求读对方锁令牌）；`analysis_runs_one_active` 若未带 `kind` 条件会挡住深度分析入队（T1 明确检查）。
