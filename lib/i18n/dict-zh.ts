@@ -226,6 +226,7 @@ export const dictZh = {
     reviewInProgress: "复核已在进行中",
     progressInvalid: "进度状态不合法",
     progressLinkInvalid: "链接需以 http:// 或 https:// 开头",
-    progressNotReference: "只有参考自研的卡片可以记录进度"
+    progressNotReference: "只有参考自研的卡片可以记录进度",
+    progressNotKept: "只有已保留的卡片可以记录进度"
   }
 } as const;

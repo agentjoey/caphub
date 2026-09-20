@@ -173,7 +173,11 @@ describe("setProgress", () => {
     expect(upd.text).toMatch(/updated_at = now\(\)/);
     expect(upd.text).toMatch(/date_trunc\('milliseconds', updated_at\) = \$2::timestamptz/);
     expect(upd.text).toMatch(/usage = 'reference'/);
-    expect(upd.text).not.toMatch(/verdict/);
+    expect(upd.text).toMatch(/verdict = 'keep'/);
+    // SET touches only progress/progress_link/progress_at/updated_at — `verdict` only appears
+    // in the WHERE guard, never assigned.
+    const setClause = upd.text.slice(upd.text.indexOf("SET"), upd.text.indexOf("WHERE"));
+    expect(setClause).not.toMatch(/verdict\s*=/);
     expect(upd.values).toEqual(["cab_1", T, "building", "https://github.com/joey/thing"]);
   });
 
@@ -205,7 +209,7 @@ describe("setProgress", () => {
   });
 
   it("returns CONFLICT when the row moved on, NOT_FOUND when it is gone", async () => {
-    const conflict = fakePool((t) => t.startsWith("SELECT usage") ? { rows: [{ usage: "reference" }] }
+    const conflict = fakePool((t) => t.startsWith("SELECT usage") ? { rows: [{ usage: "reference", verdict: "keep" }] }
       : t.startsWith("SELECT 1") ? { rows: [{ "?column?": 1 }] } : { rows: [] });
     expect(await setProgress(conflict.pool, { id: "cab_1", expectedUpdatedAt: T, progress: "done" }))
       .toMatchObject({ ok: false, reason: "CONFLICT", message: "已在别处处理" });
@@ -216,9 +220,20 @@ describe("setProgress", () => {
   });
 
   it("refuses an integrate card instead of reporting a phantom conflict", async () => {
-    const { pool } = fakePool((t) => t.startsWith("SELECT usage") ? { rows: [{ usage: "integrate" }] } : { rows: [] });
+    const { pool } = fakePool((t) => t.startsWith("SELECT usage") ? { rows: [{ usage: "integrate", verdict: "keep" }] } : { rows: [] });
     expect(await setProgress(pool, { id: "cab_1", expectedUpdatedAt: T, progress: "done" }))
       .toMatchObject({ ok: false, reason: "INVALID", message: "只有参考自研的卡片可以记录进度" });
+  });
+
+  // Regression: a discarded reference card must not be able to sit at 'building'/'done'/etc — a
+  // discard should retire it from self-build tracking. The WHERE guard's AND verdict = 'keep'
+  // makes the UPDATE miss, and this ambiguity-resolution path must report it as INVALID (a
+  // deliberate refusal), not CONFLICT (which would suggest retrying after a reload helps).
+  it("refuses a discarded reference card instead of reporting a phantom conflict", async () => {
+    const { pool, calls } = fakePool((t) => t.startsWith("SELECT usage") ? { rows: [{ usage: "reference", verdict: "discard" }] } : { rows: [] });
+    expect(await setProgress(pool, { id: "cab_1", expectedUpdatedAt: T, progress: "building" }))
+      .toMatchObject({ ok: false, reason: "INVALID", message: "只有已保留的卡片可以记录进度" });
+    expect(calls.some((c) => c.text.startsWith("UPDATE caphub_v2.capabilities SET progress"))).toBe(true);
   });
 
   it("speaks English when asked", async () => {

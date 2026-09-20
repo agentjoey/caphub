@@ -221,6 +221,7 @@ export const dictEn: Dict = {
     reviewInProgress: "Review already in progress",
     progressInvalid: "Invalid progress state",
     progressLinkInvalid: "Link must start with http:// or https://",
-    progressNotReference: "Only reference cards track self-build progress"
+    progressNotReference: "Only reference cards track self-build progress",
+    progressNotKept: "Only kept cards track progress"
   }
 };

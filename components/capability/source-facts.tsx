@@ -1,8 +1,16 @@
 import type { SourceFacts as SourceFactsData } from "../../lib/analysis/card";
 import { format, getDict, intlLocale, type Locale } from "../../lib/i18n";
+import { safeHttpUrl } from "../../lib/library/safe-url";
 
+/**
+ * `url` is model-supplied (source_facts.repo_url/homepage) and this repo's zod schema accepts
+ * any `z.string().url()` value, including `javascript:`/`data:` — only render an anchor when it
+ * parses as http/https, otherwise fall back to plain text (see safeHttpUrl).
+ */
 function LinkValue({ url }: { url: string }) {
-  return <a href={url} target="_blank" rel="noreferrer">{url}</a>;
+  const safe = safeHttpUrl(url);
+  if (!safe) return <>{url}</>;
+  return <a href={safe} target="_blank" rel="noreferrer">{url}</a>;
 }
 
 /**

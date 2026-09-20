@@ -139,17 +139,23 @@ export async function setProgress(
   if (!isProgress(input.progress)) return invalid(dict.progressInvalid);
   const link = normalizeProgressLink(input.link);
   if (link === undefined) return invalid(dict.progressLinkInvalid);
+  // verdict = 'keep' guards against a discarded reference card sitting at a progress other than
+  // its initial 'todo' — a discard should retire the card from self-build tracking, but nothing
+  // else resets `progress`, so without this a discarded card could otherwise be pushed to
+  // 'building' and then never show up (or wrongly keep showing up) in the 待自研 tile / `/todo`.
   const r = await pool.query<{ updated_at: Date }>(
     `UPDATE caphub_v2.capabilities SET progress = $3, progress_link = $4, progress_at = now(), updated_at = now()
-     WHERE id = $1 AND date_trunc('milliseconds', updated_at) = $2::timestamptz AND deleted_at IS NULL AND usage = 'reference'
+     WHERE id = $1 AND date_trunc('milliseconds', updated_at) = $2::timestamptz AND deleted_at IS NULL AND usage = 'reference' AND verdict = 'keep'
      RETURNING updated_at`,
     [input.id, input.expectedUpdatedAt, input.progress, link]);
   if (r.rows[0]) return { ok: true, updatedAt: iso(r.rows[0].updated_at) };
-  // The `usage = 'reference'` guard above makes a miss ambiguous, so say which it was instead
-  // of reporting a phantom "changed elsewhere" for a card that simply has no progress to track.
-  const row = (await pool.query<{ usage: string }>(
-    "SELECT usage FROM caphub_v2.capabilities WHERE id = $1 AND deleted_at IS NULL", [input.id])).rows[0];
+  // The `usage = 'reference' AND verdict = 'keep'` guard above makes a miss ambiguous, so say
+  // which it was instead of reporting a phantom "changed elsewhere" for a card that simply has
+  // no progress to track.
+  const row = (await pool.query<{ usage: string; verdict: string }>(
+    "SELECT usage, verdict FROM caphub_v2.capabilities WHERE id = $1 AND deleted_at IS NULL", [input.id])).rows[0];
   if (row && row.usage !== "reference") return invalid(dict.progressNotReference);
+  if (row && row.verdict !== "keep") return invalid(dict.progressNotKept);
   return missingOrConflict(pool, input.id, locale);
 }
 

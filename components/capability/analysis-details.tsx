@@ -1,5 +1,6 @@
 import type { CapabilityDetail } from "../../lib/library/queries";
 import { runStateLabel, errorLabel } from "../../lib/library/labels";
+import { safeHttpUrl } from "../../lib/library/safe-url";
 import { getDict, type Locale } from "../../lib/i18n";
 
 function seconds(durationMs: number): string {
@@ -49,14 +50,29 @@ export function AnalysisDetails({ detail, locale = "zh" }: { detail: CapabilityD
       )}
       {detail.sources.length > 0 && (
         <ul className="analysis-sources">
-          {detail.sources.map((source, index) => (
-            <li key={`${index}-${source.url}`}>
-              <a href={source.url} target="_blank" rel="noreferrer" title={`${source.title} · ${source.url}`}>
+          {detail.sources.map((source, index) => {
+            // source.url comes straight from a stored search-step result (unvalidated JSON) —
+            // same class of risk as source_facts.repo_url/homepage: only render an anchor when
+            // it parses as http/https, otherwise fall back to plain text (see safeHttpUrl).
+            const safe = safeHttpUrl(source.url);
+            const body = (
+              <>
                 <span className="analysis-sources__title">{source.title}</span>
                 <span className="analysis-sources__domain"> · {domain(source.url)}</span>
-              </a>
-            </li>
-          ))}
+              </>
+            );
+            return (
+              <li key={`${index}-${source.url}`}>
+                {safe ? (
+                  <a href={safe} target="_blank" rel="noreferrer" title={`${source.title} · ${source.url}`}>
+                    {body}
+                  </a>
+                ) : (
+                  <span title={`${source.title} · ${source.url}`}>{body}</span>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
       <dl className="analysis-ids">

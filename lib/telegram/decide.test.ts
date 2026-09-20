@@ -48,6 +48,8 @@ function routedPool(opts: {
   progressRow?: { updated_at: Date } | null;
   /** Only consulted when `progressRow` is `null`, to distinguish NOT_FOUND/wrong-usage from CONFLICT. */
   progressUsage?: string | null;
+  /** Only consulted when `progressRow` is `null` and `progressUsage` is `"reference"`, to distinguish a discarded card from CONFLICT. Defaults to `"keep"`. */
+  progressVerdict?: string;
 }) {
   const candidate = opts.candidate === undefined ? candidateRow() : opts.candidate;
   const candidateAfter = opts.candidateAfterMutation === undefined ? candidate : opts.candidateAfterMutation;
@@ -67,8 +69,10 @@ function routedPool(opts: {
     if (text.startsWith("UPDATE caphub_v2.capabilities SET progress")) {
       return opts.progressRow === null ? { rows: [] } : { rows: [opts.progressRow ?? { updated_at: new Date(T2) }] };
     }
-    if (text.startsWith("SELECT usage FROM caphub_v2.capabilities")) {
-      return { rows: opts.progressUsage === undefined ? [{ usage: "reference" }] : opts.progressUsage === null ? [] : [{ usage: opts.progressUsage }] };
+    if (text.startsWith("SELECT usage, verdict FROM caphub_v2.capabilities")) {
+      if (opts.progressUsage === null) return { rows: [] };
+      const usage = opts.progressUsage === undefined ? "reference" : opts.progressUsage;
+      return { rows: [{ usage, verdict: opts.progressVerdict ?? "keep" }] };
     }
     if (text.includes("INSERT INTO caphub_v2.tags")) return { rows: [] };
     if (text.startsWith("UPDATE caphub_v2.capabilities SET notified_at = NULL")) return { rows: [], rowCount: 1 };
@@ -238,6 +242,25 @@ describe("handleCallback", () => {
     expect(answered[0]).toMatchObject({ text: "已在别处处理" });
     expect((edited[0] as { replyMarkup?: unknown }).replyMarkup).toEqual({ inline_keyboard: [] });
     expect((edited[0] as { text: string }).text).toContain("已保留");
+  });
+
+  it("conflict: a stale progress-* press re-renders as a todo card (with the 进度 line), not a verdict card", async () => {
+    // Regression: the pre-dispatch stale check used to always call editToCurrentState, which
+    // rewrites the message into a verdict card (e.g. "已保留 · SKL-…") — losing the 进度 line —
+    // even for a /todo card's progress-building/-done/-dropped buttons. It must use
+    // editTodoToCurrentState for those actions instead, same as handleProgress's own CONFLICT
+    // branch does.
+    const { pool } = routedPool({
+      candidate: candidateRow({ usage: "reference", verdict: "keep", progress: "building", updatedAt: new Date(T2) })
+    });
+    const { api, answered, edited } = fakeApi();
+    const result = await handleCallback(deps(pool, api), cb({ action: "progress-building", updatedAt: T }));
+
+    expect(result).toEqual({ outcome: "conflict", capabilityId: "cab_1" });
+    expect(answered[0]).toMatchObject({ text: "已在别处处理" });
+    expect((edited[0] as { replyMarkup?: unknown }).replyMarkup).toEqual({ inline_keyboard: [] });
+    expect((edited[0] as { text: string }).text).toContain("进度：自研中");
+    expect((edited[0] as { text: string }).text).not.toContain("已保留 ·");
   });
 
   it("conflict from a DB-level race: decide() itself reports CONFLICT even though the precheck passed", async () => {

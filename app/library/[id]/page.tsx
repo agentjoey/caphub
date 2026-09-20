@@ -11,6 +11,7 @@ import { VerdictBadge } from "../../../components/capability/verdict-badge";
 import { formatDateTime } from "../../../lib/library/format";
 import { errorLabel, typeLabel, usageLabel } from "../../../lib/library/labels";
 import { getCapabilityDetail } from "../../../lib/library/queries";
+import { safeHttpUrl } from "../../../lib/library/safe-url";
 import { displaySerial } from "../../../lib/library/serial";
 import { libraryHref } from "../../../lib/library/search-params";
 import { getRuntime } from "../../../lib/runtime";
@@ -81,7 +82,16 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             <h2 className="panel-title">{dict.detail.howToUse}</h2>
             <PlaybookView playbook={detail.playbook} type={detail.type} locale={locale} />
             {detail.sourceUrl && (
-              <p className="detail-source"><a href={detail.sourceUrl} target="_blank" rel="noreferrer">{detail.sourceUrl}</a></p>
+              // detail.sourceUrl is model-supplied (analysis's source_url) and the zod schema
+              // accepts any z.string().url() value, including javascript:/data: — only render an
+              // anchor when it parses as http/https (see safeHttpUrl).
+              <p className="detail-source">
+                {safeHttpUrl(detail.sourceUrl) ? (
+                  <a href={detail.sourceUrl} target="_blank" rel="noreferrer">{detail.sourceUrl}</a>
+                ) : (
+                  detail.sourceUrl
+                )}
+              </p>
             )}
           </section>
         </div>
@@ -93,7 +103,14 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           />
           <SourceFacts facts={detail.sourceFacts} locale={locale} />
           {detail.usage === "reference" && (
+            // key={detail.updatedAt}: this and DetailActions each seed the optimistic-lock token
+            // into their own useState on mount. They're independent panels that can each bump
+            // capabilities.updated_at (progress save vs. decide/edit/delete), so a router.refresh()
+            // that only changes this prop must remount the component to re-seed fresh state —
+            // otherwise the *other* panel keeps stale-comparing against the token it first mounted
+            // with and spuriously CONFLICTs on its next action.
             <ProgressControl
+              key={detail.updatedAt}
               id={detail.id}
               updatedAt={detail.updatedAt}
               progress={detail.progress}
@@ -102,6 +119,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             />
           )}
           <DetailActions
+            key={detail.updatedAt}
             id={detail.id}
             captureId={detail.captureId}
             updatedAt={detail.updatedAt}

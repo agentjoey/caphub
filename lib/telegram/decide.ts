@@ -164,7 +164,14 @@ export async function handleCallback(deps: HandleCallbackDeps, cb: CallbackDecod
 
     if (candidate.updatedAt.toISOString() !== cb.updatedAt) {
       await safeAnswer(deps, cb, dict.conflict, signal);
-      await runSideEffect(deps, cb, "render-stale-conflict-failed", () => editToCurrentState(deps, cb, candidate, signal));
+      // A stale progress-* press is on a /todo card, not a verdict card — re-rendering it via
+      // editToCurrentState would rewrite it into a verdict card (e.g. "已保留 · SKL-…"), losing
+      // the 进度 line. Mirror handleProgress's own CONFLICT branch and use editTodoToCurrentState
+      // for these actions instead.
+      const isProgressAction = cb.action === "progress-building" || cb.action === "progress-done" || cb.action === "progress-dropped";
+      await runSideEffect(deps, cb, "render-stale-conflict-failed", () =>
+        isProgressAction ? editTodoToCurrentState(deps, cb, candidate, signal) : editToCurrentState(deps, cb, candidate, signal)
+      );
       return { outcome: "conflict", capabilityId: cb.capabilityId };
     }
 
