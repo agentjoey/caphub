@@ -67,6 +67,23 @@ describe("handleMcpRequest", () => {
     expect((await res.json()).error.code).toBe(-32700);
   });
 
+  it("rejects a literal null body with a JSON-RPC error instead of throwing", async () => {
+    const res = await call(null);
+    expect(res.status).not.toBe(500);
+    expect((await res.json()).error.code).toBe(-32600);
+  });
+
+  it("rejects a primitive body with -32600, not -32601", async () => {
+    const body = await (await call(5)).json();
+    expect(body.error.code).toBe(-32600);
+  });
+
+  it("answers a non-initialized notification (e.g. notifications/cancelled) with 202 and no body", async () => {
+    const res = await call({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 1 } });
+    expect(res.status).toBe(202);
+    expect(await res.text()).toBe("");
+  });
+
   it("returns a tool error, not a transport error, when a required argument is missing", async () => {
     const body = await (
       await call({ jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "search_capabilities", arguments: {} } })

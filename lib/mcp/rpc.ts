@@ -150,15 +150,23 @@ function asBusinessError(value: unknown): string | null {
 }
 
 export async function handleMcpRequest(deps: ToolDeps, request: Request): Promise<Response> {
-  let body: JsonRpcRequestBody;
+  let parsed: unknown;
   try {
-    body = await request.json();
+    parsed = await request.json();
   } catch {
     return rpcError(null, -32700, "parse error");
   }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return rpcError(null, -32600, "invalid request");
+  }
+  const body = parsed as JsonRpcRequestBody;
   const { id, method } = body;
 
-  if (method === "notifications/initialized") return new Response(null, { status: 202 });
+  // Notifications carry no id and never get a JSON-RPC response — answering one is a protocol
+  // violation. Real clients send more than notifications/initialized (e.g. notifications/cancelled).
+  if (id === undefined && typeof method === "string" && method.startsWith("notifications/")) {
+    return new Response(null, { status: 202 });
+  }
 
   switch (method) {
     case "initialize":
