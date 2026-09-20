@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { errorLabel } from "../library/labels";
 import { decodeDecision } from "./router";
 import { formatResult, TELEGRAM_MESSAGE_MAX_LEN, type DecidedCardInput, type FailedCardInput, type TodoCardInput } from "./format";
 
@@ -266,6 +267,34 @@ describe("formatResult — todo", () => {
     expect(decodeDecision(kb![0]![1]!.callback_data!)).toEqual({ action: "progress-done", capabilityId: todoBase.id, updatedAt: todoBase.updatedAt });
     expect(decodeDecision(kb![1]![0]!.callback_data!)).toEqual({ action: "progress-dropped", capabilityId: todoBase.id, updatedAt: todoBase.updatedAt });
     expect(kb?.[1]?.[1]?.url).toContain("/library/cab_deadbeefcafef00d");
+  });
+
+  it("keeps four buttons and no failure note for a healthy todo card", () => {
+    const out = formatResult(todoBase);
+    expect(out.replyMarkup?.inline_keyboard.flat()).toHaveLength(4);
+    expect(out.text).not.toContain("上次分析失败");
+  });
+
+  // Controller ruling (M3.5 walkthrough): a failed latest run is a note on the self-build card,
+  // not a replacement for it — but it must still be actionable from Telegram, so the card grows
+  // a fifth button reusing the normal rerun callback (a /todo card always has a capability row,
+  // so it's the "rerun" action, never the capture-id "rerun-capture" variant).
+  it("adds the 上次分析失败 note and a ♻️ 重跑分析 row when the latest run failed", () => {
+    const out = formatResult({ ...todoBase, progress: "building", lastRunError: "INVALID_OUTPUT" });
+    expect(out.text).toContain("进度：自研中");
+    expect(out.text).toContain(`<i>上次分析失败：${errorLabel("INVALID_OUTPUT", "zh")}</i>`);
+    expect(out.text).not.toContain("❌ 分析失败");
+
+    const kb = out.replyMarkup?.inline_keyboard;
+    expect(kb).toHaveLength(3);
+    expect(kb?.flat().map((b) => b.text)).toEqual(["🔨 开始自研", "✅ 已完成", "🚫 放弃", "🔗 去 web", "♻️ 重跑分析"]);
+    expect(decodeDecision(kb![2]![0]!.callback_data!)).toEqual({ action: "rerun", capabilityId: todoBase.id, updatedAt: todoBase.updatedAt });
+  });
+
+  it("notes a failed latest run with no error code without an empty reason", () => {
+    const out = formatResult({ ...todoBase, lastRunError: null });
+    expect(out.text).toContain("<i>上次分析失败</i>");
+    expect(out.replyMarkup?.inline_keyboard.flat()).toHaveLength(5);
   });
 
   it("omits the 评分 line when the card has no score", () => {

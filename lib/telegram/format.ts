@@ -293,7 +293,8 @@ function formatPending(card: DecidedCardInput): FormattedMessage {
 /**
  * Renders a `/todo` self-build card (AJ-298): title, 总结, 场景·标签, 评分 (when present), 进度 —
  * same paragraph layout as {@link formatPending} minus the 建议 line (the card is already kept,
- * there's no suggestion to show), plus a 进度 line and the 开始自研/已完成/放弃/去 web buttons.
+ * there's no suggestion to show), plus a 进度 line and the 开始自研/已完成/放弃/去 web buttons —
+ * and, when the capture's latest analysis run failed, a muted note plus a 重跑分析 button.
  */
 function formatTodo(card: TodoCardInput): FormattedMessage {
   const build = (f: ShrinkableFields) => {
@@ -305,8 +306,9 @@ function formatTodo(card: TodoCardInput): FormattedMessage {
     ];
     const score = scoreLine(card.score, card.scoreReason);
     if (score) paragraphs.push(score);
-    // A failed latest run is a footnote on a self-build card, not a different card: the buttons
-    // below stay, so the owner can still move the card's progress along.
+    // A failed latest run is a footnote on a self-build card, not a different card: the progress
+    // buttons below stay, so the owner can still move the card along — the note only adds a
+    // ♻️ 重跑分析 row so the failure is actionable from Telegram too.
     if (card.lastRunError !== undefined) {
       const reason = errorLabel(card.lastRunError, "zh");
       paragraphs.push(`<i>上次分析失败${reason ? `：${escapeHtml(reason)}` : ""}</i>`);
@@ -326,6 +328,14 @@ function formatTodo(card: TodoCardInput): FormattedMessage {
       ]
     ]
   };
+  // A todo card always has a capability row (that's what `/todo` lists), so its rerun always
+  // encodes the plain "rerun" action with the capability id — the "rerun-capture" variant only
+  // applies to a capture whose first run failed before any capability existed (see formatFailed).
+  if (card.lastRunError !== undefined) {
+    replyMarkup.inline_keyboard.push([
+      { text: "♻️ 重跑分析", callback_data: encodeDecision("rerun", card.id, card.updatedAt) }
+    ]);
+  }
   return { text, replyMarkup };
 }
 

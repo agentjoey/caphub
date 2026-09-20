@@ -112,7 +112,9 @@ describe("runNotifyTick", () => {
     expect(edit.text).not.toContain("❌ 分析失败");
     expect(edit.text).toContain("进度：自研中");
     expect(edit.text).toContain("上次分析失败：模型响应超时");
-    expect(edit.replyMarkup?.inline_keyboard[0]?.map((b) => b.text)).toEqual(["🔨 开始自研", "✅ 已完成"]);
+    expect(edit.replyMarkup?.inline_keyboard.map((row) => row.map((b) => b.text))).toEqual([
+      ["🔨 开始自研", "✅ 已完成"], ["🚫 放弃", "🔗 去 web"], ["♻️ 重跑分析"]
+    ]);
   });
 
   it("falls back to sendMessage when there is no stored receipt message id, and records the new id", async () => {

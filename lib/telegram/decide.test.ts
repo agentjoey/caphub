@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { handleCallback, type CallbackDecoded, type HandleCallbackDeps } from "./decide";
+import { formatResult, type TodoCardInput } from "./format";
+import { decodeDecision } from "./router";
 
 const SCENARIO_ROWS = [{ slug: "coding", label_zh: "编程", label_en: "Coding", keywords: [] }];
 const T = "2026-09-20T00:00:00.000Z";
@@ -160,6 +162,32 @@ describe("handleCallback", () => {
     // the capture is web- or telegram-sourced, or already had a (possibly different) receipt.
     const receipt = calls.find((c) => c.text.startsWith("UPDATE caphub_v2.captures SET telegram_chat_id"));
     expect(receipt?.values).toEqual(["cap_1", "1000", "500"]);
+  });
+
+  // Controller ruling (M3.5 walkthrough): the ♻️ 重跑分析 button a self-build card grows when its
+  // latest run failed must take the SAME path as the failed card's rerun button — no new action.
+  it("reruns: the button a failed-latest-run todo card carries decodes to the ordinary rerun path", async () => {
+    const todo: TodoCardInput = {
+      status: "todo", id: "cab_1", title: "示例标题", type: "skill", summary: "摘要",
+      tags: ["rag"], scenarioLabels: ["编程"], serial: null, score: null, scoreReason: null,
+      progress: "building", lastRunError: "INVALID_OUTPUT", updatedAt: T
+    };
+    const keyboard = formatResult(todo).replyMarkup!.inline_keyboard;
+    expect(keyboard.flat()).toHaveLength(5);
+    const rerunButton = keyboard.flat().find((b) => b.text === "♻️ 重跑分析")!;
+    const decoded = decodeDecision(rerunButton.callback_data!);
+    expect(decoded).toEqual({ action: "rerun", capabilityId: "cab_1", updatedAt: T });
+
+    const { pool, calls } = routedPool({
+      candidate: candidateRow({ verdict: "keep", usage: "reference", progress: "building", runState: "failed", errorCode: "INVALID_OUTPUT" }),
+      rerunCapture: { kind: "image", purged: false, active: false }
+    });
+    const { api, answered } = fakeApi();
+    const result = await handleCallback(deps(pool, api), cb({ ...decoded }));
+
+    expect(result).toEqual({ outcome: "decided", action: "rerun", capabilityId: "cab_1" });
+    expect(answered[0]).toMatchObject({ text: "已重新排队" });
+    expect(calls.some((c) => c.text.startsWith("UPDATE caphub_v2.capabilities SET notified_at = NULL"))).toBe(true);
   });
 
   it("reruns: a failure recording the callback receipt does not fail the rerun", async () => {
