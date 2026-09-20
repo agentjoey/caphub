@@ -3,6 +3,14 @@ import type { Material } from "./material";
 import type { Scenario } from "./scenarios";
 import { scenariosPromptList } from "./scenarios";
 
+/**
+ * Shared scoring rubric wording, used both in the pipeline's `reasonPrompt` (score assigned
+ * alongside the rest of the card, with web sources in hand) and in the score backfill
+ * script's `backfillScorePrompt` (score assigned after the fact, from the card's own text
+ * only). Kept as one string so the two call sites can't drift into inconsistent rubrics.
+ */
+export const SCORE_RUBRIC = "评分标准：成熟度（是否稳定可用）、可复现性（是否有仓库 / 安装路径 / 提示词原文，能不能照着做出来）、对 Joey 的适用度（是否匹配他的实际场景）、与库内已有能力的互补性（是否重复造轮子）。4–5 分表示建议直接整合，1–2 分表示通常该丢弃，3 分是中间地带。";
+
 export function visionPrompt(ocrText: string): string {
   return [
     "你在整理一个个人 agent 能力库。请仔细看这张图片，提取其中关于「能力」（skill、经验、plugin、prompt 等）的信息。",
@@ -36,7 +44,33 @@ export function reasonPrompt(input: {
       `tags 给 1–6 个标签，每个必须是英文小写单词或用连字符连接的短语（如 web-scraping、time-series），不能是中文，不能是空格分隔的多词（"Web Scraping" 不合法，要写成 web-scraping），也不能是 ${RESERVED_TAGS.join("、")} 这类类型/用途词；已有贴切的标签要复用，不要为同一含义新造近义词；` +
       "scenarios 从候选应用场景的 slug 中选出 1–3 个这个能力最可能被用在的应用场景，按贴切程度排列，只能用给出的 slug，不要自造；" +
       "source_url 给最可信的来源链接或 null。",
-    "score 给这个能力对 Joey 的 AI 价值打 1–5 分整数，评分标准：成熟度（是否稳定可用）、可复现性（是否有仓库 / 安装路径 / 提示词原文，能不能照着做出来）、对 Joey 的适用度（是否匹配他的实际场景）、与库内已有能力的互补性（是否重复造轮子）。4–5 分表示建议直接整合，1–2 分表示通常该丢弃，3 分是中间地带。score_reason 用一句不超过 80 字的中文说明打分依据。",
+    `score 给这个能力对 Joey 的 AI 价值打 1–5 分整数，${SCORE_RUBRIC}score_reason 用一句不超过 80 字的中文说明打分依据。`,
     "source_facts 是关于来源的客观事实（repo_url、stars、last_update、license、homepage），只能填写「联网来源」中明确写出的内容；某一项在来源里没有明确出现就留空（不要填、不要猜），禁止推测 star 数与更新时间（last_update）这类你不确定的数字或日期；如果联网来源为空或完全没提到这些事实，source_facts 整体留空对象即可。as_of 填写你依据的来源信息的日期（若来源本身没有日期，可留空）。"
   ].filter(Boolean).join("\n\n");
+}
+
+/**
+ * Prompt for the score backfill script (`scripts/backfill-score.ts`): scores an existing
+ * card from its own stored fields only, with no web search step behind it. Reuses
+ * `SCORE_RUBRIC` verbatim rather than inventing a second rubric, but replaces
+ * `reasonPrompt`'s source-facts instruction (which assumes web sources are in hand) with one
+ * that says explicitly there is no new search here — only a `repo_url` visible in the card's
+ * own `source_url`/`playbook` may be filled; everything else stays empty unless the card text
+ * states it. `as_of` is set by the caller (`finalizeSourceFacts`), not the model, so the
+ * prompt doesn't ask for it.
+ */
+export function backfillScorePrompt(input: {
+  title: string; summary: string; signals: string[]; playbook: unknown; tags: string[]; source_url: string | null;
+}): string {
+  return [
+    "你在给个人 agent 能力库里已经建档的一张卡片补打分。这里没有新的联网搜索，只能依据下面这张卡片自己已有的文字内容判断，不要假设你知道卡片之外的信息。",
+    `标题：${input.title}`,
+    `摘要：${input.summary}`,
+    `价值信号：${input.signals.join("；") || "（无）"}`,
+    `Playbook：${JSON.stringify(input.playbook)}`,
+    `标签：${input.tags.join(", ") || "（无）"}`,
+    `已有来源链接：${input.source_url ?? "（无）"}`,
+    `score 给这个能力对 Joey 的 AI 价值打 1–5 分整数，${SCORE_RUBRIC}score_reason 用一句不超过 80 字的中文说明打分依据。`,
+    "source_facts 是关于来源的客观事实（repo_url、stars、last_update、license、homepage）：因为这里没有联网搜索，只能看到卡片本身的文字，所以只应在「已有来源链接」或 Playbook 里能直接看到仓库地址时才填 repo_url；stars、last_update、license、homepage 除非卡片文字里明确写出，否则一律留空，不要填、不要猜，禁止推测 star 数与更新时间这类你不确定的数字或日期。不要填写 as_of，留空即可。"
+  ].join("\n\n");
 }

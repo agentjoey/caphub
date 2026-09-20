@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { cardSchema, isValidTag } from "./card";
+import { cardSchema, finalizeSourceFacts, isValidTag, scoreResultSchema } from "./card";
 
 const valid = {
   title: "用 Playwright 生成 axe 可访问性报告", type: "skill", summary: "一段摘要",
@@ -162,5 +162,42 @@ describe("cardSchema", () => {
       expect(jsonSchema.properties?.score_reason).toMatchObject({ type: "string", maxLength: 80 });
       expect(jsonSchema.properties?.source_facts).toMatchObject({ type: "object" });
     });
+  });
+});
+
+describe("scoreResultSchema", () => {
+  it("accepts just score/score_reason/source_facts, without the rest of the card", () => {
+    const parsed = scoreResultSchema.parse({ score: 4, score_reason: "有仓库和安装命令", source_facts: {} });
+    expect(parsed).toEqual({ score: 4, score_reason: "有仓库和安装命令", source_facts: {} });
+  });
+
+  it("still enforces score's 1-5 range and score_reason's 80-char cap", () => {
+    expect(() => scoreResultSchema.parse({ score: 0, score_reason: "x", source_facts: {} })).toThrow();
+    expect(() => scoreResultSchema.parse({ score: 3, score_reason: "x".repeat(81), source_facts: {} })).toThrow();
+  });
+});
+
+describe("finalizeSourceFacts", () => {
+  const now = new Date("2026-09-20T12:00:00Z");
+
+  it("sets as_of to today when a fact was filled", () => {
+    expect(finalizeSourceFacts({ repo_url: "https://github.com/a/b" }, now).as_of).toBe("2026-09-20");
+    expect(finalizeSourceFacts({ stars: 10 }, now).as_of).toBe("2026-09-20");
+    expect(finalizeSourceFacts({ license: "MIT" }, now).as_of).toBe("2026-09-20");
+  });
+
+  it("leaves as_of null when no fact was filled", () => {
+    expect(finalizeSourceFacts({}, now).as_of).toBeNull();
+    expect(finalizeSourceFacts({ repo_url: null, stars: null }, now).as_of).toBeNull();
+  });
+
+  it("ignores any as_of the model already set, always recomputing it", () => {
+    expect(finalizeSourceFacts({ as_of: "2020-01-01" }, now).as_of).toBeNull();
+    expect(finalizeSourceFacts({ repo_url: "https://x", as_of: "2020-01-01" }, now).as_of).toBe("2026-09-20");
+  });
+
+  it("preserves the other fields unchanged", () => {
+    const result = finalizeSourceFacts({ repo_url: "https://x", stars: 5, license: "MIT" }, now);
+    expect(result).toEqual({ repo_url: "https://x", stars: 5, license: "MIT", as_of: "2026-09-20" });
   });
 });

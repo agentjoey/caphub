@@ -143,5 +143,21 @@ export function refineCard<T extends { type: CapabilityType; usage: "integrate" 
 export const cardSchema = cardObjectSchema.superRefine(refineCard);
 export type Card = z.infer<typeof cardSchema>;
 
+/** `{ score, score_reason, source_facts }` alone, for the score backfill script's per-card call. */
+export const scoreResultSchema = cardObjectSchema.pick({ score: true, score_reason: true, source_facts: true });
+export type ScoreResult = z.infer<typeof scoreResultSchema>;
+
+/**
+ * Sets `source_facts.as_of` deterministically instead of trusting the model to know today's
+ * date: today (as YYYY-MM-DD) when at least one other fact field was filled, `null` when the
+ * whole object is empty. Used by the score backfill script, which has no web search step and
+ * therefore no source-dated facts to anchor `as_of` to — see prompts.ts's `backfillScorePrompt`.
+ */
+export function finalizeSourceFacts(facts: SourceFacts, now: Date = new Date()): SourceFacts {
+  const filled = facts.repo_url != null || facts.stars != null || facts.last_update != null
+    || facts.license != null || facts.homepage != null;
+  return { ...facts, as_of: filled ? now.toISOString().slice(0, 10) : null };
+}
+
 export const reviewNoteSchema = z.object({ agrees: z.boolean(), points: z.array(z.string().max(300)).max(8) });
 export type ReviewNote = z.infer<typeof reviewNoteSchema>;
