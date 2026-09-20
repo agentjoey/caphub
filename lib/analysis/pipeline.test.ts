@@ -11,13 +11,17 @@ const extraction = { what: "w", visible_text: "", commands: [], prompt_text: nul
 
 type Kind = "image" | "text" | "url";
 
-function deps(kind: Kind, opts: { reasonValue?: unknown; failTagBump?: boolean } = {}) {
+function deps(kind: Kind, opts: { reasonValue?: unknown; failTagBump?: boolean; pinnedType?: string } = {}) {
   const calls: string[] = [];
   const sql: Array<{ text: string; values: unknown[]; client?: boolean }> = [];
+  let reasonPromptSeen = "";
   let released = 0;
   const query = async (text: string, values: unknown[] = []) => {
     sql.push({ text, values });
     if (opts.failTagBump && text.includes("INSERT INTO caphub_v2.tags")) throw Object.assign(new Error("duplicate"), { code: "21000" });
+    if (text.startsWith("SELECT type FROM caphub_v2.capabilities WHERE capture_id")) {
+      return { rows: opts.pinnedType ? [{ type: opts.pinnedType }] : [] };
+    }
     if (text.startsWith("SELECT kind, object_key")) {
       return {
         rows: [{
@@ -54,11 +58,14 @@ function deps(kind: Kind, opts: { reasonValue?: unknown; failTagBump?: boolean }
     objects: { get: async () => new Uint8Array([1]) } as never,
     vision: { provider: "minimax", model: "m", invoke: async () => { calls.push("vision"); return { value: extraction, usage: { inputTokens: 1, outputTokens: 1 } }; } },
     search: { provider: "tavily", model: "s", search: async () => { calls.push("search"); return { value: { sources: [] }, usage: { inputTokens: 0, outputTokens: 0 } }; } },
-    reason: { provider: "deepseek", model: "d", invoke: async () => { calls.push("reason"); return { value: opts.reasonValue ?? card, usage: { inputTokens: 1, outputTokens: 1 } }; } },
+    reason: {
+      provider: "deepseek", model: "d",
+      invoke: async (input: { prompt: string }) => { calls.push("reason"); reasonPromptSeen = input.prompt; return { value: opts.reasonValue ?? card, usage: { inputTokens: 1, outputTokens: 1 } }; }
+    },
     material: { ocr: async () => "", fetch: kind === "url" ? (async () => new Response("hello world", { status: 200, headers: { "content-type": "text/plain" } })) as typeof fetch : undefined },
     threshold: 0.8
   };
-  return { d, calls, sql, released: () => released };
+  return { d, calls, sql, released: () => released, reasonPrompt: () => reasonPromptSeen };
 }
 
 describe("runPipeline", () => {
@@ -172,6 +179,27 @@ describe("runPipeline", () => {
       runPipeline(d, { runId: "run_budget", captureId: "cap_budget", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal)
     ).rejects.toMatchObject({ code: "BUDGET" });
     expect(calls).toEqual(["search"]);
+  });
+
+  it("passes a human-pinned type into the reason prompt as a hard constraint", async () => {
+    const { d, reasonPrompt } = deps("text", { pinnedType: "experience" });
+    await runPipeline(d, { runId: "run_pinned", captureId: "cap_pinned", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
+    expect(reasonPrompt()).toMatch(/硬性约束/);
+    expect(reasonPrompt()).toContain("experience");
+  });
+
+  it("forces the stored type back to the human-pinned value even when the model disobeys", async () => {
+    const { d, sql } = deps("text", { pinnedType: "experience", reasonValue: card }); // model returns 'prompt', not the pinned 'experience'
+    await runPipeline(d, { runId: "run_pinned2", captureId: "cap_pinned2", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
+    const insert = sql.find((q) => q.text.includes("INSERT INTO caphub_v2.capabilities"))!;
+    expect(insert.values).toContain("experience");
+    expect(insert.values).not.toContain("prompt");
+  });
+
+  it("does not add a pinned-type constraint when no capability is human-typed yet", async () => {
+    const { d, reasonPrompt } = deps("text");
+    await runPipeline(d, { runId: "run_unpinned", captureId: "cap_unpinned", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
+    expect(reasonPrompt()).not.toMatch(/硬性约束/);
   });
 });
 

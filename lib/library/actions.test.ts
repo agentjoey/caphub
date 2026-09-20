@@ -59,6 +59,7 @@ describe("editSuggestion", () => {
     const upd = calls.find((c) => c.text.startsWith("UPDATE caphub_v2.capabilities"))!;
     expect(upd.values).toContainEqual(["web-scraping"]);
     expect(upd.text).toMatch(/verdict = 'keep'/);
+    expect(upd.text).toMatch(/type_by = 'human'/);
     expect(upd.text).toMatch(LOCK_CLAUSE);
     expect(upd.text).toMatch(/serial = coalesce\(serial, nextval\('caphub_v2\.capability_serial'\)\)/);
   });

@@ -7,11 +7,17 @@
  *
  * There is no `verdict_by = 'human'` skip. That column turns 'human' whenever the owner presses
  * 保留/丢弃 on a card (see lib/library/actions.ts's `decide`) — it records that a verdict was made
- * by a human, not that a human edited the card's `type`. The schema has no column that records a
- * hand-correction of `type` specifically, so `verdict_by` can't be used as a proxy for one: a
- * dry-run against production skipped 6 of 15 cards this way, including the very card the owner
- * asked to retype. The safety net here is the dry-run -> human review -> `--apply` flow below, not
- * a per-row skip the schema can't actually express.
+ * by a human, not that a human edited the card's `type`. A dry-run against production skipped 6
+ * of 15 cards this way, including the very card the owner asked to retype, so that skip was
+ * removed.
+ *
+ * There IS a `type_by = 'human'` skip. Migration 008 added that column specifically to record a
+ * hand-correction of `type` (改建议; see lib/library/actions.ts's `editSuggestion`, and the
+ * pipeline's own rerun-honors-pinned-type enforcement in lib/analysis/pipeline.ts) — this is the
+ * correct signal `verdict_by` never was, because it's about `type` itself rather than a verdict.
+ * A card with `type_by = 'human'` is skipped and reported separately below, not silently folded
+ * into "unchanged", so the owner can see which cards were left alone because a human already
+ * decided their type.
  *
  * A proposed change that crosses the `experience` boundary (experience -> non-experience, or
  * non-experience -> experience) is also skipped rather than written: `experience` is the only
@@ -89,7 +95,7 @@ export function applyTypeReclassification(pool: Pick<Pool, "query">, id: string,
 
 export interface ReclassifyRow {
   id: string; title: string; summary: string; signals: string[]; playbook: unknown; tags: string[];
-  type: CapabilityType; verdictBy: "auto" | "human" | null; serial: number | null;
+  type: CapabilityType; verdictBy: "auto" | "human" | null; typeBy: "auto" | "human"; serial: number | null;
 }
 
 export interface NeedsManualHandling {
@@ -101,10 +107,16 @@ export interface ReclassifyChange {
   label: string; before: CapabilityType; after: CapabilityType;
 }
 
+/** A card left alone because a human already pinned its `type` (`type_by = 'human'`). */
+export interface SkippedHumanTyped {
+  capabilityId: string; title: string; type: CapabilityType;
+}
+
 export interface ReclassifyResult {
-  candidates: number; changed: number; unchanged: number; failed: number;
+  candidates: number; changed: number; unchanged: number; failed: number; skippedHumanTyped: number;
   changes: ReclassifyChange[];
   needsManualHandling: NeedsManualHandling[];
+  skipped: SkippedHumanTyped[];
 }
 
 /** True when a proposed type change crosses the `experience` boundary in either direction. */
@@ -125,7 +137,7 @@ export async function runReclassify(
   pool: Pick<Pool, "query">, call: ReclassifyCall, apply: boolean, log: (o: Record<string, unknown>) => void
 ): Promise<ReclassifyResult> {
   const { rows } = await pool.query<ReclassifyRow>(
-    `SELECT id, title, summary, signals, playbook, tags, type, verdict_by AS "verdictBy", serial
+    `SELECT id, title, summary, signals, playbook, tags, type, verdict_by AS "verdictBy", type_by AS "typeBy", serial
      FROM caphub_v2.capabilities WHERE deleted_at IS NULL ORDER BY created_at`
   );
   log({ mode: apply ? "apply" : "dry-run", candidates: rows.length });
@@ -134,7 +146,13 @@ export async function runReclassify(
   let failed = 0;
   const changes: ReclassifyChange[] = [];
   const needsManualHandling: NeedsManualHandling[] = [];
+  const skipped: SkippedHumanTyped[] = [];
   for (const row of rows) {
+    if (row.typeBy === "human") {
+      skipped.push({ capabilityId: row.id, title: row.title, type: row.type });
+      log({ capabilityId: row.id, title: row.title, type: row.type, skipped: "type_by = human" });
+      continue;
+    }
     const prompt = reclassifyTypePrompt(row);
     try {
       // A bare `new AbortController().signal` never fires — a hung DeepSeek call would block this
@@ -173,10 +191,10 @@ export async function runReclassify(
     }
   }
   log({
-    candidates: rows.length, changed, unchanged, failed,
+    candidates: rows.length, changed, unchanged, failed, skippedHumanTyped: skipped.length,
     needsManualHandling, mode: apply ? "apply" : "dry-run"
   });
-  return { candidates: rows.length, changed, unchanged, failed, changes, needsManualHandling };
+  return { candidates: rows.length, changed, unchanged, failed, skippedHumanTyped: skipped.length, changes, needsManualHandling, skipped };
 }
 
 async function main() {
@@ -187,7 +205,7 @@ async function main() {
   const call = createDeepSeekCall({ apiKey: config.providers.deepseekApiKey });
   const log = (o: Record<string, unknown>) => process.stdout.write(`${JSON.stringify({ ts: new Date().toISOString(), ...o })}\n`);
   try {
-    const { changed, unchanged, failed, changes, needsManualHandling } = await runReclassify(pool, call, apply, log);
+    const { changed, unchanged, failed, changes, needsManualHandling, skipped } = await runReclassify(pool, call, apply, log);
     if (!apply) {
       process.stdout.write(
         changes.length > 0
@@ -196,6 +214,12 @@ async function main() {
           : "0 proposed changes.\n"
       );
       process.stdout.write(`${unchanged} card(s) unchanged.\n`);
+    }
+    if (skipped.length > 0) {
+      process.stdout.write(
+        `${skipped.length} card(s) skipped (type_by = human — already hand-typed via 改建议):\n` +
+        skipped.map((c) => `  ${c.capabilityId}  ${c.type}  ${c.title}`).join("\n") + "\n"
+      );
     }
     if (needsManualHandling.length > 0) {
       process.stdout.write(

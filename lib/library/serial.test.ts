@@ -10,6 +10,7 @@ describe("formatSerial", () => {
     expect(formatSerial("experience", 12)).toBe("EXP-0012");
     expect(formatSerial("plugin", 12)).toBe("PLG-0012");
     expect(formatSerial("prompt", 12)).toBe("PRM-0012");
+    expect(formatSerial("tool", 12)).toBe("TOL-0012");
     expect(formatSerial("other", 12)).toBe("OTH-0012");
   });
   it("does not truncate serials with 5+ digits", () => {
@@ -40,6 +41,7 @@ describe("parseSerialQuery", () => {
     expect(parseSerialQuery("EXP-1")).toBe(1);
     expect(parseSerialQuery("PLG-1")).toBe(1);
     expect(parseSerialQuery("PRM-1")).toBe(1);
+    expect(parseSerialQuery("TOL-1")).toBe(1);
     expect(parseSerialQuery("OTH-1")).toBe(1);
   });
   it("locates by number even when the prefix does not match the card's current type", () => {

@@ -1,4 +1,4 @@
-import { RESERVED_TAGS, type Extraction, type SearchResult } from "./card";
+import { RESERVED_TAGS, type CapabilityType, type Extraction, type SearchResult } from "./card";
 import type { Material } from "./material";
 import type { Scenario } from "./scenarios";
 import { scenariosPromptList } from "./scenarios";
@@ -19,7 +19,7 @@ export const SCORE_RUBRIC = "评分标准：成熟度（是否稳定可用）、
  * misclassified as `other` because `plugin`/`prompt`/`other` carried no definition at all.
  */
 export const CAPABILITY_TYPE_DEFINITIONS =
-  "能力类型定义：skill（可安装/可执行的技能，如脚本、CLI、agent skill、可复用的工作流）；experience（一次具体实践得到的做法/教训/复盘，需要保留核心内容本身而不只是链接）；plugin（面向某个宿主平台——IDE、浏览器、聊天客户端等——的可安装插件/扩展）；prompt（可直接复用的提示词本身，单条提示词或提示词合集/库都算）；other（以上四类都不合适时才用，不是默认兜底）。合集/库按它收录的内容定型，不要因为「是个合集」就归为 other：提示词合集/库记为 prompt，skill 合集/库记为 skill，以此类推。";
+  "能力类型定义：skill（可安装/可执行的技能，如脚本、CLI、agent skill、可复用的工作流）；experience（一次具体实践得到的做法/教训/复盘，需要保留核心内容本身而不只是链接）；plugin（面向某个宿主平台——IDE、浏览器、聊天客户端等——的可安装插件/扩展）；prompt（可直接复用的提示词本身，单条提示词或提示词合集/库都算）；tool（可独立运行的应用/工具/框架：自带运行入口，不依附某个宿主，如 CLI 应用、桌面或 Web 应用、本地服务、agent 运行框架）；other（以上五类都不合适时才用，不是默认兜底）。skill 与 tool 的边界：skill 是被你或 agent 调用的可复用技能/工作流/脚本，tool 是自己就能跑起来的成品应用或框架。tool 与 plugin 的边界：plugin 必须插进某个宿主平台，tool 不需要宿主、自己就是入口。合集/库按它收录的内容定型，不要因为「是个合集」就归为 other：提示词合集/库记为 prompt，skill 合集/库记为 skill，以此类推。";
 
 export function visionPrompt(ocrText: string): string {
   return [
@@ -38,12 +38,24 @@ export function searchQuery(extraction: Extraction | null, material: Material): 
 export function reasonPrompt(input: {
   material: Material; extraction: Extraction | null; sources: SearchResult["sources"];
   similar: Array<{ id: string; title: string; tags: string[] }>; existingTags: string[]; scenarios: Scenario[];
+  /**
+   * When a human has already hand-set this capability's `type` (via 改建议), a rerun must
+   * honor it rather than let the model re-derive (and possibly revert) it — see
+   * lib/analysis/pipeline.ts. Passed as a hard constraint on `type` and on how `playbook`
+   * must be shaped for it (e.g. an `experience` card must put the core content into
+   * `playbook.content`); pipeline.ts also forces `card.type` to this value after parsing, as
+   * a backstop against a disobedient model.
+   */
+  pinnedType?: CapabilityType | null;
 }): string {
   const materialText = input.material.kind === "text" ? input.material.text
     : input.material.kind === "url" ? `URL: ${input.material.url}\n页面正文：${input.material.text ?? "（抓取失败）"}`
     : `（图片，见视觉提取结果）`;
   return [
     `你在为一个个人 agent 能力库做评估与建档。${CAPABILITY_TYPE_DEFINITIONS}`,
+    input.pinnedType
+      ? `硬性约束：这张卡片的 type 已由人工确定为「${input.pinnedType}」，本次重跑必须原样使用这个 type，不得改判为其他类型；playbook 必须按这个 type 的形状组织内容（例如 type 为 experience 时，必须把核心内容本身写进 playbook.content）。`
+      : "",
     `原始输入：\n${materialText}`,
     input.extraction ? `视觉提取结果：\n${JSON.stringify(input.extraction)}` : "",
     input.sources.length ? `联网来源（已截断）：\n${input.sources.map((s, i) => `[${i + 1}] ${s.title} ${s.url}\n${s.content}`).join("\n\n")}` : "联网来源：无",

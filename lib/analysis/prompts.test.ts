@@ -9,17 +9,24 @@ const scenarios = [
 ];
 
 describe("CAPABILITY_TYPE_DEFINITIONS", () => {
-  it("gives all five capability types a crisp definition, not a bare label", () => {
+  it("gives all six capability types a crisp definition, not a bare label", () => {
     expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/skill（[^）]+）/);
     expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/experience（[^）]+）/);
     expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/plugin（[^）]+）/);
     expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/prompt（[^）]+）/);
+    expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/tool（[^）]+）/);
     expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/other（[^）]+）/);
   });
 
-  it("tells the model other is only for what none of the four fit, not a default fallback", () => {
-    expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/other（以上四类都不合适时才用/);
+  it("tells the model other is only for what none of the five fit, not a default fallback", () => {
+    expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/other（以上五类都不合适时才用/);
     expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/不是默认兜底/);
+  });
+
+  it("draws the tool/skill and tool/plugin boundaries explicitly", () => {
+    expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/skill 是被你或 agent 调用的可复用技能\/工作流\/脚本/);
+    expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/tool 是自己就能跑起来的成品应用或框架/);
+    expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/plugin 必须插进某个宿主平台/);
   });
 
   it("gives the collection tie-breaker rule: a 合集/库 is typed by what it contains", () => {
@@ -33,6 +40,19 @@ describe("reasonPrompt", () => {
   it("includes the shared capability-type definitions", () => {
     const prompt = reasonPrompt({ material, extraction: null, sources: [], similar: [], existingTags: [], scenarios });
     expect(prompt).toContain(CAPABILITY_TYPE_DEFINITIONS);
+  });
+
+  it("says nothing about a pinned type when none is given", () => {
+    const prompt = reasonPrompt({ material, extraction: null, sources: [], similar: [], existingTags: [], scenarios, pinnedType: null });
+    expect(prompt).not.toMatch(/硬性约束/);
+  });
+
+  it("adds a hard constraint to use the pinned type and shape the playbook for it, when one is given", () => {
+    const prompt = reasonPrompt({ material, extraction: null, sources: [], similar: [], existingTags: [], scenarios, pinnedType: "experience" });
+    expect(prompt).toMatch(/硬性约束/);
+    expect(prompt).toContain("experience");
+    expect(prompt).toMatch(/不得改判为其他类型/);
+    expect(prompt).toMatch(/playbook\.content/);
   });
 
   it("instructs tags to be lowercase English words or hyphenated phrases, never Chinese or reserved words", () => {

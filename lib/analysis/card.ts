@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const capabilityTypeSchema = z.enum(["skill", "experience", "plugin", "prompt", "other"]);
+export const capabilityTypeSchema = z.enum(["skill", "experience", "plugin", "prompt", "tool", "other"]);
 export type CapabilityType = z.infer<typeof capabilityTypeSchema>;
 
 export const extractionSchema = z.object({
@@ -36,7 +36,7 @@ export type Playbook = z.infer<typeof playbookSchema>;
  * descriptive tag. Kept in sync with capabilityTypeSchema's members plus the two
  * "usage" values and "integrate"/"reference" as playbook kinds.
  */
-export const RESERVED_TAGS = ["skill", "experience", "plugin", "prompt", "other", "integrate", "reference"] as const;
+export const RESERVED_TAGS = ["skill", "experience", "plugin", "prompt", "tool", "other", "integrate", "reference"] as const;
 
 const TAG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 

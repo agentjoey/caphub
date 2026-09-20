@@ -9,7 +9,7 @@ import type { Lease } from "../queue/runs";
 import type { ObjectStore } from "../storage/s3";
 import { RunBudget } from "./budget";
 import { upsertCapability } from "./capabilities";
-import { extractionSchema, type Extraction } from "./card";
+import { extractionSchema, type CapabilityType, type Extraction } from "./card";
 import { prepareMaterial, type MaterialDeps } from "./material";
 import { reasonPrompt, searchQuery, visionPrompt } from "./prompts";
 import { cardSchemaFor, loadScenarios } from "./scenarios";
@@ -50,6 +50,18 @@ export function createPipelineDeps(config: Config, pool: Pool, objects: ObjectSt
     };
   }
   return { pool, objects, vision: minimax, search: createMiniMaxSearch({ apiKey: minimaxApiKey }), reason: minimax, material: {}, threshold: config.verdictAutoThreshold };
+}
+
+/**
+ * The capability's `type`, but only when a human pinned it (`type_by = 'human'`) — via 改建议
+ * (see lib/library/actions.ts's editSuggestion). Null for a capture with no capability row yet,
+ * or one whose type is still `auto`, in which case a rerun is free to re-derive `type` as usual.
+ */
+async function loadPinnedType(pool: Pick<Pool, "query">, captureId: string): Promise<CapabilityType | null> {
+  const row = (await pool.query<{ type: CapabilityType }>(
+    "SELECT type FROM caphub_v2.capabilities WHERE capture_id = $1 AND type_by = 'human'", [captureId]
+  )).rows[0];
+  return row?.type ?? null;
 }
 
 async function runSearch(deps: PipelineDeps, runId: string, query: string, budget: RunBudget, signal: AbortSignal) {
@@ -110,16 +122,20 @@ export async function runPipeline(deps: PipelineDeps, lease: Lease, signal: Abor
 
   const search = await runSearch(deps, lease.runId, searchQuery(extraction, material), budget, signal);
   const similarSeed = extraction?.what ?? (material.kind === "text" ? material.text : material.kind === "url" ? material.text ?? material.url : "");
-  const [similar, existingTags, scenarios] = await Promise.all([
-    findSimilar(deps.pool, similarSeed, lease.captureId), topTags(deps.pool), loadScenarios(deps.pool)
+  const [similar, existingTags, scenarios, pinnedType] = await Promise.all([
+    findSimilar(deps.pool, similarSeed, lease.captureId), topTags(deps.pool), loadScenarios(deps.pool), loadPinnedType(deps.pool, lease.captureId)
   ]);
   if (!scenarios.length) throw new Error("no scenarios configured in caphub_v2.scenarios; cannot run reason step");
 
   const card = await runStructured({
     pool: deps.pool, runId: lease.runId, step: "reason", call: deps.reason,
-    prompt: reasonPrompt({ material, extraction, sources: search.sources, similar, existingTags, scenarios }),
+    prompt: reasonPrompt({ material, extraction, sources: search.sources, similar, existingTags, scenarios, pinnedType }),
     schemaName: "capability_card", schema: cardSchemaFor(scenarios.map((s) => s.slug)), budget, timeoutMs: TIMEOUTS.reason, signal
   });
+  // A pinned (human-set) type must survive a rerun even if the model disobeyed the prompt's
+  // hard constraint — this is the backstop, the prompt constraint above is the first line of
+  // defense. upsertCapability independently pins `type`/`type_by` too, as a second backstop.
+  if (pinnedType) card.type = pinnedType;
 
   const decision = decideVerdict(card, deps.threshold);
   // The card and its tag counts are saved atomically: a failing tag bump must not leave a kept card behind.

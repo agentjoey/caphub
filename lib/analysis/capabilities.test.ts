@@ -60,6 +60,19 @@ describe("upsertCapability", () => {
     expect(sql).toMatch(/score_reason = CASE WHEN caphub_v2\.capabilities\.verdict_by = 'human' THEN caphub_v2\.capabilities\.score_reason ELSE excluded\.score_reason END/);
   });
 
+  it("a human-pinned type is not overwritten by this run's card, mirroring how verdict is preserved", async () => {
+    let sql = "";
+    const pool = {
+      query: async (text: string) => {
+        if (sql === "") sql = text;
+        return { rows: [{ id: "cab_1", verdict: "keep", previous_verdict: "keep", deleted: false }] };
+      }
+    };
+    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_2", card, verdict: "keep", verdictBy: "auto" });
+    expect(sql).toMatch(/type = CASE WHEN caphub_v2\.capabilities\.type_by = 'human' THEN caphub_v2\.capabilities\.type ELSE excluded\.type END/);
+    expect(sql).toMatch(/type_by = CASE WHEN caphub_v2\.capabilities\.type_by = 'human' THEN 'human' ELSE excluded\.type_by END/);
+  });
+
   it("never evaluates nextval() in the INSERT's VALUES, so a conflicting re-run can't burn a serial", async () => {
     const calls: string[] = [];
     const pool = {

@@ -34,7 +34,7 @@ export async function upsertCapability(
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CASE WHEN $12::text IS NULL THEN NULL ELSE now() END, $13, $14, $15, $16, $17,
          NULL, $18, $19, $20)
        ON CONFLICT (capture_id) DO UPDATE SET
-         run_id = excluded.run_id, title = excluded.title, type = excluded.type, summary = excluded.summary,
+         run_id = excluded.run_id, title = excluded.title, summary = excluded.summary,
          signals = excluded.signals, suggested_verdict = excluded.suggested_verdict, suggested_reason = excluded.suggested_reason,
          confidence = excluded.confidence, usage = excluded.usage, playbook = excluded.playbook, tags = excluded.tags,
          source_url = excluded.source_url, scenarios = excluded.scenarios, source_facts = excluded.source_facts,
@@ -42,6 +42,12 @@ export async function upsertCapability(
          notified_at = NULL, updated_at = now(),
          verdict = CASE WHEN caphub_v2.capabilities.verdict_by = 'human' THEN caphub_v2.capabilities.verdict ELSE excluded.verdict END,
          verdict_by = CASE WHEN caphub_v2.capabilities.verdict_by = 'human' THEN 'human' ELSE excluded.verdict_by END,
+         -- A human-pinned type (改建议; see lib/library/actions.ts's editSuggestion) must survive
+         -- a rerun even if the pipeline's own pinned-type enforcement (pipeline.ts) somehow
+         -- didn't force card.type back to it -- this is the backstop, mirroring how verdict
+         -- is pinned above.
+         type = CASE WHEN caphub_v2.capabilities.type_by = 'human' THEN caphub_v2.capabilities.type ELSE excluded.type END,
+         type_by = CASE WHEN caphub_v2.capabilities.type_by = 'human' THEN 'human' ELSE excluded.type_by END,
          verdict_at = CASE WHEN caphub_v2.capabilities.verdict_by = 'human' THEN caphub_v2.capabilities.verdict_at ELSE excluded.verdict_at END,
          -- A human decision on this capability must not have its score silently wiped or
          -- churned by a later re-run's card, mirroring how verdict itself is pinned above.
