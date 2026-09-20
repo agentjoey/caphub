@@ -434,7 +434,8 @@ body {
 .badge--keep { background: var(--green-soft); border: 1px solid var(--green-border); color: var(--green); }
 .badge--discard { background: var(--rust-soft); border: 1px solid var(--rust-border); color: var(--rust); }
 .badge--pending { background: var(--amber-soft); border: 1px solid var(--amber-border); color: var(--amber-text); }
-.badge--type, .badge--usage { background: transparent; border: 1px solid var(--hairline-strong); color: var(--ink-muted); }
+.badge--type, .badge--usage, .badge--progress { background: transparent; border: 1px solid var(--hairline-strong); color: var(--ink-muted); }
+.badge--progress-done { border-color: var(--hairline); color: var(--ink-faint); }
 .badge--auto { background: var(--paper-recessed); border: 1px solid var(--hairline); color: var(--ink-faint); }
 
 /* Tags: mono, square, recessed — machine-ish labels. */

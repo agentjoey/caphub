@@ -98,6 +98,7 @@ export const dictEn: Dict = {
     subtitle: "{count} capabilities total",
     tagsStat: "Tags",
     pendingStat: "Pending review",
+    toBuildStat: "To build",
     searchPlaceholder: "Search capabilities…",
     searchAria: "Search capabilities",
     searchButton: "Search",

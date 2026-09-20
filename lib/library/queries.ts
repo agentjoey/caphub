@@ -63,7 +63,7 @@ export function listPending(pool: Q, opts: { page: number }) {
 
 export interface LibraryFilter {
   q?: string; types?: CapabilityType[]; tags?: string[]; scenarios?: string[];
-  usage?: "integrate" | "reference"; discarded?: boolean; page: number;
+  usage?: "integrate" | "reference"; progress?: Progress[]; discarded?: boolean; page: number;
 }
 
 /** Extra context for the `q`-driven hybrid search, computed by the caller (web-only concerns). */
@@ -83,6 +83,7 @@ export function listLibrary(pool: Q, f: LibraryFilter, search: LibrarySearchCont
   if (f.tags?.length) add((i) => `cb.tags @> $${i}`, f.tags);
   if (f.usage) add((i) => `cb.usage = $${i}`, f.usage);
   if (f.scenarios?.length) add((i) => `cb.scenarios && $${i}::text[]`, f.scenarios);
+  if (f.progress?.length) add((i) => `cb.progress = ANY($${i})`, f.progress);
 
   const q = f.q?.trim();
   const serial = q ? parseSerialQuery(q) : null;
@@ -106,7 +107,8 @@ export function listLibrary(pool: Q, f: LibraryFilter, search: LibrarySearchCont
     const score = `(COALESCE(CASE WHEN cb.embedding IS NOT NULL AND $${vecIdx}::vector IS NOT NULL THEN ${semanticSim} END, 0)` +
       ` + CASE WHEN ${ftsMatch} THEN 0.3 ELSE 0 END` +
       ` + CASE WHEN ${scenarioMatch} THEN 0.25 ELSE 0 END` +
-      ` + CASE WHEN ${ilikeMatch} THEN 0.15 ELSE 0 END)`;
+      ` + CASE WHEN ${ilikeMatch} THEN 0.15 ELSE 0 END` +
+      ` + CASE WHEN cb.score IS NOT NULL THEN 0.05 * (cb.score - 3) ELSE 0 END)`;
 
     return paged(pool, clauses.join(" AND "), values, f.page, `${score} DESC, cb.updated_at DESC, cb.id`);
   }
@@ -116,7 +118,10 @@ export function listLibrary(pool: Q, f: LibraryFilter, search: LibrarySearchCont
   return paged(pool, clauses.join(" AND "), values, f.page);
 }
 
-export interface LibraryStats { byType: Record<CapabilityType, number>; total: number; tagCount: number; pending: number }
+export interface LibraryStats { byType: Record<CapabilityType, number>; total: number; tagCount: number; pending: number; toBuild: number }
+
+/** The `progress` values counted by the library stats bar's "待自研" tile: kept, reference-only cards not yet started or finished. */
+export const TO_BUILD_PROGRESS: Progress[] = ["todo", "planned"];
 
 export async function libraryStats(pool: Q): Promise<LibraryStats> {
   const byType: Record<CapabilityType, number> = { skill: 0, experience: 0, plugin: 0, prompt: 0, other: 0 };
@@ -127,7 +132,11 @@ export async function libraryStats(pool: Q): Promise<LibraryStats> {
     "SELECT count(DISTINCT t)::text AS n FROM caphub_v2.capabilities, unnest(tags) AS t WHERE verdict = 'keep' AND deleted_at IS NULL")).rows[0]?.n ?? 0);
   const pending = Number((await pool.query<{ n: string }>(
     "SELECT count(*)::text AS n FROM caphub_v2.capabilities WHERE verdict = 'pending' AND deleted_at IS NULL")).rows[0]?.n ?? 0);
-  return { byType, total: Object.values(byType).reduce((a, b) => a + b, 0), tagCount, pending };
+  const toBuild = Number((await pool.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM caphub_v2.capabilities
+     WHERE verdict = 'keep' AND deleted_at IS NULL AND usage = 'reference' AND progress = ANY($1)`,
+    [TO_BUILD_PROGRESS])).rows[0]?.n ?? 0);
+  return { byType, total: Object.values(byType).reduce((a, b) => a + b, 0), tagCount, pending, toBuild };
 }
 
 /** Per-scenario counts among currently-visible cards (kept, or discarded when `discarded` is set), for the library's scenario chip row. */

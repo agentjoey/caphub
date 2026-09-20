@@ -1,4 +1,5 @@
 import { capabilityTypeSchema, isValidTag, SCENARIO_SLUG_PATTERN, type CapabilityType } from "../analysis/card";
+import { isProgress, type Progress } from "./labels";
 import type { LibraryFilter } from "./queries";
 
 type RawParams = Record<string, string | string[] | undefined>;
@@ -18,6 +19,7 @@ export function parseLibraryParams(sp: RawParams): LibraryFilter {
   const types = toArray(sp.type).filter((t): t is CapabilityType => capabilityTypeSchema.safeParse(t).success);
   const tags = toArray(sp.tag).filter(isValidTag);
   const scenarios = toArray(sp.scenario).filter((s) => SCENARIO_SLUG_PATTERN.test(s));
+  const progress = toArray(sp.progress).filter((p): p is Progress => isProgress(p));
   const usageRaw = first(sp.usage);
   const usage = usageRaw === "integrate" || usageRaw === "reference" ? usageRaw : undefined;
   const discarded = first(sp.discarded) === "1" ? true : undefined;
@@ -30,6 +32,7 @@ export function parseLibraryParams(sp: RawParams): LibraryFilter {
     tags: tags.length > 0 ? tags : undefined,
     scenarios: scenarios.length > 0 ? scenarios : undefined,
     usage,
+    progress: progress.length > 0 ? progress : undefined,
     discarded,
     page
   };
@@ -51,6 +54,7 @@ export function libraryHref(filter: LibraryFilter, patch: Partial<LibraryFilter>
   for (const tag of merged.tags ?? []) params.append("tag", tag);
   for (const scenario of merged.scenarios ?? []) params.append("scenario", scenario);
   if (merged.usage) params.set("usage", merged.usage);
+  for (const progress of merged.progress ?? []) params.append("progress", progress);
   if (merged.discarded) params.set("discarded", "1");
   if (merged.page && merged.page > 1) params.set("page", String(merged.page));
 

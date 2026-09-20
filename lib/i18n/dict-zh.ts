@@ -103,6 +103,7 @@ export const dictZh = {
     subtitle: "共 {count} 个能力",
     tagsStat: "标签",
     pendingStat: "待 Review",
+    toBuildStat: "待自研",
     searchPlaceholder: "搜索能力…",
     searchAria: "搜索能力",
     searchButton: "搜索",

@@ -2,11 +2,12 @@ import Link from "next/link";
 import type { CapabilityType } from "../../lib/analysis/card";
 import { loadScenarios } from "../../lib/analysis/scenarios";
 import { CapturePreview } from "../../components/capability/capture-preview";
+import { ScoreBadge } from "../../components/capability/score-badge";
 import { TagList } from "../../components/capability/tag-list";
 import { relativeTime } from "../../lib/library/format";
-import { typeLabel, usageLabel } from "../../lib/library/labels";
+import { progressLabel, typeLabel, usageLabel } from "../../lib/library/labels";
 import { embedSearchQuery } from "../../lib/library/query-embedding";
-import { allTags, libraryStats, listLibrary, scenarioStats, PAGE_SIZE } from "../../lib/library/queries";
+import { allTags, libraryStats, listLibrary, scenarioStats, TO_BUILD_PROGRESS, PAGE_SIZE } from "../../lib/library/queries";
 import { matchScenarios } from "../../lib/library/scenario-match";
 import { displaySerial, parseSerialQuery } from "../../lib/library/serial";
 import { libraryHref, parseLibraryParams } from "../../lib/library/search-params";
@@ -48,7 +49,7 @@ export default async function Page({
   ]);
   const { items, total } = await listLibrary(pool, filter, { queryEmbedding, matchedScenarioSlugs });
   const topTags = tags.slice(0, TOP_TAGS);
-  const hasFilters = Boolean(filter.q || filter.types?.length || filter.tags?.length || filter.scenarios?.length || filter.usage || filter.discarded);
+  const hasFilters = Boolean(filter.q || filter.types?.length || filter.tags?.length || filter.scenarios?.length || filter.usage || filter.progress?.length || filter.discarded);
   const hasPrev = filter.page > 1;
   const hasNext = filter.page * PAGE_SIZE < total;
 
@@ -64,6 +65,7 @@ export default async function Page({
     ...(filter.tags ?? []).map((value) => ({ name: "tag", value })),
     ...(filter.scenarios ?? []).map((value) => ({ name: "scenario", value })),
     ...(filter.usage ? [{ name: "usage", value: filter.usage }] : []),
+    ...(filter.progress ?? []).map((value) => ({ name: "progress", value })),
     ...(filter.discarded ? [{ name: "discarded", value: "1" }] : [])
   ];
 
@@ -101,6 +103,23 @@ export default async function Page({
           <div className="stat__label">{dict.library.pendingStat}</div>
           <div className="stat__value">{stats.pending}</div>
         </Link>
+        {(() => {
+          const toBuildActive = filter.usage === "reference" &&
+            TO_BUILD_PROGRESS.every((p) => filter.progress?.includes(p)) &&
+            filter.progress?.length === TO_BUILD_PROGRESS.length;
+          return (
+            <Link
+              className="stat"
+              aria-current={toBuildActive ? "true" : undefined}
+              href={libraryHref(filter, toBuildActive
+                ? { usage: undefined, progress: undefined }
+                : { usage: "reference", progress: [...TO_BUILD_PROGRESS] })}
+            >
+              <div className="stat__label">{dict.library.toBuildStat}</div>
+              <div className="stat__value">{stats.toBuild}</div>
+            </Link>
+          );
+        })()}
       </div>
       <form className="search-form" action="/library" method="get">
         <input type="search" name="q" defaultValue={filter.q ?? ""} placeholder={dict.library.searchPlaceholder} aria-label={dict.library.searchAria} />
@@ -175,6 +194,12 @@ export default async function Page({
                     <div className="list-row__meta">
                       <span className="badge badge--type">{typeLabel(row.type, locale)}</span>
                       <span className="badge badge--usage">{usageLabel(row.usage, locale)}</span>
+                      <ScoreBadge score={row.score} reason={row.scoreReason} locale={locale} />
+                      {row.usage === "reference" && (
+                        <span className={`badge badge--progress${row.progress === "done" ? " badge--progress-done" : ""}`}>
+                          {progressLabel(row.progress, locale)}
+                        </span>
+                      )}
                       <span>{relativeTime(row.createdAt, locale)}</span>
                     </div>
                     <TagList tags={row.tags} />

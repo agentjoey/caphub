@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { listLibrary, listPending, libraryStats, scenarioStats, getCapabilityDetail, PAGE_SIZE, SEMANTIC_MIN } from "./queries";
+import { listLibrary, listPending, libraryStats, scenarioStats, getCapabilityDetail, PAGE_SIZE, SEMANTIC_MIN, TO_BUILD_PROGRESS } from "./queries";
 
 function recorder(rows: unknown[][]) {
   const calls: Array<{ text: string; values: unknown[] }> = [];
@@ -38,6 +38,12 @@ describe("library queries", () => {
     expect(calls[0].text).toMatch(/cb\.scenarios && \$\d+::text\[\]/);
     expect(calls[0].values).toEqual(expect.arrayContaining([["coding", "writing"]]));
   });
+  it("listLibrary filters by progress via ANY", async () => {
+    const { pool, calls } = recorder([[], [{ total: "0" }]]);
+    await listLibrary(pool, { progress: ["todo", "planned"], page: 1 });
+    expect(calls[0].text).toMatch(/cb\.progress = ANY\(\$\d+\)/);
+    expect(calls[0].values).toEqual(expect.arrayContaining([["todo", "planned"]]));
+  });
   it("listLibrary with a serial-shaped q returns only that serial, no scoring", async () => {
     const { pool, calls } = recorder([[], [{ total: "0" }]]);
     await listLibrary(pool, { q: "SKL-0012", page: 1 });
@@ -57,6 +63,11 @@ describe("library queries", () => {
     expect(text).toMatch(/ORDER BY \(COALESCE\(CASE WHEN cb\.embedding IS NOT NULL/);
     expect(text).toMatch(new RegExp(`>= \\$\\d+`));
     expect(values).toEqual(expect.arrayContaining(["[0.1,0.2]", "web scraping", "%web scraping%", ["data"], SEMANTIC_MIN]));
+  });
+  it("listLibrary's hybrid score adds a small score weight only when cb.score is not null", async () => {
+    const { pool, calls } = recorder([[], [{ total: "0" }]]);
+    await listLibrary(pool, { q: "web scraping", page: 1 });
+    expect(calls[0].text).toMatch(/CASE WHEN cb\.score IS NOT NULL THEN 0\.05 \* \(cb\.score - 3\) ELSE 0 END/);
   });
   it("listLibrary's scored hybrid query tie-breaks on cb.id so equally-scored, equally-updated rows have a stable order", async () => {
     const { pool, calls } = recorder([[], [{ total: "0" }]]);
@@ -85,14 +96,19 @@ describe("library queries", () => {
     await scenarioStats(pool, { discarded: true });
     expect(calls[0].values).toEqual(["discard"]);
   });
-  it("libraryStats counts kept by type, distinct tags of kept, and pending", async () => {
-    const { pool } = recorder([[{ type: "skill", n: "3" }, { type: "prompt", n: "1" }], [{ n: "7" }], [{ n: "2" }]]);
+  it("libraryStats counts kept by type, distinct tags of kept, pending, and to-build (reference, todo/planned)", async () => {
+    const { pool, calls } = recorder([[{ type: "skill", n: "3" }, { type: "prompt", n: "1" }], [{ n: "7" }], [{ n: "2" }], [{ n: "5" }]]);
     const s = await libraryStats(pool);
     expect(s.byType.skill).toBe(3);
     expect(s.byType.experience).toBe(0);
     expect(s.total).toBe(4);
     expect(s.tagCount).toBe(7);
     expect(s.pending).toBe(2);
+    expect(s.toBuild).toBe(5);
+    const toBuildCall = calls[3];
+    expect(toBuildCall.text).toMatch(/usage = 'reference'/);
+    expect(toBuildCall.text).toMatch(/progress = ANY\(\$1\)/);
+    expect(toBuildCall.values).toEqual([TO_BUILD_PROGRESS]);
   });
   it("getCapabilityDetail returns null when missing", async () => {
     const { pool } = recorder([[]]);
