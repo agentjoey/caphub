@@ -86,6 +86,13 @@ export async function handleCallback(deps: HandleCallbackDeps, cb: CallbackDecod
       return { outcome: "rejected", reason: "not-owner" };
     }
 
+    // A "rerun-capture" button (see router.ts's DecisionAction) carries a capture id, not a
+    // capability id — there is no capability row to load yet, so this must branch before
+    // loadCandidateById below (which would otherwise report a spurious "not-found").
+    if (cb.action === "rerun-capture") {
+      return await handleRerunCapture(deps, cb, signal);
+    }
+
     const candidate = await loadCandidateById(deps.pool, cb.capabilityId);
     if (!candidate) {
       await safeAnswer(deps, cb, dict.cardNotFound, signal);
@@ -165,6 +172,30 @@ async function handleRerun(deps: HandleCallbackDeps, cb: CallbackDecoded, candid
     );
     await runSideEffect(deps, cb, "clear-notified-at-failed", () => clearNotifiedAt(deps.pool, cb.capabilityId));
     return { outcome: "decided", action: "rerun", capabilityId: cb.capabilityId };
+  }
+
+  await safeAnswer(deps, cb, result.message, signal);
+  if (result.reason === "OBJECT_GONE") return { outcome: "rejected", reason: "object-gone", capabilityId: cb.capabilityId };
+  if (result.reason === "CONFLICT") return { outcome: "rejected", reason: "already-queued", capabilityId: cb.capabilityId };
+  if (result.reason === "NOT_FOUND") return { outcome: "rejected", reason: "not-found", capabilityId: cb.capabilityId };
+  return { outcome: "rejected", reason: "invalid", capabilityId: cb.capabilityId };
+}
+
+/**
+ * Handles a `"rerun-capture"` button press (see router.ts's `DecisionAction`): `cb.capabilityId`
+ * is actually a capture id here, so unlike {@link handleRerun} this never loads a `Candidate` —
+ * there is no capability row yet. `requestRerun` itself guards against a concurrent re-queue
+ * (its partial unique index), so there is no optimistic-lock check to perform here either.
+ */
+async function handleRerunCapture(deps: HandleCallbackDeps, cb: CallbackDecoded, signal?: AbortSignal): Promise<CallbackOutcome> {
+  const result = await requestRerun(deps.pool, { captureId: cb.capabilityId, pipeline: deps.pipeline }, "zh");
+
+  if (result.ok) {
+    await safeAnswer(deps, cb, TOAST.rerun, signal);
+    await runSideEffect(deps, cb, "requeue-capture-edit-failed", () =>
+      deps.api.editMessageText({ chatId: cb.chatId, messageId: cb.messageId, text: REQUEUE_TEXT, replyMarkup: NO_BUTTONS, signal }).then(() => undefined)
+    );
+    return { outcome: "decided", action: "rerun-capture", capabilityId: cb.capabilityId };
   }
 
   await safeAnswer(deps, cb, result.message, signal);

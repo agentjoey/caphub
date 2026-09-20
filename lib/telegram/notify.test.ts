@@ -183,3 +183,87 @@ describe("runNotifyTick", () => {
     expect(notifyUpdate?.values).toEqual(["cab_good"]);
   });
 });
+
+// Ruling 1 (Task 7): a capture whose FIRST analysis run failed never gets a capabilities row —
+// this second selection branch (keyed on analysis_runs, not capabilities) is how that failure
+// still reaches Telegram. The capability branch above is untouched by this.
+function captureFailureRow(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    captureId: "cap_1", runId: "run_1", errorCode: "TIMEOUT",
+    updatedAt: new Date("2026-09-20T00:00:00.000Z"),
+    telegramChatId: "1000", telegramMessageId: "500",
+    ...overrides
+  };
+}
+
+function fakePoolWithCaptureFailures(
+  captureFailureRows: Array<Record<string, unknown>>,
+  opts: { throwOn?: (text: string) => boolean } = {}
+) {
+  const calls: Array<{ text: string; values: unknown[] }> = [];
+  const query = async (text: string, values: unknown[] = []) => {
+    calls.push({ text, values });
+    if (opts.throwOn?.(text)) {
+      throw Object.assign(new Error("connection terminated"), { code: "57P01" });
+    }
+    if (text.includes("FROM caphub_v2.capabilities cb")) return { rows: [] };
+    if (text.includes("FROM caphub_v2.captures c") && text.includes("caphub_v2.analysis_runs ar")) {
+      return { rows: captureFailureRows };
+    }
+    if (text.includes("FROM caphub_v2.scenarios")) return { rows: SCENARIO_ROWS };
+    if (text.includes("UPDATE caphub_v2.analysis_runs SET notified_at")) return { rows: [], rowCount: 1 };
+    if (text.includes("UPDATE caphub_v2.captures SET telegram_message_id")) return { rows: [], rowCount: 1 };
+    return { rows: [] };
+  };
+  return { calls, pool: { query } as never };
+}
+
+describe("runNotifyTick — failed-run-with-no-capability branch", () => {
+  it("pushes a failed-first-run capture with a rerun-capture button, and marks the run notified", async () => {
+    const { pool, calls } = fakePoolWithCaptureFailures([captureFailureRow()]);
+    const api = fakeApi();
+    const result = await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
+    expect(result).toBe("notified");
+    expect(api.edited).toHaveLength(1);
+    const [edit] = api.edited as Array<{ chatId: unknown; messageId: unknown; text: string; replyMarkup?: { inline_keyboard: Array<Array<{ callback_data?: string }>> } }>;
+    expect(edit.text).toBe("❌ 分析失败 · 模型响应超时");
+    expect(edit.replyMarkup?.inline_keyboard[0]?.[0]?.callback_data).toMatch(/^rc\|cap_1\|/);
+    const runNotified = calls.find((c) => c.text.includes("UPDATE caphub_v2.analysis_runs SET notified_at"));
+    expect(runNotified?.values).toEqual(["run_1"]);
+  });
+
+  it("falls back to sendMessage and records the message id against the capture (not a capability)", async () => {
+    const { pool, calls } = fakePoolWithCaptureFailures([captureFailureRow({ telegramMessageId: null })]);
+    const api = fakeApi();
+    const result = await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
+    expect(result).toBe("notified");
+    expect(api.sent).toHaveLength(1);
+    const recorded = calls.find((c) => c.text.includes("UPDATE caphub_v2.captures SET telegram_message_id"));
+    expect(recorded?.values).toEqual(["cap_1", "777"]);
+  });
+
+  it("processes both branches in the same tick", async () => {
+    const capabilityRows = [candidateRow()];
+    const captureRows = [captureFailureRow({ captureId: "cap_2", runId: "run_2", telegramMessageId: "501" })];
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const query = async (text: string, values: unknown[] = []) => {
+      calls.push({ text, values });
+      if (text.includes("FROM caphub_v2.capabilities cb")) return { rows: capabilityRows };
+      if (text.includes("FROM caphub_v2.captures c") && text.includes("caphub_v2.analysis_runs ar")) return { rows: captureRows };
+      if (text.includes("FROM caphub_v2.scenarios")) return { rows: SCENARIO_ROWS };
+      return { rows: [], rowCount: 1 };
+    };
+    const api = fakeApi();
+    const result = await runNotifyTick({ pool: { query } as never, api, ownerChatId: 1000 }, new AbortController().signal);
+    expect(result).toBe("notified");
+    expect(api.edited).toHaveLength(2);
+  });
+
+  it("does not mark the run notified on a transient delivery error", async () => {
+    const { pool, calls } = fakePoolWithCaptureFailures([captureFailureRow()]);
+    const api = fakeApi({ editMessageText: async () => { throw new TelegramError(429, "too many requests", 3); } });
+    const result = await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
+    expect(result).toBe("error");
+    expect(calls.some((c) => c.text.includes("UPDATE caphub_v2.analysis_runs SET notified_at"))).toBe(false);
+  });
+});

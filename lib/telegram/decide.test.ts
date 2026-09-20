@@ -219,3 +219,61 @@ describe("handleCallback", () => {
     expect(answered).toHaveLength(1);
   });
 });
+
+// Ruling 1 (Task 7): "rerun-capture" carries a capture id (not a capability id) — a failed
+// FIRST analysis run has no capability row to load or optimistic-lock against.
+describe("handleCallback — rerun-capture", () => {
+  it("requeues by capture id directly, without loading a candidate", async () => {
+    const { pool, calls } = routedPool({ candidate: candidateRow(), rerunCapture: { kind: "image", purged: false, active: false } });
+    const { api, answered, edited } = fakeApi();
+    const result = await handleCallback(deps(pool, api), cb({ action: "rerun-capture", capabilityId: "cap_1" }));
+
+    expect(result).toEqual({ outcome: "decided", action: "rerun-capture", capabilityId: "cap_1" });
+    expect(answered[0]).toMatchObject({ text: "已重新排队" });
+    expect(edited[0]).toMatchObject({ chatId: 1000, messageId: 500, text: "已重新排队，分析中…" });
+    expect((edited[0] as { replyMarkup?: unknown }).replyMarkup).toEqual({ inline_keyboard: [] });
+    // No candidate lookup (the "cb.capture_id AS captureId" query) and no notified_at clear
+    // (there is no capability row to clear it on) — just the rerun insert.
+    expect(calls.some((c) => c.text.includes(`cb.capture_id AS "captureId"`))).toBe(false);
+    expect(calls.some((c) => c.text.startsWith("UPDATE caphub_v2.capabilities SET notified_at = NULL"))).toBe(false);
+    expect(calls.some((c) => c.text.startsWith("INSERT INTO caphub_v2.analysis_runs"))).toBe(true);
+  });
+
+  it("object gone: a purged capture is rejected with its own toast", async () => {
+    const { pool } = routedPool({ rerunCapture: { kind: "image", purged: true, active: false } });
+    const { api, answered, edited } = fakeApi();
+    const result = await handleCallback(deps(pool, api), cb({ action: "rerun-capture", capabilityId: "cap_1" }));
+
+    expect(result).toEqual({ outcome: "rejected", reason: "object-gone", capabilityId: "cap_1" });
+    expect(answered[0]).toMatchObject({ text: "原图已过期，无法重跑" });
+    expect(edited).toHaveLength(0);
+  });
+
+  it("already queued: rejected with its own toast", async () => {
+    const { pool } = routedPool({ rerunCapture: { kind: "image", purged: false, active: true } });
+    const { api, answered } = fakeApi();
+    const result = await handleCallback(deps(pool, api), cb({ action: "rerun-capture", capabilityId: "cap_1" }));
+
+    expect(result).toEqual({ outcome: "rejected", reason: "already-queued", capabilityId: "cap_1" });
+    expect(answered[0]).toMatchObject({ text: "已在排队或分析中" });
+  });
+
+  it("capture not found: rejected with its own toast", async () => {
+    const { pool } = routedPool({ rerunCapture: null });
+    const { api, answered } = fakeApi();
+    const result = await handleCallback(deps(pool, api), cb({ action: "rerun-capture", capabilityId: "cap_ghost" }));
+
+    expect(result).toEqual({ outcome: "rejected", reason: "not-found", capabilityId: "cap_ghost" });
+    expect(answered).toHaveLength(1);
+  });
+
+  it("non-owner chat is still rejected before the rerun-capture branch runs", async () => {
+    const { pool, calls } = routedPool({});
+    const { api, answered } = fakeApi();
+    const result = await handleCallback(deps(pool, api), cb({ action: "rerun-capture", capabilityId: "cap_1", chatId: 9999 }));
+
+    expect(result).toEqual({ outcome: "rejected", reason: "not-owner" });
+    expect(answered).toHaveLength(1);
+    expect(calls).toHaveLength(0);
+  });
+});

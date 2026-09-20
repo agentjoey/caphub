@@ -152,3 +152,52 @@ that would otherwise open up during a rolling release:
    - Search `SKL-1` — resolves to the serial-numbered card directly.
    - Switch the UI language (zh ⇄ en) via the chrome switch — labels and dates re-render in the
      new locale without a full reload glitch.
+
+## M3 release (Telegram interface)
+
+M3 adds a Telegram bot as a second capture/search/decide surface. Migration `006` is additive
+(a new table, plus a nullable column), so it's safe to run before the code deploy; the poll loop
+and notify push stay off until `TELEGRAM_ENABLED=true` is set, so this can land as a normal
+rolling deploy with the switch flipped afterward.
+
+1. **Apply migration 006**, locally, with the Neon owner connection string (never from Railway —
+   see Migrations above):
+   ```bash
+   npm run migrate
+   ```
+   This creates `caphub_v2.telegram_state` (the `getUpdates` offset, so a Railway restart of
+   `worker` neither reprocesses nor skips updates) and adds `caphub_v2.analysis_runs.notified_at`
+   (so a capture whose *first* analysis run fails — and therefore never gets a `capabilities`
+   row — can still be pushed to Telegram and marked as pushed; see `lib/telegram/notify.ts`).
+2. **Set the bot token and owner chat id** on the `worker` service, via the Railway dashboard (or
+   MCP `set-variables`, with the Human supplying the token out-of-band — it is a secret and must
+   never be printed or committed):
+   - `TELEGRAM_BOT_TOKEN` — from @BotFather
+   - `TELEGRAM_OWNER_CHAT_ID` — the numeric chat id `getUpdates`/`getMe` resolves for the owner;
+     every update from any other chat id is silently ignored (see `lib/telegram/router.ts`)
+3. **Push/merge to `main`** — this auto-deploys `worker` (and `web`, unaffected by this release).
+   With `TELEGRAM_ENABLED` still unset/`false`, the worker logs
+   `{"telegram":"poll-loop-not-started-for-mode", ...}` only in `--once`/`--dry-run` modes and
+   simply never builds the Telegram wiring in `--daemon`, so this step is a no-op behaviorally.
+4. **Set `TELEGRAM_ENABLED=true`** on `worker` and let it redeploy (or `railway redeploy -s
+   worker`). On startup the worker logs `{"telegram":"getMe", "username": ...}` (a `getMe`
+   self-check — failure only warns, never blocks startup) and registers the bot's slash commands
+   (`setMyCommands`). The poll loop (`getUpdates`, long-polling up to 25 s) and the notify push
+   then run on their own cadence, alongside (not blocking) the existing analysis/review/embed
+   ticks — see `runTelegramLoop` in `scripts/worker.ts`.
+5. **Real-device walkthrough**, from the owner's Telegram account (the one behind
+   `TELEGRAM_OWNER_CHAT_ID`):
+   - Send `/help` — get the usage summary.
+   - Send a photo — get "已收到，分析中…", then (once analysis finishes) a decided/pending card
+     with 保留/丢弃/重跑分析 buttons; press one and confirm the message updates in place.
+   - Send free text — get search results (or "没找到…") pointing at `caphub.agentjoey.ai`.
+   - Send `/pending` and `/stats` — get the expected replies.
+   - Force a capture whose first analysis fails (e.g. an unsupported image) and confirm it still
+     arrives as a `❌ 分析失败` card with a single 重跑 button, even though it never became a
+     library card.
+   - Restart the `worker` service mid-conversation (Railway dashboard) and confirm no message is
+     either reprocessed (duplicate replies) or silently dropped — the persisted offset in
+     `caphub_v2.telegram_state` is what this step is verifying.
+6. **Rollback**: set `TELEGRAM_ENABLED` back to `false` and let `worker` redeploy. No schema
+   rollback is needed — migration 006 is additive and inert with the flag off (the bot simply
+   stops polling; in-flight `getUpdates` offset state is left in place for a future re-enable).

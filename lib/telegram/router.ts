@@ -50,7 +50,14 @@ export interface RouterUpdate extends TelegramUpdate {
   callback_query?: CallbackQueryLike;
 }
 
-export type DecisionAction = "keep" | "discard" | "rerun";
+/**
+ * `"rerun-capture"` is distinct from `"rerun"`: both re-queue an analysis, but `"rerun"`'s
+ * button carries a *capability* id (an already-decided or previously-analyzed card) while
+ * `"rerun-capture"`'s carries a *capture* id directly — used for a capture whose first analysis
+ * run failed, so no capability row exists yet to look up (see notify.ts's failed-run-with-no-
+ * capability selection branch, and decide.ts's handling of it).
+ */
+export type DecisionAction = "keep" | "discard" | "rerun" | "rerun-capture";
 
 export type ClassifiedUpdate =
   | { kind: "ignored"; reason: string }
@@ -62,6 +69,7 @@ export type ClassifiedUpdate =
   | {
       kind: "callback";
       action: DecisionAction;
+      /** A capability id for every action except `"rerun-capture"`, where this is a capture id — see {@link DecisionAction}. */
       capabilityId: string;
       updatedAt: string;
       callbackId: string;
@@ -270,8 +278,8 @@ export function classifyUpdate(update: unknown, opts: { ownerChatId: number }): 
   return { kind: "ignored", reason: "unsupported" };
 }
 
-const ACTION_TO_CODE: Record<DecisionAction, string> = { keep: "k", discard: "d", rerun: "r" };
-const CODE_TO_ACTION: Record<string, DecisionAction> = { k: "keep", d: "discard", r: "rerun" };
+const ACTION_TO_CODE: Record<DecisionAction, string> = { keep: "k", discard: "d", rerun: "r", "rerun-capture": "rc" };
+const CODE_TO_ACTION: Record<string, DecisionAction> = { k: "keep", d: "discard", r: "rerun", rc: "rerun-capture" };
 
 /** Encodes a moderation decision as Telegram `callback_data`: `k|<capabilityId>|<epochMs>`. */
 export function encodeDecision(action: DecisionAction, capabilityId: string, updatedAtIso: string): string {

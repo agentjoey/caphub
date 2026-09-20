@@ -4,6 +4,7 @@ import { formatSerial } from "../library/serial";
 import { escapeHtml, type InlineKeyboardMarkup } from "./api";
 import { publicBaseUrl } from "./capture";
 import { encodeDecision } from "./router";
+import type { DecisionAction } from "./router";
 
 /** Summaries are truncated to this many codepoints in the "pending" card. */
 export const PENDING_SUMMARY_MAX_LEN = 300;
@@ -47,6 +48,16 @@ export interface FailedCardInput {
   id: string;
   updatedAt: string;
   errorCode: string | null;
+  /**
+   * What `id` identifies, and therefore which callback action the rerun button encodes.
+   * `"capability"` (the default, when omitted) is the original branch — a failed *rerun* of an
+   * already-decided card, where `id` is the capability id and the button encodes `"rerun"`
+   * (decide.ts reloads the capability and calls `requestRerun` with its `captureId`).
+   * `"capture"` is a capture whose first analysis run failed, so no capability row exists yet —
+   * `id` is the capture id itself, and the button encodes `"rerun-capture"` so decide.ts calls
+   * `requestRerun` directly with `id` rather than trying to load a nonexistent capability.
+   */
+  target?: "capability" | "capture";
 }
 
 export type FormatCardInput = DecidedCardInput | FailedCardInput;
@@ -134,8 +145,9 @@ function formatPending(card: DecidedCardInput): FormattedMessage {
 function formatFailed(card: FailedCardInput): FormattedMessage {
   const reason = errorLabel(card.errorCode, "zh");
   const text = `❌ 分析失败 · ${escapeHtml(reason)}`;
+  const action: DecisionAction = card.target === "capture" ? "rerun-capture" : "rerun";
   const replyMarkup: InlineKeyboardMarkup = {
-    inline_keyboard: [[{ text: "重跑", callback_data: encodeDecision("rerun", card.id, card.updatedAt) }]]
+    inline_keyboard: [[{ text: "重跑", callback_data: encodeDecision(action, card.id, card.updatedAt) }]]
   };
   return { text, replyMarkup };
 }

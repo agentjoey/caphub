@@ -145,18 +145,80 @@ async function recordMessageId(pool: Pool, capabilityId: string, messageId: numb
 }
 
 /**
+ * A capture whose FIRST analysis run failed, with no capability row (see
+ * {@link selectFailedCaptureRuns}). Deliberately narrow, like {@link Candidate} isn't reused
+ * here — this only ever renders via `FailedCardInput` with `target: "capture"`.
+ */
+export interface CaptureFailure {
+  captureId: string;
+  runId: string;
+  errorCode: string | null;
+  updatedAt: Date;
+  telegramChatId: string | null;
+  telegramMessageId: string | null;
+}
+
+/**
+ * Selects up to {@link BATCH_SIZE} telegram-sourced captures whose latest analysis run failed
+ * and was never pushed, and which have no capability row at all (a first-run failure — see
+ * Ruling 1 in the Task 7 brief: a card only gets a capabilities row once *some* run succeeds, so
+ * a capture stuck on repeated failures would otherwise never be notified). One row per capture
+ * (its most recent still-unnotified failed run), so an older failed run for the same capture is
+ * left as-is rather than double-pushed.
+ */
+async function selectFailedCaptureRuns(pool: Pool): Promise<CaptureFailure[]> {
+  const { rows } = await pool.query<CaptureFailure>(
+    `SELECT DISTINCT ON (c.id)
+       c.id AS "captureId", ar.id AS "runId", ar.error_code AS "errorCode",
+       coalesce(ar.finished_at, ar.created_at) AS "updatedAt",
+       c.telegram_chat_id AS "telegramChatId", c.telegram_message_id AS "telegramMessageId"
+     FROM caphub_v2.captures c
+     JOIN caphub_v2.analysis_runs ar ON ar.capture_id = c.id
+     WHERE c.source = 'telegram' AND ar.state = 'failed' AND ar.notified_at IS NULL
+       AND NOT EXISTS (SELECT 1 FROM caphub_v2.capabilities k WHERE k.capture_id = c.id)
+     ORDER BY c.id, ar.created_at DESC
+     LIMIT ${BATCH_SIZE}`
+  );
+  return rows;
+}
+
+function buildCaptureFailureFormatInput(failure: CaptureFailure): FailedCardInput {
+  return { status: "failed", id: failure.captureId, updatedAt: failure.updatedAt.toISOString(), errorCode: failure.errorCode, target: "capture" };
+}
+
+async function markRunNotified(pool: Pool, runId: string): Promise<void> {
+  await pool.query("UPDATE caphub_v2.analysis_runs SET notified_at = now() WHERE id = $1", [runId]);
+}
+
+/** {@link recordMessageId}'s counterpart for a {@link CaptureFailure} — `id` is already the capture id, no capability indirection needed. */
+async function recordMessageIdForCapture(pool: Pool, captureId: string, messageId: number): Promise<void> {
+  await pool.query("UPDATE caphub_v2.captures SET telegram_message_id = $2 WHERE id = $1", [captureId, String(messageId)]);
+}
+
+/** The subset of a {@link Candidate} or {@link CaptureFailure} that {@link deliver} needs — just enough to address and identify a push, regardless of what kind of row it came from. */
+interface PushTarget {
+  /** Logged/passed to `recordMessageId` to identify the row — a capability id or a capture id, depending on the caller. */
+  id: string;
+  telegramChatId: string | null;
+  telegramMessageId: string | null;
+}
+
+/**
  * Pushes (or edits) exactly one card's Telegram message, given already-rendered `text`/
  * `replyMarkup`. Returns "notified" on success, "skipped" for a card-local issue (nothing to
  * retry differently), or "error" for a transient Telegram-side failure (429 / network) that
- * should trigger backoff.
+ * should trigger backoff. `recordMessageId` is injected so the same delivery logic serves both
+ * selection branches (a capability id vs. a capture id — see {@link recordMessageId} and
+ * {@link recordMessageIdForCapture}).
  */
 async function deliver(
   deps: NotifyTickDeps,
-  candidate: Candidate,
-  rendered: { text: string; replyMarkup?: InlineKeyboardMarkup }
+  target: PushTarget,
+  rendered: { text: string; replyMarkup?: InlineKeyboardMarkup },
+  recordMessageId: (pool: Pool, id: string, messageId: number) => Promise<void>
 ): Promise<"notified" | "skipped" | "error"> {
-  const chatId = candidate.telegramChatId ?? deps.ownerChatId;
-  const messageId = candidate.telegramMessageId ? Number(candidate.telegramMessageId) : null;
+  const chatId = target.telegramChatId ?? deps.ownerChatId;
+  const messageId = target.telegramMessageId ? Number(target.telegramMessageId) : null;
 
   if (messageId !== null) {
     try {
@@ -168,10 +230,10 @@ async function deliver(
       return "notified";
     } catch (error) {
       if (isTransient(error)) {
-        deps.log?.({ notify: "edit-failed-transient", capability: candidate.id });
+        deps.log?.({ notify: "edit-failed-transient", capability: target.id });
         return "error";
       }
-      deps.log?.({ notify: "edit-failed-fallback-send", capability: candidate.id });
+      deps.log?.({ notify: "edit-failed-fallback-send", capability: target.id });
       // Fall through to a fresh send below — the stored receipt message is gone or can no
       // longer be edited.
     }
@@ -182,21 +244,21 @@ async function deliver(
     sent = await deps.api.sendMessage({ chatId, text: rendered.text, replyMarkup: rendered.replyMarkup });
   } catch (error) {
     if (isTransient(error)) {
-      deps.log?.({ notify: "send-failed-transient", capability: candidate.id });
+      deps.log?.({ notify: "send-failed-transient", capability: target.id });
       return "error";
     }
-    deps.log?.({ notify: "send-failed", capability: candidate.id });
+    deps.log?.({ notify: "send-failed", capability: target.id });
     return "skipped";
   }
 
   if (sent && typeof sent === "object" && typeof sent.message_id === "number") {
     try {
-      await recordMessageId(deps.pool, candidate.id, sent.message_id);
+      await recordMessageId(deps.pool, target.id, sent.message_id);
     } catch (error) {
       // The push itself already succeeded — but without this write, a later re-push (e.g.
       // after a rerun) would blindly re-send instead of editing. Treat the candidate as failed
       // for this tick (skip markNotified below) rather than risk losing track of the message.
-      deps.log?.({ notify: "record-message-id-failed", capability: candidate.id, code: dbErrorCode(error) });
+      deps.log?.({ notify: "record-message-id-failed", capability: target.id, code: dbErrorCode(error) });
       return "error";
     }
   }
@@ -215,7 +277,8 @@ async function deliver(
 export async function runNotifyTick(deps: NotifyTickDeps, signal: AbortSignal): Promise<"idle" | "notified" | "error"> {
   if (signal.aborted) return "idle";
   const candidates = await selectCandidates(deps.pool);
-  if (candidates.length === 0) return "idle";
+  const captureFailures = await selectFailedCaptureRuns(deps.pool);
+  if (candidates.length === 0 && captureFailures.length === 0) return "idle";
 
   const scenarios = await loadScenarios(deps.pool);
   const scenarioLabel = new Map(scenarios.map((s) => [s.slug, s.labelZh]));
@@ -233,7 +296,7 @@ export async function runNotifyTick(deps: NotifyTickDeps, signal: AbortSignal): 
       continue;
     }
 
-    const outcome = await deliver(deps, candidate, rendered);
+    const outcome = await deliver(deps, candidate, rendered, recordMessageId);
     if (outcome === "notified") {
       try {
         await markNotified(deps.pool, candidate.id);
@@ -251,7 +314,34 @@ export async function runNotifyTick(deps: NotifyTickDeps, signal: AbortSignal): 
     }
   }
 
-  deps.log?.({ notify: "done", notified, total: candidates.length });
+  // Second selection branch (Ruling 1): a capture whose first analysis run failed, so there is
+  // no capability row to key the push off of — see selectFailedCaptureRuns.
+  for (const failure of captureFailures) {
+    if (signal.aborted) break;
+    let rendered;
+    try {
+      rendered = formatResult(buildCaptureFailureFormatInput(failure));
+    } catch (error) {
+      deps.log?.({ notify: "format-failed", capture: failure.captureId, error: error instanceof Error ? error.message : String(error) });
+      continue;
+    }
+
+    const target: PushTarget = { id: failure.captureId, telegramChatId: failure.telegramChatId, telegramMessageId: failure.telegramMessageId };
+    const outcome = await deliver(deps, target, rendered, recordMessageIdForCapture);
+    if (outcome === "notified") {
+      try {
+        await markRunNotified(deps.pool, failure.runId);
+        notified += 1;
+      } catch (error) {
+        deps.log?.({ notify: "mark-run-notified-failed", runId: failure.runId, code: dbErrorCode(error) });
+        sawError = true;
+      }
+    } else if (outcome === "error") {
+      sawError = true;
+    }
+  }
+
+  deps.log?.({ notify: "done", notified, total: candidates.length + captureFailures.length });
   // A transient/DB error anywhere in the batch means the caller should back off, even if other
   // candidates in the same batch were pushed successfully — "notified" is reserved for a
   // fully-clean tick.
