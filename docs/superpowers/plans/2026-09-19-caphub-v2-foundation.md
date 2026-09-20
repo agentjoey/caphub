@@ -2987,7 +2987,7 @@ GRANT SELECT ON ALL TABLES IN SCHEMA caphub TO caphub_v2_app;
 ```
 `DATABASE_URL` 用 `caphub_v2_app`；迁移只由 Human 本地用 owner 串跑 `npm run migrate`，Railway 上不放 owner 串。
 
-> **已完成（2026-09-19）**：Railway project `Caphub` 已建，id `fd170595-5a8f-4579-b09c-cb08894b3c19`，环境 `production` = `8f95c499-edcb-4725-bc86-bb9132d61d78`。Railway 区域按 service 设置：建 `web`、`worker` 时都选 **Singapore（Asia Southeast）**，建好后用 `describe-environment` 核对。Linear：AGE-276…AGE-293 对应 Task 1…18。
+> **已完成（2026-09-19）**：Railway project `Caphub` 已建，id `fd170595-5a8f-4579-b09c-cb08894b3c19`，环境 `production` = `8f95c499-edcb-4725-bc86-bb9132d61d78`。Railway 区域按 service 设置：建 `web`、`worker` 时都选 **Singapore（Asia Southeast）**，建好后用 `describe-environment` 核对。Linear：AJ-276…AJ-293 对应 Task 1…18。
 
 - [ ] **Step 4: 在已建的 Railway project 里建两个 service 并部署**（需 Human 授权；用 Railway MCP `create-project` / `create-service` / `set-variables` / `create-deployment`；密钥值由 Human 在面板粘贴或通过 MCP 由 Human 提供，不出现在对话记录里）
 

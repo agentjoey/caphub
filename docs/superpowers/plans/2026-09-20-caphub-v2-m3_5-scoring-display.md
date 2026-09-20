@@ -6,7 +6,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-19-caphub-v2-design.md`（§4 schema、§5 分析、§6 web、§7 Telegram）。本文件的「设计决定」是增补，2026-09-20 由 Human 选定。
 
-**Linear:** AGE-297（分析内容显示优化）、AGE-298（Telegram 卡片优化）、以及 Human 2026-09-20 提出的参考自研进度管理。AGE-295 / AGE-299 属于 M3.6，不在本期。
+**Linear:** AJ-297（分析内容显示优化）、AJ-298（Telegram 卡片优化）、以及 Human 2026-09-20 提出的参考自研进度管理。AJ-295 / AJ-299 属于 M3.6，不在本期。
 
 ## 设计决定（Human 已选定）
 
@@ -106,7 +106,7 @@ CREATE INDEX capabilities_progress_idx ON caphub_v2.capabilities (progress)
 
 ## Self-review
 
-- AGE-297 三条：结构化来源与评分（T1/T2/T3）、顺序调整（T3/T5）、详情页 UI 重做（T3）。
-- AGE-298 两条：文字分段与评分（T5）、按钮可辨识度（T5，受 Telegram 限制只能靠文案与图标）。
+- AJ-297 三条：结构化来源与评分（T1/T2/T3）、顺序调整（T3/T5）、详情页 UI 重做（T3）。
+- AJ-298 两条：文字分段与评分（T5）、按钮可辨识度（T5，受 Telegram 限制只能靠文案与图标）。
 - 参考自研进度：字段（T1）、web（T3/T4）、Telegram（T5）。
 - 风险：模型编造来源事实（prompt 显式禁止 + 允许留空 + 事实带 as_of）；进度更新触发重新向量化（可接受，embed tick 自行处理）；Telegram 按钮配色无法自定义（已在设计里说明）。
