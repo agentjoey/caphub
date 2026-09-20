@@ -166,17 +166,23 @@ export async function requestRerun(pool: Pool, input: { captureId: string; pipel
   const c = (await pool.query<{ kind: string; purged: boolean; active: boolean }>(
     `SELECT c.kind,
             EXISTS (SELECT 1 FROM caphub_v2.retention t WHERE t.object_key = c.object_key AND t.purged_at IS NOT NULL) AS purged,
-            EXISTS (SELECT 1 FROM caphub_v2.analysis_runs r WHERE r.capture_id = c.id AND r.state IN ('queued','running')) AS active
+            EXISTS (SELECT 1 FROM caphub_v2.analysis_runs r
+                    WHERE r.capture_id = c.id AND r.kind = 'analysis' AND r.state IN ('queued','running')) AS active
      FROM caphub_v2.captures c WHERE c.id = $1`, [input.captureId])).rows[0];
   if (!c) return { ok: false, reason: "NOT_FOUND", message: dict.captureNotFound };
   if (c.kind === "image" && c.purged) return { ok: false, reason: "OBJECT_GONE", message: dict.objectExpired };
   if (c.active) return conflict(dict.alreadyQueued);
   try {
+    // `kind` is left to its 'analysis' column default (migration 010) — this is the normal
+    // pipeline's queue call, and the only other kind is queued by requestDeepAnalysis.
     await pool.query("INSERT INTO caphub_v2.analysis_runs (id, capture_id, pipeline, state) VALUES ($1, $2, $3, 'queued')",
       [newId("run"), input.captureId, input.pipeline]);
   } catch (e) {
     // A concurrent request can win the pre-check race above; the partial unique index
-    // (capture_id, pipeline) WHERE state IN ('queued','running') is the real guard.
+    // analysis_runs_one_active — (capture_id, pipeline) WHERE state IN ('queued','running')
+    // AND kind = 'analysis' — is the real guard, and migration 010 scoped it to that kind. The
+    // pre-check above must carry the same `kind` predicate or it would be stricter than the
+    // database and reject a rerun that the insert would happily have accepted (M3.6 fix round 3).
     if (isUniqueViolation(e)) return conflict(dict.alreadyQueued);
     throw e;
   }

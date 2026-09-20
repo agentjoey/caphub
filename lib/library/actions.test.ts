@@ -117,6 +117,47 @@ describe("softDelete / requestReview / requestRerun", () => {
     expect(await requestRerun(pool, { captureId: "", pipeline: "mixed" })).toMatchObject({ ok: false, reason: "INVALID" });
     expect(calls.length).toBe(0);
   });
+
+  /**
+   * Evaluates the capture pre-check against a seeded `analysis_runs` table by applying the
+   * query's OWN kind predicate — so dropping `r.kind = 'analysis'` from the SQL fails these
+   * tests, instead of them passing on a hand-fed `active` boolean.
+   */
+  function rerunPool(runs: Array<{ kind: string; state: string }>) {
+    return fakePool((t) => {
+      if (t.includes("FROM caphub_v2.captures")) {
+        const scopedToAnalysis = /r\.kind = 'analysis'/.test(t);
+        const active = runs.some((r) => ["queued", "running"].includes(r.state) && (!scopedToAnalysis || r.kind === "analysis"));
+        return { rows: [{ kind: "text", purged: false, active }] };
+      }
+      return { rows: [] };
+    });
+  }
+
+  // Regression (M3.6 fix round 3): migration 010 scoped analysis_runs_one_active — the real DB
+  // guard — to kind = 'analysis'. An unscoped pre-check here would be stricter than the database,
+  // refusing a 重跑分析 that the insert would have accepted, just because a deep dive is running.
+  it("queues a rerun while a deep run is queued or running, since only an active ANALYSIS run blocks one", async () => {
+    for (const state of ["queued", "running"]) {
+      const { pool, calls } = rerunPool([{ kind: "deep", state }]);
+      expect(await requestRerun(pool, { captureId: "cap_1", pipeline: "mixed" })).toMatchObject({ ok: true });
+      expect(calls.some((c) => c.text.startsWith("INSERT INTO caphub_v2.analysis_runs"))).toBe(true);
+    }
+  });
+
+  it("still refuses a rerun while an analysis run of the same capture is queued or running", async () => {
+    for (const state of ["queued", "running"]) {
+      const { pool, calls } = rerunPool([{ kind: "analysis", state }]);
+      expect(await requestRerun(pool, { captureId: "cap_1", pipeline: "mixed" }))
+        .toMatchObject({ ok: false, reason: "CONFLICT", message: "已在排队或分析中" });
+      expect(calls.some((c) => c.text.startsWith("INSERT INTO caphub_v2.analysis_runs"))).toBe(false);
+    }
+  });
+
+  it("ignores a finished deep run entirely", async () => {
+    const { pool } = rerunPool([{ kind: "deep", state: "failed" }, { kind: "analysis", state: "done" }]);
+    expect(await requestRerun(pool, { captureId: "cap_1", pipeline: "mixed" })).toMatchObject({ ok: true });
+  });
 });
 
 describe("locale-aware messages", () => {

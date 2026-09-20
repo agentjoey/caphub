@@ -282,6 +282,12 @@ export interface CaptureFailure {
  * `c.source = 'telegram'`. One row per capture (its most recent still-unnotified failed run), so
  * an older failed run for the same capture is left as-is rather than double-pushed.
  *
+ * `ar.kind = 'analysis'` is belt-and-braces: a deep run only exists for a card (see
+ * requestDeepAnalysis), so the `NOT EXISTS (capabilities …)` clause already excludes every deep
+ * run — but this branch renders 「分析失败」, which must never describe a failed deep dive, so it
+ * says so locally instead of relying on that invariant holding elsewhere. A failed deep run is
+ * pushed by {@link selectDeepRuns} instead.
+ *
  * TODO: an older superseded failed run for the same capture (one that was itself never
  * notified, now shadowed by this capture's latest failed run) is permanently skipped by
  * `DISTINCT ON (c.id)` above — it's never pushed and never marked notified. Low-risk (bounded,
@@ -297,7 +303,7 @@ async function selectFailedCaptureRuns(pool: Pool): Promise<CaptureFailure[]> {
      FROM caphub_v2.captures c
      JOIN caphub_v2.analysis_runs ar ON ar.capture_id = c.id
      WHERE c.telegram_chat_id IS NOT NULL AND c.telegram_message_id IS NOT NULL
-       AND ar.state = 'failed' AND ar.notified_at IS NULL
+       AND ar.kind = 'analysis' AND ar.state = 'failed' AND ar.notified_at IS NULL
        AND NOT EXISTS (SELECT 1 FROM caphub_v2.capabilities k WHERE k.capture_id = c.id)
      ORDER BY c.id, ar.created_at DESC
      LIMIT ${BATCH_SIZE}`

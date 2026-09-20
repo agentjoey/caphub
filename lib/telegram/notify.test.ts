@@ -336,6 +336,8 @@ describe("runNotifyTick — failed-run-with-no-capability branch", () => {
     const [edit] = api.edited as Array<{ chatId: unknown; messageId: unknown; text: string; replyMarkup?: { inline_keyboard: Array<Array<{ callback_data?: string }>> } }>;
     expect(edit.text).toBe("❌ 分析失败 · 模型响应超时");
     expect(edit.replyMarkup?.inline_keyboard[0]?.[0]?.callback_data).toMatch(/^rc\|cap_1\|/);
+    // This branch renders 「分析失败」, which must never describe a failed deep dive (fix round 3).
+    expect(calls.find((c) => c.text.includes("caphub_v2.analysis_runs ar"))!.text).toContain("ar.kind = 'analysis'");
     const runNotified = calls.find((c) => c.text.includes("UPDATE caphub_v2.analysis_runs SET notified_at"));
     expect(runNotified?.values).toEqual(["run_1"]);
     const select = calls.find((c) => c.text.includes("caphub_v2.analysis_runs ar"));
