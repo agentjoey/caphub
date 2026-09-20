@@ -117,4 +117,51 @@ describe("guardRequest", () => {
     expect(res.status).toBe(401);
     expect(verify).not.toHaveBeenCalled();
   });
+
+  describe("refusal logging on /api/mcp", () => {
+    it("logs no_token when no token is present", async () => {
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      const verify = vi.fn();
+      await guardRequest(mcp(), MCP_ENV, { verify });
+      expect(log.mock.calls.map((c) => c[0]).join("\n")).toContain('"reason":"no_token"');
+      log.mockRestore();
+    });
+
+    it("logs verify_failed when verification throws", async () => {
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      const verify = vi.fn().mockRejectedValue(new Error("bad token"));
+      await guardRequest(mcp({ "cf-access-jwt-assertion": "t" }), MCP_ENV, { verify });
+      expect(log.mock.calls.map((c) => c[0]).join("\n")).toContain('"reason":"verify_failed"');
+      log.mockRestore();
+    });
+
+    it("logs allowlist_unset when the allowlist env var is unset", async () => {
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      const verify = vi.fn().mockResolvedValue({ email: "", commonName: "caphub-agent" });
+      await guardRequest(mcp({ "cf-access-jwt-assertion": "t" }), ENV, { verify });
+      expect(log.mock.calls.map((c) => c[0]).join("\n")).toContain('"reason":"allowlist_unset"');
+      log.mockRestore();
+    });
+
+    it("logs cn_mismatch when the common name does not match the allowlist", async () => {
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      const verify = vi.fn().mockResolvedValue({ email: "", commonName: "someone-elses-token" });
+      await guardRequest(mcp({ "cf-access-jwt-assertion": "t" }), MCP_ENV, { verify });
+      expect(log.mock.calls.map((c) => c[0]).join("\n")).toContain('"reason":"cn_mismatch"');
+      log.mockRestore();
+    });
+
+    it("never logs the token or the common name, even on refusal", async () => {
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      const secretToken = "super-secret-jwt-value-should-never-appear";
+      const secretCn = "someone-elses-super-secret-common-name";
+      const verify = vi.fn().mockResolvedValue({ email: "", commonName: secretCn });
+      await guardRequest(mcp({ "cf-access-jwt-assertion": secretToken }), MCP_ENV, { verify });
+      const allLogged = log.mock.calls.map((c) => c.join(" ")).join("\n");
+      expect(allLogged).not.toContain(secretToken);
+      expect(allLogged).not.toContain(secretCn);
+      expect(allLogged).not.toContain(MCP_ENV.CF_ACCESS_SERVICE_TOKEN_CN);
+      log.mockRestore();
+    });
+  });
 });

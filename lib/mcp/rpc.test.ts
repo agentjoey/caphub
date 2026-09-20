@@ -103,4 +103,34 @@ describe("handleMcpRequest", () => {
     const body = await (await call({ jsonrpc: "2.0", id: 7, method: "ping" })).json();
     expect(body.result).toEqual({});
   });
+
+  describe("logging on rejected tool calls", () => {
+    it("logs a line, in the same shape as a successful call, for an unknown tool name", async () => {
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      await call({ jsonrpc: "2.0", id: 8, method: "tools/call", params: { name: "not_a_tool", arguments: {} } });
+      expect(log).toHaveBeenCalledTimes(1);
+      const line = JSON.parse(log.mock.calls[0][0] as string);
+      expect(line).toMatchObject({ tool: "not_a_tool", ok: false });
+      expect(typeof line.durationMs).toBe("number");
+      log.mockRestore();
+    });
+
+    it("logs a line for a rejected argument validation failure", async () => {
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      await call({ jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "search_capabilities", arguments: {} } });
+      expect(log).toHaveBeenCalledTimes(1);
+      const line = JSON.parse(log.mock.calls[0][0] as string);
+      expect(line).toMatchObject({ tool: "search_capabilities", ok: false });
+      log.mockRestore();
+    });
+
+    it("does not log for a successful call yet double-log", async () => {
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      await call({ jsonrpc: "2.0", id: 10, method: "tools/call", params: { name: "get_stats", arguments: {} } });
+      expect(log).toHaveBeenCalledTimes(1);
+      const line = JSON.parse(log.mock.calls[0][0] as string);
+      expect(line).toMatchObject({ tool: "get_stats", ok: true });
+      log.mockRestore();
+    });
+  });
 });

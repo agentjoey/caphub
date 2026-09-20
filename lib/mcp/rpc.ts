@@ -104,20 +104,31 @@ function extractSerial(args: unknown): string | undefined {
 }
 
 async function callTool(deps: ToolDeps, params: Record<string, unknown> | undefined) {
+  const started = Date.now();
   const name = params?.name;
   const args = params?.arguments ?? {};
-  if (typeof name !== "string") return toolError("missing tool name");
+  const serial = extractSerial(args);
+  // Same shape as the success line below (tool, serial, ok, duration) — a rejected call is still
+  // a call, and a client failing every one of them should be visible without inspecting bodies.
+  const log = (ok: boolean) => console.log(JSON.stringify({ tool: typeof name === "string" ? name : undefined, serial, ok, durationMs: Date.now() - started }));
+
+  if (typeof name !== "string") {
+    log(false);
+    return toolError("missing tool name");
+  }
 
   const def = TOOL_DEFS.find((t) => t.name === name);
   const handler = TOOL_HANDLERS[name as ToolName];
-  if (!def || !handler) return toolError(`unknown tool: ${String(name)}`);
+  if (!def || !handler) {
+    log(false);
+    return toolError(`unknown tool: ${String(name)}`);
+  }
 
   const validationError = validateArgs(def.inputSchema as ToolInputSchema, args);
-  if (validationError) return toolError(validationError);
-
-  const started = Date.now();
-  const serial = extractSerial(args);
-  const log = (ok: boolean) => console.log(JSON.stringify({ tool: name, serial, ok, durationMs: Date.now() - started }));
+  if (validationError) {
+    log(false);
+    return toolError(validationError);
+  }
 
   try {
     const value = await handler(deps, args as Record<string, unknown>);
