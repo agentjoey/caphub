@@ -32,6 +32,30 @@ describe("decide", () => {
     const upd = calls.find((c) => c.text.startsWith("UPDATE caphub_v2.capabilities"))!;
     expect(upd.text).toMatch(/serial = CASE WHEN \$3 = 'keep' THEN coalesce\(serial, nextval\('caphub_v2\.capability_serial'\)\) ELSE serial END/);
   });
+  it("enqueues an M3.7 enrich run, after commit, when deciding keep on a never-enriched card", async () => {
+    const { pool, calls } = fakePool((t) => t.startsWith("UPDATE caphub_v2.capabilities")
+      ? { rows: [{ updated_at: new Date(T), tags: ["python"], previous: "pending", capture_id: "cap_1", enriched_at: null, pipeline: "mixed" }] }
+      : { rows: [] });
+    const r = await decide(pool, { id: "cab_1", expectedUpdatedAt: T, verdict: "keep" });
+    expect(r).toMatchObject({ ok: true });
+    const enqueue = calls.find((c) => c.text.includes("INSERT INTO caphub_v2.analysis_runs"));
+    expect(enqueue).toBeDefined();
+    expect(enqueue!.text).toContain("'enrich'");
+    expect(enqueue!.values).toEqual([expect.any(String), "cap_1", "mixed"]);
+  });
+  it("does not enqueue an enrich run when discarding, or when the card is already enriched", async () => {
+    const { pool: discardPool, calls: discardCalls } = fakePool((t) => t.startsWith("UPDATE caphub_v2.capabilities")
+      ? { rows: [{ updated_at: new Date(T), tags: [], previous: "keep", capture_id: "cap_1", enriched_at: null, pipeline: "mixed" }] }
+      : { rows: [] });
+    await decide(discardPool, { id: "cab_1", expectedUpdatedAt: T, verdict: "discard" });
+    expect(discardCalls.some((c) => c.text.includes("INSERT INTO caphub_v2.analysis_runs"))).toBe(false);
+
+    const { pool: enrichedPool, calls: enrichedCalls } = fakePool((t) => t.startsWith("UPDATE caphub_v2.capabilities")
+      ? { rows: [{ updated_at: new Date(T), tags: [], previous: "pending", capture_id: "cap_1", enriched_at: "2026-09-01T00:00:00.000Z", pipeline: "mixed" }] }
+      : { rows: [] });
+    await decide(enrichedPool, { id: "cab_1", expectedUpdatedAt: T, verdict: "keep" });
+    expect(enrichedCalls.some((c) => c.text.includes("INSERT INTO caphub_v2.analysis_runs"))).toBe(false);
+  });
   it("returns CONFLICT when the row changed and NOT_FOUND when missing", async () => {
     const conflict = fakePool((t) => t.startsWith("SELECT 1") ? { rows: [{ "?column?": 1 }] } : { rows: [] });
     expect(await decide(conflict.pool, { id: "cab_1", expectedUpdatedAt: T, verdict: "keep" })).toMatchObject({ ok: false, reason: "CONFLICT", message: "已在别处处理" });
@@ -63,6 +87,22 @@ describe("editSuggestion", () => {
     expect(upd.text).toMatch(/suggestion_by = 'human'/);
     expect(upd.text).toMatch(LOCK_CLAUSE);
     expect(upd.text).toMatch(/serial = coalesce\(serial, nextval\('caphub_v2\.capability_serial'\)\)/);
+  });
+  it("enqueues an M3.7 enrich run, after commit, when the card has never been enriched", async () => {
+    const { pool, calls } = fakePool((t) => t.startsWith("UPDATE caphub_v2.capabilities")
+      ? { rows: [{ updated_at: new Date(T), tags: ["web-scraping"], previous: "pending", capture_id: "cap_2", enriched_at: null, pipeline: "minimax" }] }
+      : { rows: [] });
+    await editSuggestion(pool, { id: "cab_1", expectedUpdatedAt: T, type: "skill", usage: "integrate", tags: ["web-scraping"] });
+    const enqueue = calls.find((c) => c.text.includes("INSERT INTO caphub_v2.analysis_runs"));
+    expect(enqueue).toBeDefined();
+    expect(enqueue!.values).toEqual([expect.any(String), "cap_2", "minimax"]);
+  });
+  it("does not enqueue an enrich run via editSuggestion when the card was already enriched", async () => {
+    const { pool, calls } = fakePool((t) => t.startsWith("UPDATE caphub_v2.capabilities")
+      ? { rows: [{ updated_at: new Date(T), tags: ["web-scraping"], previous: "keep", capture_id: "cap_2", enriched_at: "2026-09-01T00:00:00.000Z", pipeline: "minimax" }] }
+      : { rows: [] });
+    await editSuggestion(pool, { id: "cab_1", expectedUpdatedAt: T, type: "skill", usage: "integrate", tags: ["web-scraping"] });
+    expect(calls.some((c) => c.text.includes("INSERT INTO caphub_v2.analysis_runs"))).toBe(false);
   });
   it("rejects malformed input without touching the database", async () => {
     const { pool, calls } = fakePool(() => ({ rows: [] }));

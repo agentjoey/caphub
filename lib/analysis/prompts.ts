@@ -1,3 +1,4 @@
+import type { CanonicalResult } from "./canonical";
 import { INTERFACE_TAGS, RESERVED_TAGS, type Card, type CapabilityType, type DeepSource, type Extraction, type SearchResult } from "./card";
 import type { Material } from "./material";
 import type { Scenario } from "./scenarios";
@@ -164,4 +165,72 @@ export function deepSynthesizePrompt(subject: DeepSubject, sources: DeepSource[]
     "sources 是你在上面这些字段里实际引用到的检索结果，按你自己的顺序重新列出 { title, url }（可以是原始检索结果的子集，不要求全部收录，也不要新增没出现过的链接）。",
     "cases 给 0–4 条 { title ≤ 30 字, detail ≤ 60 字, source } 的具体案例/落地实例；source 必须是上面你自己输出的 sources 数组里的下标（从 0 开始），必须是真实在检索结果里找到的案例，绝不能编造；如果检索结果里确实没有找到任何公开案例，cases 必须是空数组，不要为了凑数编造。"
   ].join("\n\n");
+}
+
+// --- Enrichment (M3.7) ------------------------------------------------------------------
+// See lib/analysis/enrich.ts. Round 1 (reasonPrompt above) is cheap triage and never opens the
+// card's own canonical URL; round 2 runs once a card is kept, opens that source for real, and
+// rewrites the card so its summary describes the capability instead of narrating the analysis.
+
+/** The subset of an existing CapabilityCard an enrichment run rewrites from. */
+export interface EnrichSubject {
+  title: string; type: CapabilityType; usage: "integrate" | "reference"; summary: string;
+  signals: string[]; playbook: Card["playbook"]; tags: string[]; source_url: string | null;
+  open_questions: string[];
+  /**
+   * True when `suggestion_by = 'human'` (a human already set type/usage/tags via 改建议 --
+   * lib/library/actions.ts's editSuggestion). Told to the model so it doesn't spend effort
+   * trying to reclassify a card whose type/usage/tags are pinned back to their stored values
+   * regardless of what it outputs (see enrich.ts's enrichCardSchemaFor).
+   */
+  pinned: boolean;
+}
+
+/** Canonical fetch text handed to the model, capped well below canonical.ts's own 512 KiB read cap so the prompt stays a reasonable size. */
+const CANONICAL_TEXT_PROMPT_CHARS = 6000;
+
+function canonicalPromptText(canonical: CanonicalResult): string {
+  if (!canonical) {
+    return "抓取来源：未能抓取到来源页面内容（可能是没有来源链接、页面不可达，或抓取失败）。请只依据下面的补充调研结果和原有卡片内容改写，不要编造这个来源本可能有的内容。";
+  }
+  const text = canonical.text.slice(0, CANONICAL_TEXT_PROMPT_CHARS);
+  if (canonical.kind === "repo") {
+    const f = canonical.facts;
+    const factsLine = [
+      f.repo_url ? `repo_url: ${f.repo_url}` : null,
+      f.stars != null ? `stars: ${f.stars}` : null,
+      f.last_update ? `last_update: ${f.last_update}` : null,
+      f.license ? `license: ${f.license}` : null,
+      f.homepage ? `homepage: ${f.homepage}` : null
+    ].filter(Boolean).join("；") || "（GitHub API 未返回可用字段）";
+    return `抓取来源（GitHub 仓库 ${canonical.url}）：\n客观事实（权威，来自 GitHub API，source_facts 里对应字段直接采用，不要自己再猜或改写出不一致的数字）：${factsLine}\nREADME/描述正文（已截断）：\n${text || "（空）"}`;
+  }
+  return `抓取来源（网页 ${canonical.url}，标题：${canonical.title || "（无标题）"}）：\n正文（已截断）：\n${text || "（空）"}`;
+}
+
+/** Prompt for the enrichment pass' single rewrite ("reason") step. */
+export function enrichPrompt(subject: EnrichSubject, canonical: CanonicalResult, searchResults: Array<{ question: string; sources: SearchResult["sources"] }>): string {
+  return [
+    `你在为个人 agent 能力库里已经建档、判定为 keep 的一张卡片做「补充调研」重写：不是从零分析，而是基于已抓取到的权威来源和补充检索，把卡片改写得更准确、更贴近能力本身。${CAPABILITY_TYPE_DEFINITIONS}`,
+    subject.pinned
+      ? `硬性约束：这张卡片的 type/usage/tags 已由人工确定（type=${subject.type}、usage=${subject.usage}、tags=${subject.tags.join(", ")}），本次改写必须原样使用这三项，不得改判；playbook 必须按这个 type/usage 的形状组织内容。`
+      : "",
+    `原有卡片：\n标题：${subject.title}\n类型：${subject.type}\n用途：${subject.usage}\n摘要：${subject.summary}\n价值信号：${subject.signals.join("；")}\n标签：${subject.tags.join(", ")}\nPlaybook：${JSON.stringify(subject.playbook)}\n来源链接：${subject.source_url ?? "（无）"}`,
+    subject.open_questions.length ? `第一轮遗留的待核实问题：${subject.open_questions.join("；")}` : "第一轮没有遗留待核实问题。",
+    canonicalPromptText(canonical),
+    searchResults.length
+      ? `针对待核实问题做的补充检索结果：\n${searchResults.map((r) => `问题「${r.question}」：\n${r.sources.length ? r.sources.map((s, i) => `[${i + 1}] ${s.title} ${s.url}\n${s.content}`).join("\n") : "（无结果）"}`).join("\n\n")}`
+      : "本次没有做补充检索（没有遗留问题，或已直接从抓取来源确认）。",
+    [
+      "请重新输出改写后的卡片字段：",
+      subject.pinned ? "" : "type 与 usage 按上面的类型定义与 integrate（可直接拿来用）/reference（值得借鉴后自研）之间重新判断；",
+      "summary 写这个能力本身——它是什么、解决什么问题、怎么用、边界/局限在哪（≤ 300 字）；summary 只写关于能力的事实性描述，绝不能复述你是怎么核实/抓取/搜索的，禁止出现「经核实」「未直接证实」「抓取失败」这类过程叙述占据正文；来源是否可信、有没有核实到，只放进 signals 里恰好一条，不得写进 summary；",
+      "signals 给 2–3 条价值信号，其中恰好一条专门讲来源可信度/是否已核实，其余讲解决什么场景、适用边界等；",
+      "playbook 按 usage/type 给可执行内容：integrate 给 install 命令、repo、prompt 全文；reference 给借鉴要点；experience 类型必须把核心内容本身写进 content；",
+      subject.pinned ? "" : `tags 给 1–6 个标签，规则同第一轮：必须是英文小写单词或用连字符连接的短语，不能是中文，不能是 ${RESERVED_TAGS.join("、")} 这类类型/用途词；接入方式明确时使用 ${INTERFACE_TAGS.join("、")} 中的固定标签；已有贴切的标签要复用；`
+    ].filter(Boolean).join(""),
+    `score 给这个能力对 Joey 的 AI 价值打 1–5 分整数，${SCORE_RUBRIC}score_reason 用一句不超过 80 字的中文说明打分依据。`,
+    "source_facts 是关于来源的客观事实（repo_url、stars、last_update、license、homepage）：只能填写上面「抓取来源」或「补充检索结果」中明确出现的内容，不能推测、不能凭经验填写；某一项没有明确出现就留空。",
+    "open_questions 列出改写后仍然存在、需要进一步核实的问题（0–3 条，每条 ≤ 30 字）：把第一轮遗留问题中，这次抓取/检索已经解决的去掉，仍未解决的保留，也可以基于这次新看到的信息发现新的疑问；已经解决就不要再列进去，宁可留空也不要为了填满硬凑。"
+  ].filter(Boolean).join("\n\n");
 }

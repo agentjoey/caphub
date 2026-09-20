@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Pool } from "pg";
 import { createDeepAnalysisDeps, runDeepAnalysis } from "../lib/analysis/deep";
+import { createEnrichDeps, runEnrichment } from "../lib/analysis/enrich";
 import { runPipeline } from "../lib/analysis/pipeline";
 import { loadConfig, type WorkerConfig } from "../lib/config";
 import { createPool } from "../lib/db/pool";
@@ -140,9 +141,13 @@ async function main() {
     // WorkerConfig) and a Tavily key (optional, same requirement mixed/minimax_tavily pipelines
     // have) -- without the latter it's simply left unavailable, same treatment those get.
     const deepDeps = createDeepAnalysisDeps(config, pool);
+    // Enrichment (M3.7) has the same two-key requirement as deep analysis (fixed DeepSeek +
+    // Tavily deps, see createEnrichDeps), so it's unavailable under the exact same condition.
+    const enrichDeps = createEnrichDeps(config, pool);
     if (!config.analysisEnabled) log({ analysis: "disabled" });
     if (!embedCall) log({ embeddings: "disabled" });
     if (!deepDeps) log({ deepAnalysis: "disabled", reason: "TAVILY_API_KEY not configured" });
+    if (!enrichDeps) log({ enrichment: "disabled", reason: "TAVILY_API_KEY not configured" });
     const embedBackoff = new EmbedBackoff();
     // RunQueue's claim/heartbeat take a `kind` to scope themselves to one run kind's rows and
     // lease duration (analysis: 2 min, deep: 6 min -- see lib/queue/runs.ts); runTick's TickDeps
@@ -156,6 +161,11 @@ async function main() {
     const deepQueue = {
       claim: (token: string, now: Date) => queue.claim(token, now, "deep"),
       heartbeat: (lease: Lease, now: Date) => queue.heartbeat(lease, now, "deep"),
+      finish: (lease: Lease, outcome: RunOutcome, now: Date) => queue.finish(lease, outcome, now)
+    };
+    const enrichQueue = {
+      claim: (token: string, now: Date) => queue.claim(token, now, "enrich"),
+      heartbeat: (lease: Lease, now: Date) => queue.heartbeat(lease, now, "enrich"),
       finish: (lease: Lease, outcome: RunOutcome, now: Date) => queue.finish(lease, outcome, now)
     };
 
@@ -205,6 +215,29 @@ async function main() {
           }, controller.signal);
           if (state !== "idle") log({ tick: state });
           if (state === "idle") {
+            // Worker priority order (M3.7 brief): 普通分析 → 补充调研 → 深度分析 → review → embed.
+            // Enrichment (M3.7) is tried right after the normal analysis tick, before deep
+            // analysis: a card entering `keep` gets its canonical-source rewrite before anyone
+            // spends an 8-call deep-analysis budget on it. Same `kind` of run on the same
+            // queue/lease machinery as deep; a thrown error from runTick's own `run` callback is
+            // always caught inside runTick itself and recorded as the run's own failure (never
+            // rethrown), so the try/catch here only guards against runTick's surrounding
+            // plumbing (e.g. queue.claim itself failing) -- it must never end this loop.
+            let enrichState: "idle" | "processed" = "idle";
+            if (enrichDeps) {
+              try {
+                enrichState = await runTick({
+                  queue: enrichQueue,
+                  run: (lease, signal) => runEnrichment(enrichDeps, lease, signal),
+                  clock: () => new Date(),
+                  ownerToken: randomUUID,
+                  log
+                }, controller.signal);
+                if (enrichState !== "idle") log({ enrichTick: enrichState });
+              } catch (e) {
+                log({ enrichTickError: e instanceof Error ? e.message : String(e) });
+              }
+            }
             // Deep analysis (M3.6) is tried next, before review/embed: same priority order as
             // the normal analysis tick above, just a different `kind` of run on the same
             // queue/lease machinery. A deep-analysis failure (a thrown error from runTick's own
@@ -212,7 +245,7 @@ async function main() {
             // failure, never rethrown) must never end this loop -- the try/catch here only
             // guards against runTick's surrounding plumbing (e.g. queue.claim itself failing).
             let deepState: "idle" | "processed" = "idle";
-            if (deepDeps) {
+            if (enrichState === "idle" && deepDeps) {
               try {
                 deepState = await runTick({
                   queue: deepQueue,

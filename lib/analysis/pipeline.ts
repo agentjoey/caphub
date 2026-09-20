@@ -5,7 +5,7 @@ import { ProviderError } from "../providers/errors";
 import { createMiniMaxCall } from "../providers/minimax";
 import { createMiniMaxSearch, type SearchCall } from "../providers/minimax-search";
 import { createTavilySearch } from "../providers/tavily";
-import type { Lease } from "../queue/runs";
+import { enqueueEnrichRun, type Lease } from "../queue/runs";
 import type { ObjectStore } from "../storage/s3";
 import { RunBudget } from "./budget";
 import { upsertCapability } from "./capabilities";
@@ -226,6 +226,15 @@ export async function runPipeline(deps: PipelineDeps, lease: Lease, signal: Abor
     const enteringKeep = stored.verdict === "keep" && stored.previousVerdict !== "keep" && !stored.deleted;
     if (enteringKeep) await bumpTags(db, card.tags);
     await db.query("COMMIT");
+    // Queued outside the transaction just committed above (via deps.pool, a separate
+    // connection): a losing race against another enqueue for the same capture surfaces as
+    // 23505 inside enqueueEnrichRun's own try/catch, and swallowing that *inside* the
+    // transaction would abort it (Postgres marks a transaction failed on any error until
+    // ROLLBACK, even one caught in application code) -- see migration 011's
+    // analysis_runs_one_active_enrich.
+    if (stored.verdict === "keep" && stored.enrichedAt === null) {
+      await enqueueEnrichRun(deps.pool, lease.captureId, lease.pipeline);
+    }
     return { capabilityId: stored.id, verdict: stored.verdict };
   } catch (error) {
     await db.query("ROLLBACK");

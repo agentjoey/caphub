@@ -21,6 +21,10 @@ function deps(kind: Kind, opts: {
   embedQueryResult?: number[] | null;
   /** Throws instead of resolving, to exercise the belt-and-braces try/catch around it. */
   embedQueryThrows?: boolean;
+  /** `enriched_at` the fake upsert RETURNs; null (never enriched) unless overridden. */
+  enrichedAt?: string | null;
+  /** Simulates a concurrent duplicate enqueue racing analysis_runs_one_active_enrich (23505). */
+  enrichEnqueueThrows?: boolean;
 } = {}) {
   const calls: string[] = [];
   const sql: Array<{ text: string; values: unknown[]; client?: boolean }> = [];
@@ -62,7 +66,11 @@ function deps(kind: Kind, opts: {
       // values: [id, captureId, runId, title, type, summary, signals, suggested_verdict,
       //          suggested_reason, confidence, verdict, verdictBy, usage, playbook, tags, source_url]
       const verdict = values[10] as string;
-      return { rows: [{ id: "cab_1", verdict, previous_verdict: null, deleted: false }] };
+      return { rows: [{ id: "cab_1", verdict, previous_verdict: null, deleted: false, enriched_at: opts.enrichedAt ?? null }] };
+    }
+    if (text.includes("INSERT INTO caphub_v2.analysis_runs")) {
+      if (opts.enrichEnqueueThrows) throw Object.assign(new Error("duplicate"), { code: "23505" });
+      return { rows: [] };
     }
     return { rows: [] };
   };
@@ -126,6 +134,36 @@ describe("runPipeline", () => {
     expect(clientSql).toContain("ROLLBACK");
     expect(clientSql).not.toContain("COMMIT");
     expect(released()).toBe(1);
+  });
+
+  it("enqueues an M3.7 enrich run, outside the capability transaction, when the card enters keep with enriched_at still null", async () => {
+    const { d, sql } = deps("text");
+    await runPipeline(d, { runId: "run_enrich", captureId: "cap_enrich", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
+    const enqueue = sql.find((q) => q.text.includes("INSERT INTO caphub_v2.analysis_runs"));
+    expect(enqueue).toBeDefined();
+    // Issued via deps.pool directly, not the capability upsert's transactional client -- see
+    // pipeline.ts's comment on why this must happen after COMMIT, not inside the transaction.
+    expect(enqueue!.client).toBeUndefined();
+    expect(enqueue!.text).toContain("'enrich'");
+    expect(enqueue!.values).toEqual([expect.any(String), "cap_enrich", "mixed"]);
+  });
+
+  it("does not enqueue an enrich run when the card already has enriched_at set", async () => {
+    const { d, sql } = deps("text", { enrichedAt: "2026-09-19T00:00:00.000Z" });
+    await runPipeline(d, { runId: "run_no_enrich", captureId: "cap_no_enrich", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
+    expect(sql.some((q) => q.text.includes("INSERT INTO caphub_v2.analysis_runs"))).toBe(false);
+  });
+
+  it("does not enqueue an enrich run when the card does not enter keep", async () => {
+    const { d, sql } = deps("text", { reasonValue: pendingCard });
+    await runPipeline(d, { runId: "run_pending", captureId: "cap_pending", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
+    expect(sql.some((q) => q.text.includes("INSERT INTO caphub_v2.analysis_runs"))).toBe(false);
+  });
+
+  it("does not fail the pipeline run when a concurrent enqueue already queued an enrich run (23505)", async () => {
+    const { d } = deps("text", { enrichEnqueueThrows: true });
+    const out = await runPipeline(d, { runId: "run_dup_enrich", captureId: "cap_dup_enrich", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
+    expect(out).toEqual({ capabilityId: "cab_1", verdict: "keep" });
   });
 
   it("excludes its own capture from the similar-capability lookup", async () => {

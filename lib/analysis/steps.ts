@@ -2,8 +2,9 @@ import type { Pool } from "pg";
 import { jsonStringifyStripNul, stripNul } from "../text/sanitize";
 
 // "plan" and "synthesize" are the deep-analysis pipeline's steps (lib/analysis/deep.ts);
-// the analysis_steps.step CHECK was widened to allow them by migration 010.
-export type StepName = "vision" | "search" | "reason" | "review" | "plan" | "synthesize";
+// the analysis_steps.step CHECK was widened to allow them by migration 010. "fetch" is the
+// enrichment pipeline's canonical-source fetch (lib/analysis/enrich.ts), added by migration 011.
+export type StepName = "vision" | "search" | "reason" | "review" | "plan" | "synthesize" | "fetch";
 
 export interface StepRow {
   runId: string; step: StepName; provider: string; model: string; attempt: number;

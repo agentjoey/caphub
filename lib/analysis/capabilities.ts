@@ -10,6 +10,14 @@ export interface UpsertCapabilityResult {
   previousVerdict: string | null;
   /** Whether the row is (or was) soft-deleted. */
   deleted: boolean;
+  /**
+   * Whether the second-pass enrichment (M3.7) has run for this card yet -- this upsert never
+   * touches `enriched_at` itself (a rerun of the first pass must not silently wipe out an
+   * existing enrichment), so this reports whatever value was already there. The caller uses it
+   * to decide whether to enqueue an `enrich` run: see lib/analysis/pipeline.ts and migration
+   * 011's `enqueueEnrichRun` (lib/queue/runs.ts).
+   */
+  enrichedAt: string | null;
 }
 
 export async function upsertCapability(
@@ -24,7 +32,7 @@ export async function upsertCapability(
   // let the ON CONFLICT branch keep the existing serial via `coalesce(..., serial)` (a no-op
   // coalesce since the VALUES-side serial is always NULL, but keeps the human-verdict-wins
   // shape symmetric with `verdict`/`verdict_by`/`verdict_at`).
-  const r = await db.query<{ id: string; verdict: string; previous_verdict: string | null; deleted: boolean }>(
+  const r = await db.query<{ id: string; verdict: string; previous_verdict: string | null; deleted: boolean; enriched_at: string | null }>(
     `WITH prev AS (
        SELECT verdict, deleted_at FROM caphub_v2.capabilities WHERE capture_id = $2
      ), upsert AS (
@@ -59,9 +67,9 @@ export async function upsertCapability(
          score = CASE WHEN caphub_v2.capabilities.verdict_by = 'human' THEN caphub_v2.capabilities.score ELSE excluded.score END,
          score_reason = CASE WHEN caphub_v2.capabilities.verdict_by = 'human' THEN caphub_v2.capabilities.score_reason ELSE excluded.score_reason END,
          serial = coalesce(caphub_v2.capabilities.serial, excluded.serial)
-       RETURNING id, verdict, deleted_at
+       RETURNING id, verdict, deleted_at, enriched_at
      )
-     SELECT upsert.id, upsert.verdict, prev.verdict AS previous_verdict, coalesce(prev.deleted_at, upsert.deleted_at) IS NOT NULL AS deleted
+     SELECT upsert.id, upsert.verdict, prev.verdict AS previous_verdict, coalesce(prev.deleted_at, upsert.deleted_at) IS NOT NULL AS deleted, upsert.enriched_at
      FROM upsert LEFT JOIN prev ON true`,
     [newId("cab"), row.captureId, row.runId, stripNul(c.title), c.type, stripNul(c.summary), jsonStringifyStripNul(c.signals),
       c.suggested_verdict, stripNul(c.suggested_reason), c.confidence, row.verdict, row.verdictBy, c.usage, jsonStringifyStripNul(c.playbook),
@@ -81,5 +89,5 @@ export async function upsertCapability(
       [out.id]
     );
   }
-  return { id: out.id, verdict: out.verdict, previousVerdict: out.previous_verdict, deleted: out.deleted };
+  return { id: out.id, verdict: out.verdict, previousVerdict: out.previous_verdict, deleted: out.deleted, enrichedAt: out.enriched_at };
 }

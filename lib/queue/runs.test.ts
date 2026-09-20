@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_ATTEMPTS, RunQueue } from "./runs";
+import { enqueueEnrichRun, MAX_ATTEMPTS, RunQueue } from "./runs";
 
 function fakePool(claimRow: Record<string, unknown> | undefined) {
   const calls: string[] = [];
@@ -58,6 +58,15 @@ describe("RunQueue.claim", () => {
     expect(calls[claimIdx]).toContain("AND kind = $4)");
     expect(params[claimIdx]).toEqual([now.toISOString(), "tok", MAX_ATTEMPTS, "deep", "360"]);
   });
+
+  it("scopes claim to 'enrich' and uses the 4-minute enrich lease", async () => {
+    const { pool, calls, params } = fakePool({ id: "run_enrich", capture_id: "cap_enrich", pipeline: "mixed" });
+    const now = new Date("2026-09-19T00:00:00Z");
+    const lease = await new RunQueue(pool).claim("tok", now, "enrich");
+    expect(lease?.runId).toBe("run_enrich");
+    const claimIdx = calls.findIndex((c) => c.includes("UPDATE caphub_v2.analysis_runs r SET state = 'running'"));
+    expect(params[claimIdx]).toEqual([now.toISOString(), "tok", MAX_ATTEMPTS, "enrich", "240"]);
+  });
 });
 
 describe("RunQueue.heartbeat", () => {
@@ -74,5 +83,32 @@ describe("RunQueue.heartbeat", () => {
     const pool = { query: async (_t: string, v: unknown[] = []) => { params.push(v); return { rowCount: 1 }; } };
     await new RunQueue(pool as never).heartbeat({ runId: "r1", captureId: "c1", pipeline: "minimax", ownerToken: "tok" }, new Date("2026-09-19T00:00:00Z"), "deep");
     expect(params[0]).toEqual(["r1", "2026-09-19T00:00:00.000Z", "tok", "360"]);
+  });
+
+  it("renews the lease using the 4-minute enrich duration when kind is 'enrich'", async () => {
+    const params: unknown[][] = [];
+    const pool = { query: async (_t: string, v: unknown[] = []) => { params.push(v); return { rowCount: 1 }; } };
+    await new RunQueue(pool as never).heartbeat({ runId: "r1", captureId: "c1", pipeline: "minimax", ownerToken: "tok" }, new Date("2026-09-19T00:00:00Z"), "enrich");
+    expect(params[0]).toEqual(["r1", "2026-09-19T00:00:00.000Z", "tok", "240"]);
+  });
+});
+
+describe("enqueueEnrichRun", () => {
+  it("inserts a queued enrich run with the given capture and pipeline", async () => {
+    const params: unknown[][] = [];
+    const pool = { query: async (_t: string, v: unknown[] = []) => { params.push(v); return { rows: [] }; } };
+    await enqueueEnrichRun(pool as never, "cap_1", "mixed");
+    expect(params[0][1]).toBe("cap_1");
+    expect(params[0][2]).toBe("mixed");
+  });
+
+  it("swallows a unique_violation (23505) as an already-queued run instead of throwing", async () => {
+    const pool = { query: async () => { throw Object.assign(new Error("duplicate"), { code: "23505" }); } };
+    await expect(enqueueEnrichRun(pool as never, "cap_1", "mixed")).resolves.toBeUndefined();
+  });
+
+  it("rethrows any other error", async () => {
+    const pool = { query: async () => { throw new Error("boom"); } };
+    await expect(enqueueEnrichRun(pool as never, "cap_1", "mixed")).rejects.toThrow("boom");
   });
 });

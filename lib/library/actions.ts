@@ -3,6 +3,7 @@ import { capabilityTypeSchema, isValidTag, type CapabilityType, type Overlap } f
 import { bumpTags } from "../analysis/tags";
 import type { Pipeline } from "../config";
 import { newId } from "../ids";
+import { enqueueEnrichRun } from "../queue/runs";
 import { getDict, type Locale } from "../i18n";
 import { stripNul } from "../text/sanitize";
 import { isProgress, type Progress } from "./labels";
@@ -52,17 +53,27 @@ export function decide(pool: Pool, input: { id: string; expectedUpdatedAt: strin
     return Promise.resolve(invalid(dict.invalid));
   }
   return tx(pool, async (db) => {
-    const r = await db.query<{ updated_at: Date; tags: string[]; previous: string }>(
+    const r = await db.query<{ updated_at: Date; tags: string[]; previous: string; capture_id: string; enriched_at: string | null; pipeline: Pipeline }>(
       `UPDATE caphub_v2.capabilities cb SET verdict = $3, verdict_by = 'human', verdict_at = now(), updated_at = now(),
          serial = CASE WHEN $3 = 'keep' THEN coalesce(serial, nextval('caphub_v2.capability_serial')) ELSE serial END
        FROM (SELECT verdict AS previous FROM caphub_v2.capabilities WHERE id = $1) prev
        WHERE cb.id = $1 AND date_trunc('milliseconds', cb.updated_at) = $2::timestamptz AND cb.deleted_at IS NULL
-       RETURNING cb.updated_at, cb.tags, prev.previous`,
+       RETURNING cb.updated_at, cb.tags, prev.previous, cb.capture_id, cb.enriched_at,
+         (SELECT r.pipeline FROM caphub_v2.analysis_runs r WHERE r.id = cb.run_id) AS pipeline`,
       [input.id, input.expectedUpdatedAt, input.verdict]);
     const row = r.rows[0];
-    if (!row) return missingOrConflict(db, input.id, locale);
+    if (!row) return { result: await missingOrConflict(db, input.id, locale), enrich: null };
     if (input.verdict === "keep" && row.previous !== "keep") await bumpTags(db, row.tags);
-    return { ok: true, updatedAt: iso(row.updated_at) };
+    const enrich = input.verdict === "keep" && row.enriched_at === null ? { captureId: row.capture_id, pipeline: row.pipeline } : null;
+    return { result: { ok: true, updatedAt: iso(row.updated_at) } as ActionResult, enrich };
+  }).then(async ({ result, enrich }) => {
+    // Enqueued after the transaction above has committed, via `pool` (a separate connection),
+    // not `db` -- swallowing enqueueEnrichRun's own 23505 handling *inside* that transaction
+    // would abort it (any error marks a Postgres transaction failed until ROLLBACK, even one
+    // caught in application code). A losing race against another enqueue for the same capture
+    // is exactly what migration 011's analysis_runs_one_active_enrich exists to stop.
+    if (enrich) await enqueueEnrichRun(pool, enrich.captureId, enrich.pipeline);
+    return result;
   });
 }
 
@@ -79,17 +90,26 @@ export function editSuggestion(pool: Pool, input: { id: string; expectedUpdatedA
     return Promise.resolve(invalid(bad.length ? `${dict.tagsInvalidPrefix}${bad.join(dict.tagsJoinSeparator)}${dict.tagsInvalidSuffix}` : dict.tagsCountInvalid));
   }
   return tx(pool, async (db) => {
-    const r = await db.query<{ updated_at: Date; tags: string[]; previous: string }>(
+    const r = await db.query<{ updated_at: Date; tags: string[]; previous: string; capture_id: string; enriched_at: string | null; pipeline: Pipeline }>(
       `UPDATE caphub_v2.capabilities cb SET type = $3, type_by = 'human', usage = $4, tags = $5, suggestion_by = 'human', verdict = 'keep', verdict_by = 'human', verdict_at = now(), updated_at = now(),
          serial = coalesce(serial, nextval('caphub_v2.capability_serial'))
        FROM (SELECT verdict AS previous FROM caphub_v2.capabilities WHERE id = $1) prev
        WHERE cb.id = $1 AND date_trunc('milliseconds', cb.updated_at) = $2::timestamptz AND cb.deleted_at IS NULL
-       RETURNING cb.updated_at, cb.tags, prev.previous`,
+       RETURNING cb.updated_at, cb.tags, prev.previous, cb.capture_id, cb.enriched_at,
+         (SELECT r.pipeline FROM caphub_v2.analysis_runs r WHERE r.id = cb.run_id) AS pipeline`,
       [input.id, input.expectedUpdatedAt, input.type, input.usage, tags]);
     const row = r.rows[0];
-    if (!row) return missingOrConflict(db, input.id, locale);
+    if (!row) return { result: await missingOrConflict(db, input.id, locale), enrich: null };
     if (row.previous !== "keep") await bumpTags(db, tags);
-    return { ok: true, updatedAt: iso(row.updated_at) };
+    // editSuggestion always results in verdict = 'keep' (set unconditionally above), so the
+    // only gate here is whether this card has ever been enriched.
+    const enrich = row.enriched_at === null ? { captureId: row.capture_id, pipeline: row.pipeline } : null;
+    return { result: { ok: true, updatedAt: iso(row.updated_at) } as ActionResult, enrich };
+  }).then(async ({ result, enrich }) => {
+    // See decide()'s matching comment: enqueued after this transaction has committed, via
+    // `pool`, not `db`.
+    if (enrich) await enqueueEnrichRun(pool, enrich.captureId, enrich.pipeline);
+    return result;
   });
 }
 

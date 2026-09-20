@@ -1,18 +1,19 @@
 import type { Pool } from "pg";
 import type { Pipeline } from "../config";
+import { newId } from "../ids";
 
 export interface Lease { runId: string; captureId: string; pipeline: Pipeline; ownerToken: string }
 export interface RunOutcome { state: "done" | "failed"; errorCode?: string; errorMessage?: string }
 
 /**
- * A normal analysis run and a deep-analysis run (migration 010's `analysis_runs.kind`) share
- * this same lease/heartbeat/finish machinery, but a deep run's steps (plan → up to 6 searches
- * → two synthesize passes) run far longer than a normal run's, so it gets a longer lease --
- * see {@link LEASE_SECONDS}. `claim`/`heartbeat` take `kind` to scope themselves to one kind's
- * rows at a time; `finish` doesn't need it since run ids are globally unique.
+ * A normal analysis run, a deep-analysis run and an enrichment run (migration 010/011's
+ * `analysis_runs.kind`) share this same lease/heartbeat/finish machinery, but each kind's steps
+ * run for a different amount of time, so each gets its own lease -- see {@link LEASE_SECONDS}.
+ * `claim`/`heartbeat` take `kind` to scope themselves to one kind's rows at a time; `finish`
+ * doesn't need it since run ids are globally unique.
  */
-export type RunKind = "analysis" | "deep";
-const LEASE_SECONDS: Record<RunKind, number> = { analysis: 120, deep: 360 };
+export type RunKind = "analysis" | "deep" | "enrich";
+const LEASE_SECONDS: Record<RunKind, number> = { analysis: 120, deep: 360, enrich: 240 };
 /** A run whose lease expired this many times (worker crash mid-run) is failed instead of reclaimed. */
 export const MAX_ATTEMPTS = 2;
 
@@ -76,5 +77,40 @@ export class RunQueue {
   async summary(): Promise<Array<{ state: string; count: number }>> {
     const r = await this.pool.query<{ state: string; count: string }>("SELECT state, count(*)::text AS count FROM caphub_v2.analysis_runs GROUP BY state ORDER BY state");
     return r.rows.map((x) => ({ state: x.state, count: Number(x.count) }));
+  }
+}
+
+/** True for a Postgres unique_violation (23505) error, e.g. a race against a partial unique index. */
+function isUniqueViolation(e: unknown): boolean {
+  return typeof e === "object" && e !== null && (e as { code?: unknown }).code === "23505";
+}
+
+/**
+ * Queues an `enrich` run (M3.7's second pass) for a capture whose card just became `keep` and
+ * has never been enriched (`enriched_at IS NULL` -- the caller's job to check before calling
+ * this). Three call sites: upsertCapability (auto-keep), decide(keep) and editSuggestion (which
+ * always results in keep) -- see lib/analysis/pipeline.ts and lib/library/actions.ts.
+ *
+ * `pipeline` is NOT NULL on `analysis_runs` but carries no meaning for an enrich run (its
+ * providers are fixed -- DeepSeek + Tavily, see createEnrichDeps), same note as
+ * requestDeepAnalysis's on 'deep' runs; callers pass along whatever pipeline is already in
+ * scope (the triggering run's own, or the card's) rather than asking for one they can't
+ * sensibly choose.
+ *
+ * Concurrency is a fire-and-forget INSERT, not a pre-check + insert: migration 011's
+ * `analysis_runs_one_active_enrich` partial unique index (one active enrich run per capture) is
+ * the only guard, and a losing race surfaces as 23505 here, swallowed as "already queued" rather
+ * than treated as a failure of whatever write just triggered this (a card decision or upsert
+ * must never fail because an enrich run was already queued for it).
+ */
+export async function enqueueEnrichRun(pool: Pick<Pool, "query">, captureId: string, pipeline: Pipeline): Promise<void> {
+  try {
+    await pool.query(
+      "INSERT INTO caphub_v2.analysis_runs (id, capture_id, pipeline, state, kind) VALUES ($1, $2, $3, 'queued', 'enrich')",
+      [newId("run"), captureId, pipeline]
+    );
+  } catch (e) {
+    if (isUniqueViolation(e)) return;
+    throw e;
   }
 }
