@@ -12,6 +12,7 @@ vi.mock("../library/build-notes", async () => {
   return { ...actual, appendBuildNote: appendBuildNoteMock };
 });
 
+import { PAGE_SIZE } from "../library/queries";
 import { appendNote, getCapability, getStats, listRecent, listToBuild, MAX_ITEMS, resolveSerial, searchCapabilities, setBuildProgress } from "./tools";
 
 const fakePool = (rows: unknown[]) => ({ query: vi.fn().mockResolvedValue({ rows, rowCount: rows.length }) });
@@ -47,7 +48,11 @@ function detailRow(overrides: Partial<CapabilityDetail> = {}) {
 }
 
 describe("mcp tools", () => {
-  it("caps the result count at 25 even when asked for more", async () => {
+  it("pins the advertised cap to PAGE_SIZE, since no tool takes a page/offset argument to reach anything beyond it", () => {
+    expect(MAX_ITEMS).toBe(PAGE_SIZE);
+  });
+
+  it("caps the result count at MAX_ITEMS even when asked for more", async () => {
     const res = await searchCapabilities({ pool: fakePool([]) as never }, { query: "动效", limit: 999 });
     expect(res.items.length).toBeLessThanOrEqual(MAX_ITEMS);
   });

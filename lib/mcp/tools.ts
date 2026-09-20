@@ -5,7 +5,7 @@ import { setProgress } from "../library/actions";
 import { appendBuildNote, normalizeNote } from "../library/build-notes";
 import type { Progress } from "../library/labels";
 import { embedSearchQuery } from "../library/query-embedding";
-import { getCapabilityDetail, libraryStats, listLibrary, listTodoCapabilities, type CapabilityDetail, type CapabilityRow, type LibraryFilter } from "../library/queries";
+import { getCapabilityDetail, libraryStats, listLibrary, listTodoCapabilities, PAGE_SIZE, type CapabilityDetail, type CapabilityRow, type LibraryFilter } from "../library/queries";
 import { matchScenarios } from "../library/scenario-match";
 import { formatSerial, parseSerialQuery } from "../library/serial";
 import { resolveSerial } from "./serial";
@@ -15,8 +15,12 @@ export { resolveSerial } from "./serial";
 /** Public web base for a card's page link — never the internal id alone, and never a storage key. */
 const WEB_BASE = "https://caphub.agentjoey.ai";
 
-/** Hard cap on any list a read-only tool returns, regardless of what the caller asked for. */
-export const MAX_ITEMS = 25;
+/**
+ * Hard cap on any list a read-only tool returns, regardless of what the caller asked for.
+ * Pinned to {@link PAGE_SIZE} — no tool accepts a page or offset argument, so anything the
+ * query's `paged()` can't return in a single page is unreachable and must not be advertised.
+ */
+export const MAX_ITEMS = PAGE_SIZE;
 
 const clamp = (n: unknown, fallback: number): number =>
   Math.min(MAX_ITEMS, Math.max(1, Number.isInteger(n) ? (n as number) : fallback));

@@ -1,3 +1,5 @@
+import { PAGE_SIZE } from "../library/queries";
+
 /**
  * JSON Schemas for the seven MCP tools, published verbatim to clients via `tools/list`.
  * Descriptions are written for the calling agent, not for humans: they say when to reach
@@ -12,7 +14,7 @@ export const TOOL_DEFS = [
       type: "object",
       properties: {
         query: { type: "string", description: "自然语言描述，例如'网页滚动动效'" },
-        limit: { type: "integer", minimum: 1, maximum: 25, default: 10 },
+        limit: { type: "integer", minimum: 1, maximum: PAGE_SIZE, default: 10 },
         type: { type: "string", enum: ["skill", "experience", "plugin", "prompt", "tool", "model", "other"] },
         tags: { type: "array", items: { type: "string" } },
         usage: { type: "string", enum: ["integrate", "reference"] }
@@ -34,11 +36,11 @@ export const TOOL_DEFS = [
   },
   {
     name: "list_to_build",
-    description: "列出已保留、仅供参考、还在等待或正在自建的卡片（/todo 集合）。想知道'接下来该做什么'时用这个。",
+    description: "列出还在等待自建、尚未开始的卡片（todo / planned，/todo 集合）。一旦标记为 building 就会从这个列表移除。想知道'接下来该做什么'时用这个。",
     inputSchema: {
       type: "object",
       properties: {
-        limit: { type: "integer", minimum: 1, maximum: 25, default: 10 }
+        limit: { type: "integer", minimum: 1, maximum: PAGE_SIZE, default: 10 }
       }
     }
   },
@@ -48,7 +50,7 @@ export const TOOL_DEFS = [
     inputSchema: {
       type: "object",
       properties: {
-        limit: { type: "integer", minimum: 1, maximum: 25, default: 10 }
+        limit: { type: "integer", minimum: 1, maximum: PAGE_SIZE, default: 10 }
       }
     }
   },
