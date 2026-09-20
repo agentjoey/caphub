@@ -5,7 +5,7 @@ import { upsertCapability } from "./capabilities";
 const card: Card = {
   title: "t", type: "prompt", summary: "s", signals: ["a", "b"], suggested_verdict: "keep", suggested_reason: "r",
   confidence: 0.9, usage: "integrate", playbook: { kind: "integrate", install: [], repo: null, prompt_text: "p" }, tags: ["x"], source_url: null,
-  scenarios: ["coding"]
+  scenarios: ["coding"], score: 4, score_reason: "r", source_facts: {}
 };
 
 describe("upsertCapability", () => {
@@ -26,6 +26,40 @@ describe("upsertCapability", () => {
     expect(out).toEqual({ id: "cab_1", verdict: "keep", previousVerdict: null, deleted: false });
   });
 
+  it("inserts score, score_reason and source_facts", async () => {
+    let sql = "";
+    let params: unknown[] = [];
+    const pool = {
+      query: async (text: string, values: unknown[] = []) => {
+        if (sql === "") { sql = text; params = values; }
+        return { rows: [{ id: "cab_1", verdict: "keep", previous_verdict: null, deleted: false }] };
+      }
+    };
+    const withFacts: Card = { ...card, score: 4, score_reason: "有仓库", source_facts: { repo_url: "https://github.com/a/b", stars: 10 } };
+    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card: withFacts, verdict: "keep", verdictBy: "auto" });
+    expect(sql).toContain("score");
+    expect(sql).toContain("score_reason");
+    expect(sql).toContain("source_facts");
+    expect(params).toContain(4);
+    expect(params).toContain("有仓库");
+    expect(params).toContain(JSON.stringify({ repo_url: "https://github.com/a/b", stars: 10 }));
+  });
+
+  it("a human verdict does not wipe the existing score on re-run", async () => {
+    let sql = "";
+    const pool = {
+      query: async (text: string) => {
+        if (sql === "") sql = text;
+        return { rows: [{ id: "cab_1", verdict: "keep", previous_verdict: "keep", deleted: false }] };
+      }
+    };
+    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_2", card, verdict: "keep", verdictBy: "auto" });
+    // A human-verdict row keeps its score/score_reason regardless of what this run's card carries,
+    // mirroring how verdict/verdict_by/verdict_at are preserved for verdict_by = 'human'.
+    expect(sql).toMatch(/score = CASE WHEN caphub_v2\.capabilities\.verdict_by = 'human' THEN caphub_v2\.capabilities\.score ELSE excluded\.score END/);
+    expect(sql).toMatch(/score_reason = CASE WHEN caphub_v2\.capabilities\.verdict_by = 'human' THEN caphub_v2\.capabilities\.score_reason ELSE excluded\.score_reason END/);
+  });
+
   it("never evaluates nextval() in the INSERT's VALUES, so a conflicting re-run can't burn a serial", async () => {
     const calls: string[] = [];
     const pool = {
@@ -37,7 +71,7 @@ describe("upsertCapability", () => {
     await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card, verdict: "keep", verdictBy: "auto" });
     const [upsertSql, followUpSql] = calls;
     // VALUES always passes a literal NULL for serial; nextval() never appears in the INSERT list.
-    expect(upsertSql).toMatch(/VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11, \$12,[\s\S]*?\n\s*NULL\)/);
+    expect(upsertSql).toMatch(/VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11, \$12,[\s\S]*?\n\s*NULL, \$18, \$19, \$20\)/);
     expect(upsertSql.split("VALUES")[1]).not.toContain("nextval");
     // ON CONFLICT keeps whatever serial the row already has.
     expect(upsertSql).toContain("serial = coalesce(caphub_v2.capabilities.serial, excluded.serial)");
@@ -82,7 +116,7 @@ describe("upsertCapability", () => {
       ...card,
       title: "t\u0000itle", summary: "s\u0000ummary", signals: ["a\u0000", "b"], suggested_reason: "r\u0000eason",
       playbook: { kind: "integrate", install: [], repo: null, prompt_text: "p\u0000" }, tags: ["x\u0000"], source_url: "https://a.b/\u0000",
-      scenarios: ["coding\u0000"]
+      scenarios: ["coding\u0000"], score_reason: "s\u0000core reason", source_facts: { license: "M\u0000IT" }
     };
     await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card: dirty, verdict: "keep", verdictBy: "auto" });
     for (const p of params) {
@@ -97,5 +131,7 @@ describe("upsertCapability", () => {
     expect(params[14]).toEqual(["x"]);
     expect(params[15]).toBe("https://a.b/");
     expect(params[16]).toEqual(["coding"]);
+    expect(params[18]).toBe("score reason");
+    expect(JSON.parse(params[19] as string)).toEqual({ license: "MIT" });
   });
 });

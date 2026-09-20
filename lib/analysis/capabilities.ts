@@ -30,18 +30,23 @@ export async function upsertCapability(
      ), upsert AS (
        INSERT INTO caphub_v2.capabilities
          (id, capture_id, run_id, title, type, summary, signals, suggested_verdict, suggested_reason, confidence,
-          verdict, verdict_by, verdict_at, usage, playbook, tags, source_url, scenarios, serial)
+          verdict, verdict_by, verdict_at, usage, playbook, tags, source_url, scenarios, serial, score, score_reason, source_facts)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CASE WHEN $12::text IS NULL THEN NULL ELSE now() END, $13, $14, $15, $16, $17,
-         NULL)
+         NULL, $18, $19, $20)
        ON CONFLICT (capture_id) DO UPDATE SET
          run_id = excluded.run_id, title = excluded.title, type = excluded.type, summary = excluded.summary,
          signals = excluded.signals, suggested_verdict = excluded.suggested_verdict, suggested_reason = excluded.suggested_reason,
          confidence = excluded.confidence, usage = excluded.usage, playbook = excluded.playbook, tags = excluded.tags,
-         source_url = excluded.source_url, scenarios = excluded.scenarios, review_note = NULL, review_error = NULL, review_requested_at = NULL,
+         source_url = excluded.source_url, scenarios = excluded.scenarios, source_facts = excluded.source_facts,
+         review_note = NULL, review_error = NULL, review_requested_at = NULL,
          notified_at = NULL, updated_at = now(),
          verdict = CASE WHEN caphub_v2.capabilities.verdict_by = 'human' THEN caphub_v2.capabilities.verdict ELSE excluded.verdict END,
          verdict_by = CASE WHEN caphub_v2.capabilities.verdict_by = 'human' THEN 'human' ELSE excluded.verdict_by END,
          verdict_at = CASE WHEN caphub_v2.capabilities.verdict_by = 'human' THEN caphub_v2.capabilities.verdict_at ELSE excluded.verdict_at END,
+         -- A human decision on this capability must not have its score silently wiped or
+         -- churned by a later re-run's card, mirroring how verdict itself is pinned above.
+         score = CASE WHEN caphub_v2.capabilities.verdict_by = 'human' THEN caphub_v2.capabilities.score ELSE excluded.score END,
+         score_reason = CASE WHEN caphub_v2.capabilities.verdict_by = 'human' THEN caphub_v2.capabilities.score_reason ELSE excluded.score_reason END,
          serial = coalesce(caphub_v2.capabilities.serial, excluded.serial)
        RETURNING id, verdict, deleted_at
      )
@@ -49,7 +54,8 @@ export async function upsertCapability(
      FROM upsert LEFT JOIN prev ON true`,
     [newId("cab"), row.captureId, row.runId, stripNul(c.title), c.type, stripNul(c.summary), jsonStringifyStripNul(c.signals),
       c.suggested_verdict, stripNul(c.suggested_reason), c.confidence, row.verdict, row.verdictBy, c.usage, jsonStringifyStripNul(c.playbook),
-      c.tags.map(stripNul), c.source_url === null ? null : stripNul(c.source_url), c.scenarios.map(stripNul)]);
+      c.tags.map(stripNul), c.source_url === null ? null : stripNul(c.source_url), c.scenarios.map(stripNul),
+      c.score, stripNul(c.score_reason), jsonStringifyStripNul(c.source_facts)]);
   const out = r.rows[0];
   // Brand-new (or previously-non-keep, now-keep, still-serial-less) rows get their serial
   // assigned here, after the upsert, instead of via nextval() in VALUES — the WHERE clause

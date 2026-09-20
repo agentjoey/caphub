@@ -4,7 +4,7 @@ import { createPipelineDeps, runPipeline, type PipelineDeps } from "./pipeline";
 const card = {
   title: "t", type: "prompt", summary: "s", signals: ["a", "b"], suggested_verdict: "keep", suggested_reason: "r",
   confidence: 0.9, usage: "integrate", playbook: { kind: "integrate", install: [], repo: null, prompt_text: "p" }, tags: ["x"], source_url: null,
-  scenarios: ["coding"]
+  scenarios: ["coding"], score: 4, score_reason: "r", source_facts: {}
 };
 const pendingCard = { ...card, confidence: 0.5 };
 const extraction = { what: "w", visible_text: "", commands: [], prompt_text: null, source_hints: [], questions: [] };

@@ -7,7 +7,8 @@ const valid = {
   signals: ["解决 CI 里可访问性回归", "与库里已有 e2e-a11y 重叠"],
   suggested_verdict: "keep", suggested_reason: "有可执行命令", confidence: 0.9,
   usage: "integrate", playbook: { kind: "integrate", install: ["npm i -D @axe-core/playwright"], repo: null, prompt_text: null },
-  tags: ["testing", "accessibility"], source_url: null, scenarios: []
+  tags: ["testing", "accessibility"], source_url: null, scenarios: [],
+  score: 4, score_reason: "有仓库和安装命令，可复现性高", source_facts: {}
 };
 
 describe("isValidTag", () => {
@@ -109,5 +110,57 @@ describe("cardSchema", () => {
       ...valid,
       playbook: { kind: "integrate", install: ["npm i"], repo: "owner/repo", prompt_text: null }
     }).playbook).toMatchObject({ kind: "integrate", repo: "owner/repo" });
+  });
+
+  describe("score / score_reason / source_facts", () => {
+    it("accepts a score of 1 through 5", () => {
+      for (const score of [1, 2, 3, 4, 5]) expect(cardSchema.parse({ ...valid, score }).score).toBe(score);
+    });
+    it("rejects a score of 0 or 6", () => {
+      expect(() => cardSchema.parse({ ...valid, score: 0 })).toThrow();
+      expect(() => cardSchema.parse({ ...valid, score: 6 })).toThrow();
+    });
+    it("rejects a non-integer score", () => {
+      expect(() => cardSchema.parse({ ...valid, score: 3.5 })).toThrow();
+    });
+    it("requires score and score_reason (missing fields fail)", () => {
+      const { score: _score, ...withoutScore } = valid as typeof valid & { score: number };
+      expect(() => cardSchema.parse(withoutScore)).toThrow();
+      const { score_reason: _reason, ...withoutReason } = valid as typeof valid & { score_reason: string };
+      expect(() => cardSchema.parse(withoutReason)).toThrow();
+    });
+    it("rejects a score_reason over 80 chars", () => {
+      expect(() => cardSchema.parse({ ...valid, score_reason: "a".repeat(81) })).toThrow();
+    });
+    it("defaults source_facts to {} when omitted, and accepts an explicit empty object", () => {
+      const { source_facts: _sf, ...withoutSourceFacts } = valid as typeof valid & { source_facts: object };
+      expect(cardSchema.parse(withoutSourceFacts).source_facts).toEqual({});
+      expect(cardSchema.parse({ ...valid, source_facts: {} }).source_facts).toEqual({});
+    });
+    it("accepts a fully-populated source_facts object", () => {
+      const source_facts = {
+        repo_url: "https://github.com/a/b", stars: 123, last_update: "2026-01-15",
+        license: "MIT", homepage: "https://example.com", as_of: "2026-09-20"
+      };
+      expect(cardSchema.parse({ ...valid, source_facts }).source_facts).toEqual(source_facts);
+    });
+    it("accepts explicit nulls for every source_facts field", () => {
+      const source_facts = { repo_url: null, stars: null, last_update: null, license: null, homepage: null, as_of: null };
+      expect(cardSchema.parse({ ...valid, source_facts }).source_facts).toEqual(source_facts);
+    });
+    it("rejects a non-ISO-date last_update or as_of", () => {
+      expect(() => cardSchema.parse({ ...valid, source_facts: { last_update: "yesterday" } })).toThrow();
+      expect(() => cardSchema.parse({ ...valid, source_facts: { as_of: "not-a-date" } })).toThrow();
+    });
+    it("rejects a negative or non-integer stars count", () => {
+      expect(() => cardSchema.parse({ ...valid, source_facts: { stars: -1 } })).toThrow();
+      expect(() => cardSchema.parse({ ...valid, source_facts: { stars: 1.5 } })).toThrow();
+    });
+    it("stays representable as JSON Schema for providers", () => {
+      const jsonSchema = z.toJSONSchema(cardSchema) as { properties?: Record<string, unknown> };
+      expect(jsonSchema.properties?.score).toMatchObject({ type: "integer", minimum: 1, maximum: 5 });
+      expect(jsonSchema.properties?.score_reason).toMatchObject({ type: "string", maxLength: 80 });
+      expect(jsonSchema.properties?.source_facts).toMatchObject({ type: "object" });
+    });
   });
 });

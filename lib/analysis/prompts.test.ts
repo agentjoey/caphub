@@ -28,4 +28,22 @@ describe("reasonPrompt", () => {
     expect(prompt).toContain("writing（写作：文案）");
     expect(prompt).toMatch(/1–3 个/);
   });
+
+  it("gives the scoring rubric (maturity, reproducibility, fit, complementarity) and the 1-5/4-5/1-2 guidance", () => {
+    const prompt = reasonPrompt({ material, extraction: null, sources: [], similar: [], existingTags: [], scenarios });
+    expect(prompt).toMatch(/成熟度/);
+    expect(prompt).toMatch(/可复现性/);
+    expect(prompt).toMatch(/适用度/);
+    expect(prompt).toMatch(/互补性/);
+    expect(prompt).toMatch(/4[–-]5 分/);
+    expect(prompt).toMatch(/1[–-]2 分/);
+  });
+
+  it("forbids guessing source facts: only fill a field the sources explicitly state", () => {
+    const prompt = reasonPrompt({ material, extraction: null, sources: [], similar: [], existingTags: [], scenarios });
+    expect(prompt).toMatch(/source_facts/);
+    expect(prompt).toMatch(/禁止推测/);
+    expect(prompt).toMatch(/star/i);
+    expect(prompt).toMatch(/更新时间|last_update/);
+  });
 });

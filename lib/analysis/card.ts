@@ -79,6 +79,24 @@ export const SCENARIO_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const scenariosSchema = z.array(z.string().max(40).regex(SCENARIO_SLUG_PATTERN)).max(3).default([]);
 
 /**
+ * Objective facts about the capability's source, gathered from search results — never
+ * guessed by the model (see prompts.ts's explicit "don't invent star counts / dates"
+ * instruction). Every field is optional/nullable, and `{}` (nothing found) is valid and
+ * is the schema's default. `last_update`/`as_of` use `z.iso.date()` (YYYY-MM-DD) so
+ * `z.toJSONSchema` still renders a plain string format, not a custom refinement.
+ */
+export const sourceFactsSchema = z.object({
+  repo_url: z.string().url().nullable().optional(),
+  stars: z.number().int().nonnegative().nullable().optional(),
+  last_update: z.iso.date().nullable().optional(),
+  license: z.string().max(100).nullable().optional(),
+  homepage: z.string().url().nullable().optional(),
+  /** The date these facts were gathered, so a stale source_facts blob can be told apart from a fresh one. */
+  as_of: z.iso.date().nullable().optional()
+});
+export type SourceFacts = z.infer<typeof sourceFactsSchema>;
+
+/**
  * The bare object shape, without the cross-field superRefine below. Exported so
  * `cardSchemaFor` can `.extend()` a field (ZodObject supports this; the ZodEffects
  * produced by `.superRefine()` does not) and then re-apply the same cross-field rules.
@@ -95,7 +113,11 @@ export const cardObjectSchema = z.object({
   playbook: playbookSchema,
   tags: tagsSchema,
   source_url: z.string().url().nullable(),
-  scenarios: scenariosSchema
+  scenarios: scenariosSchema,
+  /** AI-assigned value score, 1 (drop) – 5 (integrate now); see prompts.ts's rubric. */
+  score: z.number().int().min(1).max(5),
+  score_reason: z.string().min(1).max(80),
+  source_facts: sourceFactsSchema.default({})
 });
 
 export function refineCard<T extends { type: CapabilityType; usage: "integrate" | "reference"; playbook: Playbook }>(

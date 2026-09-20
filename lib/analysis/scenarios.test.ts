@@ -8,7 +8,8 @@ const valid = {
   signals: ["解决 CI 里可访问性回归", "与库里已有 e2e-a11y 重叠"],
   suggested_verdict: "keep", suggested_reason: "有可执行命令", confidence: 0.9,
   usage: "integrate", playbook: { kind: "integrate", install: ["npm i -D @axe-core/playwright"], repo: null, prompt_text: null },
-  tags: ["testing", "accessibility"], source_url: null
+  tags: ["testing", "accessibility"], source_url: null,
+  score: 4, score_reason: "有仓库和安装命令，可复现性高"
 };
 
 describe("loadScenarios", () => {
@@ -71,6 +72,13 @@ describe("cardSchemaFor", () => {
 
   it("throws when given an empty slug list", () => {
     expect(() => cardSchemaFor([])).toThrow();
+  });
+
+  it("still requires score/score_reason and defaults source_facts to {}", () => {
+    const schema = cardSchemaFor(slugs);
+    const { score: _score, ...withoutScore } = valid as typeof valid & { score: number };
+    expect(() => schema.parse({ ...withoutScore, scenarios: ["coding"] })).toThrow();
+    expect(schema.parse({ ...valid, scenarios: ["coding"] }).source_facts).toEqual({});
   });
 });
 
