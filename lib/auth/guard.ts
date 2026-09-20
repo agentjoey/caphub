@@ -31,7 +31,17 @@ export async function guardRequest(
 
   const verify = deps.verify ?? verifyAccessJwt;
   try {
-    await verify(token, { aud, teamDomain });
+    const identity = await verify(token, { aud, teamDomain });
+    const isMcp = request.nextUrl.pathname === "/api/mcp";
+    if (isMcp) {
+      const expected = env.CF_ACCESS_SERVICE_TOKEN_CN?.trim();
+      // Fail closed: with no allowlisted common name configured, nobody gets in —
+      // verifying the signature alone would let any service token in the same
+      // Access team through this route.
+      if (!expected || identity.commonName !== expected) return unauthorized();
+    } else if (!identity.email) {
+      return unauthorized();
+    }
     return NextResponse.next();
   } catch {
     return unauthorized();

@@ -40,7 +40,7 @@ async function getJwks(teamDomain: string, fetchFn: typeof fetch, forceRefresh: 
 export async function verifyAccessJwt(
   token: string,
   opts: { aud: string; teamDomain: string; fetch?: typeof fetch; now?: () => Date }
-): Promise<{ email: string }> {
+): Promise<{ email: string; commonName: string }> {
   if (!opts.aud || !opts.aud.trim()) throw new Error("ACCESS_AUD_REQUIRED");
   if (!opts.teamDomain || !HOSTNAME_RE.test(opts.teamDomain.trim())) throw new Error("ACCESS_TEAM_DOMAIN_INVALID");
 
@@ -62,6 +62,7 @@ export async function verifyAccessJwt(
   }
 
   const email = typeof payload.email === "string" ? payload.email : "";
-  if (!email) throw new Error("ACCESS_EMAIL_MISSING");
-  return { email };
+  const commonName = typeof payload.common_name === "string" ? payload.common_name : "";
+  if (!email && !commonName) throw new Error("ACCESS_IDENTITY_MISSING");
+  return { email, commonName };
 }
