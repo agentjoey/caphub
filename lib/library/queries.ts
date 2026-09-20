@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
-import type { CapabilityType, Playbook, ReviewNote } from "../analysis/card";
+import type { CapabilityType, Playbook, ReviewNote, SourceFacts } from "../analysis/card";
+import type { Progress } from "./labels";
 import { toVectorLiteral } from "../analysis/embedding";
 import { parseSerialQuery } from "./serial";
 
@@ -13,6 +14,8 @@ const CARD_COLUMNS = `
   cb.suggested_verdict AS "suggestedVerdict", cb.suggested_reason AS "suggestedReason", cb.confidence,
   cb.verdict, cb.verdict_by AS "verdictBy", cb.usage, cb.playbook, cb.tags, cb.source_url AS "sourceUrl",
   cb.serial, cb.scenarios,
+  cb.score, cb.score_reason AS "scoreReason", cb.source_facts AS "sourceFacts",
+  cb.progress, cb.progress_link AS "progressLink", cb.progress_at AS "progressAt",
   cb.review_note AS "reviewNote", cb.review_requested_at AS "reviewRequestedAt", cb.review_error AS "reviewError",
   cb.synced_at AS "syncedAt", cb.deleted_at AS "deletedAt", cb.created_at AS "createdAt", cb.updated_at AS "updatedAt",
   json_build_object('kind', c.kind, 'objectKey', c.object_key, 'thumbKey', c.thumb_key, 'text', c.text, 'url', c.url) AS capture`;
@@ -23,6 +26,9 @@ export interface CapabilityRow {
   verdict: "keep" | "discard" | "pending"; verdictBy: "auto" | "human" | null;
   usage: "integrate" | "reference"; playbook: Playbook; tags: string[]; sourceUrl: string | null;
   serial: number | null; scenarios: string[];
+  /** AI value score 1–5, or null for a card scored before M3.5's backfill — the UI must render nothing rather than a 0. */
+  score: number | null; scoreReason: string | null; sourceFacts: SourceFacts;
+  progress: Progress; progressLink: string | null; progressAt: string | null;
   reviewNote: ReviewNote | null; reviewRequestedAt: string | null; reviewError: string | null;
   syncedAt: string | null; deletedAt: string | null; createdAt: string; updatedAt: string;
   capture: { kind: "image" | "text" | "url"; objectKey: string | null; thumbKey: string | null; text: string | null; url: string | null };

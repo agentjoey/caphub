@@ -23,6 +23,7 @@ export const dictZh = {
     verdict: { keep: "保留", discard: "丢弃", pending: "待决" },
     verdictBy: { auto: "自动", human: "人工" },
     runState: { queued: "排队中", running: "分析中", done: "已建卡", failed: "失败" },
+    progress: { todo: "未处理", planned: "已排期", building: "自研中", done: "已完成", dropped: "放弃" },
     errors: {
       OBJECT_UNAVAILABLE: "原图已过期，无法重跑",
       BUDGET: "超出单次分析预算",
@@ -115,13 +116,36 @@ export const dictZh = {
   detail: {
     back: "← 能力库",
     createdAt: "创建于 {date}",
+    summary: "一句话总结",
+    signals: "价值信号",
     howToUse: "怎么用",
+    sourceFacts: "来源事实",
+    repoUrl: "仓库地址",
+    stars: "star 数",
+    lastUpdate: "最近更新",
+    license: "许可证",
+    homepage: "主页",
+    factsAsOf: "事实采集于 {date}",
     reviewingNotice: "DeepSeek 复核中，稍后刷新查看",
     reviewFailedPrefix: "复核失败：",
     reviewNoteAgree: "复核意见：同意",
     reviewNoteDisagree: "复核意见：不同意",
     syncedAt: "最后同步到 Obsidian：{date}",
     notSynced: "尚未同步"
+  },
+  scoreBadge: {
+    label: "★ {score}/5",
+    aria: "价值评分 {score} / 5"
+  },
+  progressControl: {
+    title: "自研进度",
+    stateLegend: "进度",
+    linkLabel: "关联链接",
+    linkPlaceholder: "https://…",
+    linkHint: "自研仓库、issue 或笔记地址，可留空",
+    save: "保存进度",
+    saving: "保存中…",
+    genericError: "操作失败，请重试"
   },
   detailActions: {
     keep: "保留",
@@ -198,6 +222,9 @@ export const dictZh = {
     captureNotFound: "投递记录不存在",
     objectExpired: "原图已过期，无法重跑",
     alreadyQueued: "已在排队或分析中",
-    reviewInProgress: "复核已在进行中"
+    reviewInProgress: "复核已在进行中",
+    progressInvalid: "进度状态不合法",
+    progressLinkInvalid: "链接需以 http:// 或 https:// 开头",
+    progressNotReference: "只有参考自研的卡片可以记录进度"
   }
 } as const;

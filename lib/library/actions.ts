@@ -4,6 +4,8 @@ import { bumpTags } from "../analysis/tags";
 import type { Pipeline } from "../config";
 import { newId } from "../ids";
 import { getDict, type Locale } from "../i18n";
+import { stripNul } from "../text/sanitize";
+import { isProgress, type Progress } from "./labels";
 
 export type ActionResult =
   | { ok: true; updatedAt: string }
@@ -98,6 +100,57 @@ export async function softDelete(pool: Pool, input: { id: string; expectedUpdate
      WHERE id = $1 AND date_trunc('milliseconds', updated_at) = $2::timestamptz AND deleted_at IS NULL RETURNING updated_at`,
     [input.id, input.expectedUpdatedAt]);
   return r.rows[0] ? { ok: true, updatedAt: iso(r.rows[0].updated_at) } : missingOrConflict(pool, input.id, locale);
+}
+
+/**
+ * Normalizes an optional self-build link: blank/absent becomes NULL, http(s) URLs are kept
+ * (NUL-stripped, since a pasted value can carry one and Postgres text cannot store U+0000),
+ * anything else — including `javascript:` and other schemes — is rejected by returning
+ * `undefined`, which the caller turns into an INVALID ActionResult.
+ */
+function normalizeProgressLink(link: string | null | undefined): string | null | undefined {
+  if (link === null || link === undefined) return null;
+  if (typeof link !== "string") return undefined;
+  const value = stripNul(link).trim();
+  if (!value) return null;
+  if (value.length > 500) return undefined;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+  } catch {
+    return undefined;
+  }
+  return value;
+}
+
+/**
+ * Records self-build progress on a `usage = 'reference'` card. Uses the same
+ * `date_trunc('milliseconds', updated_at)` optimistic lock as decide()/editSuggestion() and
+ * bumps `updated_at` too — one lock discipline for every writer, at the cost of re-embedding
+ * the card on the next embed tick (accepted in the M3.5 plan). Never touches `verdict`.
+ */
+export async function setProgress(
+  pool: Pool,
+  input: { id: string; expectedUpdatedAt: string; progress: Progress; link?: string | null },
+  locale: Locale = "zh"
+): Promise<ActionResult> {
+  const dict = getDict(locale).actions;
+  if (!isNonEmptyString(input.id) || !isParsableTimestamp(input.expectedUpdatedAt)) return invalid(dict.invalid);
+  if (!isProgress(input.progress)) return invalid(dict.progressInvalid);
+  const link = normalizeProgressLink(input.link);
+  if (link === undefined) return invalid(dict.progressLinkInvalid);
+  const r = await pool.query<{ updated_at: Date }>(
+    `UPDATE caphub_v2.capabilities SET progress = $3, progress_link = $4, progress_at = now(), updated_at = now()
+     WHERE id = $1 AND date_trunc('milliseconds', updated_at) = $2::timestamptz AND deleted_at IS NULL AND usage = 'reference'
+     RETURNING updated_at`,
+    [input.id, input.expectedUpdatedAt, input.progress, link]);
+  if (r.rows[0]) return { ok: true, updatedAt: iso(r.rows[0].updated_at) };
+  // The `usage = 'reference'` guard above makes a miss ambiguous, so say which it was instead
+  // of reporting a phantom "changed elsewhere" for a card that simply has no progress to track.
+  const row = (await pool.query<{ usage: string }>(
+    "SELECT usage FROM caphub_v2.capabilities WHERE id = $1 AND deleted_at IS NULL", [input.id])).rows[0];
+  if (row && row.usage !== "reference") return invalid(dict.progressNotReference);
+  return missingOrConflict(pool, input.id, locale);
 }
 
 export async function requestRerun(pool: Pool, input: { captureId: string; pipeline: Pipeline }, locale: Locale = "zh"): Promise<ActionResult> {

@@ -20,6 +20,18 @@ export function verdictLabel(verdict: keyof typeof VERDICT_LABEL, locale: Locale
   return getDict(locale).labels.verdict[verdict];
 }
 
+/** Self-build progress states, mirroring migration 007's CHECK constraint. Only meaningful for `usage = 'reference'` cards. */
+export const PROGRESS_VALUES = ["todo", "planned", "building", "done", "dropped"] as const;
+export type Progress = (typeof PROGRESS_VALUES)[number];
+
+export function isProgress(value: unknown): value is Progress {
+  return typeof value === "string" && (PROGRESS_VALUES as readonly string[]).includes(value);
+}
+
+export function progressLabel(progress: Progress, locale: Locale = "zh"): string {
+  return getDict(locale).labels.progress[progress];
+}
+
 export function runStateLabel(state: string, locale: Locale = "zh"): string {
   return (getDict(locale).labels.runState as Record<string, string>)[state] ?? state;
 }

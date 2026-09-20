@@ -18,6 +18,7 @@ export const dictEn: Dict = {
     verdict: { keep: "Keep", discard: "Discard", pending: "Pending" },
     verdictBy: { auto: "Auto", human: "Human" },
     runState: { queued: "Queued", running: "Analyzing", done: "Filed", failed: "Failed" },
+    progress: { todo: "Not started", planned: "Planned", building: "Building", done: "Done", dropped: "Dropped" },
     errors: {
       OBJECT_UNAVAILABLE: "Original image expired, cannot rerun",
       BUDGET: "Exceeded per-run analysis budget",
@@ -110,13 +111,36 @@ export const dictEn: Dict = {
   detail: {
     back: "← Library",
     createdAt: "Created {date}",
+    summary: "Summary",
+    signals: "Value signals",
     howToUse: "How to use",
+    sourceFacts: "Source facts",
+    repoUrl: "Repository",
+    stars: "Stars",
+    lastUpdate: "Last update",
+    license: "License",
+    homepage: "Homepage",
+    factsAsOf: "Facts gathered {date}",
     reviewingNotice: "DeepSeek is reviewing, refresh shortly to see the result",
     reviewFailedPrefix: "Review failed: ",
     reviewNoteAgree: "Review note: agrees",
     reviewNoteDisagree: "Review note: disagrees",
     syncedAt: "Last synced to Obsidian: {date}",
     notSynced: "Not synced yet"
+  },
+  scoreBadge: {
+    label: "★ {score}/5",
+    aria: "Value score {score} of 5"
+  },
+  progressControl: {
+    title: "Self-build progress",
+    stateLegend: "Progress",
+    linkLabel: "Related link",
+    linkPlaceholder: "https://…",
+    linkHint: "Repo, issue or note for your build — optional",
+    save: "Save progress",
+    saving: "Saving…",
+    genericError: "Something went wrong, please retry"
   },
   detailActions: {
     keep: "Keep",
@@ -193,6 +217,9 @@ export const dictEn: Dict = {
     captureNotFound: "Capture record not found",
     objectExpired: "Original image expired, cannot rerun",
     alreadyQueued: "Already queued or being analyzed",
-    reviewInProgress: "Review already in progress"
+    reviewInProgress: "Review already in progress",
+    progressInvalid: "Invalid progress state",
+    progressLinkInvalid: "Link must start with http:// or https://",
+    progressNotReference: "Only reference cards track self-build progress"
   }
 };

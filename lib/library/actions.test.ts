@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decide, editSuggestion, requestReview, requestRerun, softDelete } from "./actions";
+import { decide, editSuggestion, requestReview, requestRerun, setProgress, softDelete } from "./actions";
 
 type Handler = (text: string, values: unknown[]) => { rows: unknown[]; rowCount?: number };
 function fakePool(handler: Handler) {
@@ -154,5 +154,76 @@ describe("tx() rollback failure", () => {
     expect(releases).toHaveLength(1);
     expect(releases[0]).toBeInstanceOf(Error);
     expect((releases[0] as Error).message).toBe("rollback failed");
+  });
+});
+
+describe("setProgress", () => {
+  const ok = (t: string) => t.startsWith("UPDATE caphub_v2.capabilities")
+    ? { rows: [{ updated_at: new Date(T) }] }
+    : { rows: [] };
+
+  it("writes progress, link and progress_at under the same optimistic lock, bumping updated_at", async () => {
+    const { pool, calls } = fakePool(ok);
+    const r = await setProgress(pool, { id: "cab_1", expectedUpdatedAt: T, progress: "building", link: "https://github.com/joey/thing" });
+    expect(r).toEqual({ ok: true, updatedAt: T });
+    const upd = calls.find((c) => c.text.startsWith("UPDATE caphub_v2.capabilities"))!;
+    expect(upd.text).toMatch(/progress = \$3/);
+    expect(upd.text).toMatch(/progress_link = \$4/);
+    expect(upd.text).toMatch(/progress_at = now\(\)/);
+    expect(upd.text).toMatch(/updated_at = now\(\)/);
+    expect(upd.text).toMatch(/date_trunc\('milliseconds', updated_at\) = \$2::timestamptz/);
+    expect(upd.text).toMatch(/usage = 'reference'/);
+    expect(upd.text).not.toMatch(/verdict/);
+    expect(upd.values).toEqual(["cab_1", T, "building", "https://github.com/joey/thing"]);
+  });
+
+  it("stores an empty or blank link as NULL", async () => {
+    for (const link of ["", "   ", null, undefined]) {
+      const { pool, calls } = fakePool(ok);
+      expect(await setProgress(pool, { id: "cab_1", expectedUpdatedAt: T, progress: "done", link })).toMatchObject({ ok: true });
+      expect(calls[0].values[3]).toBe(null);
+    }
+  });
+
+  it("rejects a malformed link and a bad progress value without touching the database", async () => {
+    const { pool, calls } = fakePool(ok);
+    expect(await setProgress(pool, { id: "cab_1", expectedUpdatedAt: T, progress: "todo", link: "javascript:alert(1)" }))
+      .toMatchObject({ ok: false, reason: "INVALID" });
+    expect(await setProgress(pool, { id: "cab_1", expectedUpdatedAt: T, progress: "todo", link: "not a url" }))
+      .toMatchObject({ ok: false, reason: "INVALID" });
+    expect(await setProgress(pool, { id: "cab_1", expectedUpdatedAt: T, progress: "shipped" as never }))
+      .toMatchObject({ ok: false, reason: "INVALID" });
+    expect(await setProgress(pool, { id: "", expectedUpdatedAt: T, progress: "todo" })).toMatchObject({ ok: false, reason: "INVALID" });
+    expect(await setProgress(pool, { id: "cab_1", expectedUpdatedAt: "nope", progress: "todo" })).toMatchObject({ ok: false, reason: "INVALID" });
+    expect(calls.length).toBe(0);
+  });
+
+  it("strips NUL from the link before binding it", async () => {
+    const { pool, calls } = fakePool(ok);
+    await setProgress(pool, { id: "cab_1", expectedUpdatedAt: T, progress: "planned", link: "https://ex.com/a\u0000b" });
+    expect(String(calls[0].values[3])).not.toMatch(/\u0000/);
+  });
+
+  it("returns CONFLICT when the row moved on, NOT_FOUND when it is gone", async () => {
+    const conflict = fakePool((t) => t.startsWith("SELECT usage") ? { rows: [{ usage: "reference" }] }
+      : t.startsWith("SELECT 1") ? { rows: [{ "?column?": 1 }] } : { rows: [] });
+    expect(await setProgress(conflict.pool, { id: "cab_1", expectedUpdatedAt: T, progress: "done" }))
+      .toMatchObject({ ok: false, reason: "CONFLICT", message: "已在别处处理" });
+
+    const missing = fakePool(() => ({ rows: [] }));
+    expect(await setProgress(missing.pool, { id: "cab_1", expectedUpdatedAt: T, progress: "done" }))
+      .toMatchObject({ ok: false, reason: "NOT_FOUND" });
+  });
+
+  it("refuses an integrate card instead of reporting a phantom conflict", async () => {
+    const { pool } = fakePool((t) => t.startsWith("SELECT usage") ? { rows: [{ usage: "integrate" }] } : { rows: [] });
+    expect(await setProgress(pool, { id: "cab_1", expectedUpdatedAt: T, progress: "done" }))
+      .toMatchObject({ ok: false, reason: "INVALID", message: "只有参考自研的卡片可以记录进度" });
+  });
+
+  it("speaks English when asked", async () => {
+    const { pool } = fakePool(() => ({ rows: [] }));
+    expect(await setProgress(pool, { id: "cab_1", expectedUpdatedAt: T, progress: "todo", link: "ftp://x" }, "en"))
+      .toMatchObject({ ok: false, reason: "INVALID", message: "Link must start with http:// or https://" });
   });
 });

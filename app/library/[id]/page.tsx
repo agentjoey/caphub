@@ -4,6 +4,9 @@ import { loadScenarios } from "../../../lib/analysis/scenarios";
 import { AnalysisDetails } from "../../../components/capability/analysis-details";
 import { CapturePreview } from "../../../components/capability/capture-preview";
 import { PlaybookView } from "../../../components/capability/playbook-view";
+import { ProgressControl } from "../../../components/capability/progress-control";
+import { ScoreBadge } from "../../../components/capability/score-badge";
+import { SourceFacts } from "../../../components/capability/source-facts";
 import { VerdictBadge } from "../../../components/capability/verdict-badge";
 import { formatDateTime } from "../../../lib/library/format";
 import { errorLabel, typeLabel, usageLabel } from "../../../lib/library/labels";
@@ -31,6 +34,10 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const serial = displaySerial(detail.verdict, detail.type, detail.serial);
   const cardScenarios = scenarios.filter((s) => detail.scenarios.includes(s.slug));
 
+  // Section order is Human-decided (M3.5 design decision 2), shared with the Telegram card:
+  // summary → scenarios/usage/score → value signals → playbook → source facts → folded details.
+  // The right-hand column (screenshot, source facts, actions) stacks under the main column on
+  // narrow screens, which keeps that same reading order on one column.
   return (
     <div>
       <p className="back-link"><Link href="/library">{dict.detail.back}</Link></p>
@@ -39,36 +46,40 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           <h1 className="page-title">
             {detail.title}
             {serial && <span className="serial"> {serial}</span>}
+            <ScoreBadge score={detail.score} reason={detail.scoreReason} locale={locale} />
           </h1>
           <p className="page-subtitle detail-meta">
-            {typeLabel(detail.type, locale)} · {usageLabel(detail.usage, locale)} · <VerdictBadge verdict={detail.verdict} verdictBy={detail.verdictBy} locale={locale} /> · {format(dict.detail.createdAt, { date: formatDateTime(detail.createdAt, locale) })}
+            {typeLabel(detail.type, locale)} · <VerdictBadge verdict={detail.verdict} verdictBy={detail.verdictBy} locale={locale} /> · {format(dict.detail.createdAt, { date: formatDateTime(detail.createdAt, locale) })}
           </p>
-          {cardScenarios.length > 0 && (
-            <div className="filter-row scenario-row">
-              {cardScenarios.map((s) => (
-                <Link key={s.slug} className="chip chip--scenario" href={libraryHref({ page: 1 }, { scenarios: [s.slug] })}>
-                  {locale === "en" ? s.labelEn : s.labelZh}
-                </Link>
-              ))}
-            </div>
-          )}
         </div>
       </div>
       <div className="detail-grid">
         <div>
           <section className="panel">
+            <h2 className="panel-title">{dict.detail.summary}</h2>
+            <p className="card-summary detail-summary">{detail.summary}</p>
+            <div className="filter-row detail-facets">
+              {cardScenarios.map((s) => (
+                <Link key={s.slug} className="chip chip--scenario" href={libraryHref({ page: 1 }, { scenarios: [s.slug] })}>
+                  {locale === "en" ? s.labelEn : s.labelZh}
+                </Link>
+              ))}
+              <span className="badge badge--usage">{usageLabel(detail.usage, locale)}</span>
+            </div>
+          </section>
+          {detail.signals.length > 0 && (
+            <section className="panel">
+              <h2 className="panel-title">{dict.detail.signals}</h2>
+              <ul className="card-signals">
+                {detail.signals.map((signal) => (
+                  <li key={signal}>{signal}</li>
+                ))}
+              </ul>
+            </section>
+          )}
+          <section className="panel">
             <h2 className="panel-title">{dict.detail.howToUse}</h2>
             <PlaybookView playbook={detail.playbook} type={detail.type} locale={locale} />
-            <div className="detail-body">
-              <p className="card-summary">{detail.summary}</p>
-              {detail.signals.length > 0 && (
-                <ul className="card-signals">
-                  {detail.signals.map((signal) => (
-                    <li key={signal}>{signal}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
             {detail.sourceUrl && (
               <p className="detail-source"><a href={detail.sourceUrl} target="_blank" rel="noreferrer">{detail.sourceUrl}</a></p>
             )}
@@ -80,6 +91,16 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             size="full"
             locale={locale}
           />
+          <SourceFacts facts={detail.sourceFacts} locale={locale} />
+          {detail.usage === "reference" && (
+            <ProgressControl
+              id={detail.id}
+              updatedAt={detail.updatedAt}
+              progress={detail.progress}
+              progressLink={detail.progressLink}
+              locale={locale}
+            />
+          )}
           <DetailActions
             id={detail.id}
             captureId={detail.captureId}
