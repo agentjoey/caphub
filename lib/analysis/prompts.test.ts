@@ -240,6 +240,11 @@ describe("enrichPrompt", () => {
     expect(prompt).toContain("**定位。** 自适应反爬抓取库");
   });
 
+  it("renders a （无） placeholder for 摘要要点 when the subject has no summary_points yet", () => {
+    const prompt = enrichPrompt({ ...subject, summary_points: [] }, null, []);
+    expect(prompt).toContain("摘要要点：（无）");
+  });
+
   it("tells summary it's the lead only (≤120 chars), not a process narration", () => {
     const prompt = enrichPrompt(subject, null, []);
     expect(prompt).toMatch(/summary 是引子：一句话（≤ 120 字）说明这个能力是什么，不展开细节，细节交给 summary_points/);

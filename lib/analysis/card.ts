@@ -133,10 +133,17 @@ export const NO_OVERLAP: Overlap = { relation: "none", target: null, reason: "" 
  * "适用场景"), `text` is the one-sentence explanation that follows it. Rendering (Task 2) joins
  * these as Markdown; this schema only constrains their lengths so a model can't dump a whole
  * paragraph into a single point.
+ *
+ * The caps here (12 / 90) are deliberately looser than what the prompt asks the model to aim
+ * for (≤8 / ≤60, prompts.ts) -- review fix round 1: with a 1-character-over-cap failure killing
+ * the whole (expensive) reason/enrich run after `runStructured`'s two attempts, and models
+ * counting CJK characters unreliably, the schema needs slack to only reject genuine
+ * paragraph-dumping, not a model that slightly overshot the prompt's shaping target. Mirrors
+ * `summary`'s own prompt-vs-schema gap immediately below.
  */
 export const summaryPointSchema = z.object({
-  label: z.string().min(1).max(8),
-  text: z.string().min(1).max(60)
+  label: z.string().min(1).max(12),
+  text: z.string().min(1).max(90)
 });
 export type SummaryPoint = z.infer<typeof summaryPointSchema>;
 
@@ -152,9 +159,11 @@ export const cardObjectSchema = z.object({
    * The lead: one short sentence framing what this capability is, read by every list row,
    * search hit and un-enriched card (controller ruling: KEPT, not replaced by
    * `summary_points`) -- the structured detail now lives in `summary_points` instead of being
-   * crammed into this field, hence the tightened cap (was 800).
+   * crammed into this field, hence the tightened cap (was 800). The prompt asks for ≤120 chars
+   * as the shaping target; the schema cap is 180 (see summaryPointSchema's comment for why the
+   * schema deliberately keeps headroom above the prompt's target instead of matching it exactly).
    */
-  summary: z.string().min(1).max(120),
+  summary: z.string().min(1).max(180),
   /**
    * 3–5 `**标签。** 说明句` lines that follow the lead (munderdiffl.in's pattern, per the M3.8
    * brief) -- each point is one short, scannable fact, never a paragraph. Defaults are not

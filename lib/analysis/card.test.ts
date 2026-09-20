@@ -194,11 +194,14 @@ describe("cardSchema open_questions", () => {
 });
 
 describe("cardSchema summary", () => {
-  it("accepts a summary up to 120 chars", () => {
-    expect(cardSchema.parse({ ...valid, summary: "a".repeat(120) }).summary).toBe("a".repeat(120));
+  it("accepts a summary up to 180 chars (the schema cap, looser than the prompt's 120-char shaping target)", () => {
+    expect(cardSchema.parse({ ...valid, summary: "a".repeat(180) }).summary).toBe("a".repeat(180));
   });
-  it("rejects a summary over 120 chars", () => {
-    expect(() => cardSchema.parse({ ...valid, summary: "a".repeat(121) })).toThrow();
+  it("rejects a summary over 180 chars", () => {
+    expect(() => cardSchema.parse({ ...valid, summary: "a".repeat(181) })).toThrow();
+  });
+  it("accepts a summary that mildly overshoots the prompt's 120-char target (e.g. 150 chars), rather than failing the run", () => {
+    expect(cardSchema.parse({ ...valid, summary: "a".repeat(150) }).summary).toBe("a".repeat(150));
   });
 });
 
@@ -219,27 +222,35 @@ describe("cardSchema summary_points", () => {
     const summary_points = Array.from({ length: 6 }, (_, i) => ({ label: `点${i}`, text: `说明 ${i}` }));
     expect(() => cardSchema.parse({ ...valid, summary_points })).toThrow();
   });
-  it("rejects a label over 8 chars", () => {
+  it("rejects a label over 12 chars (the schema cap, looser than the prompt's 8-char shaping target)", () => {
     const summary_points = [
-      { label: "一二三四五六七八九", text: "a" },
+      { label: "一二三四五六七八九十一二三", text: "a" },
       ...valid.summary_points.slice(1)
     ];
     expect(() => cardSchema.parse({ ...valid, summary_points })).toThrow();
   });
-  it("accepts a label of exactly 8 chars", () => {
+  it("accepts a label of exactly 12 chars", () => {
     const summary_points = [
-      { label: "一二三四五六七八", text: "a" },
+      { label: "一二三四五六七八九十一二", text: "a" },
       ...valid.summary_points.slice(1)
     ];
-    expect(cardSchema.parse({ ...valid, summary_points }).summary_points[0].label).toBe("一二三四五六七八");
+    expect(cardSchema.parse({ ...valid, summary_points }).summary_points[0].label).toBe("一二三四五六七八九十一二");
   });
-  it("rejects a text over 60 chars", () => {
-    const summary_points = [{ label: "定位", text: "a".repeat(61) }, ...valid.summary_points.slice(1)];
+  it("accepts a label that mildly overshoots the prompt's 8-char target (e.g. 10 chars), rather than failing the run", () => {
+    const summary_points = [{ label: "一二三四五六七八九十", text: "a" }, ...valid.summary_points.slice(1)];
+    expect(cardSchema.parse({ ...valid, summary_points }).summary_points[0].label).toBe("一二三四五六七八九十");
+  });
+  it("rejects a text over 90 chars (the schema cap, looser than the prompt's 60-char shaping target)", () => {
+    const summary_points = [{ label: "定位", text: "a".repeat(91) }, ...valid.summary_points.slice(1)];
     expect(() => cardSchema.parse({ ...valid, summary_points })).toThrow();
   });
-  it("accepts a text of exactly 60 chars", () => {
-    const summary_points = [{ label: "定位", text: "a".repeat(60) }, ...valid.summary_points.slice(1)];
-    expect(cardSchema.parse({ ...valid, summary_points }).summary_points[0].text).toBe("a".repeat(60));
+  it("accepts a text of exactly 90 chars", () => {
+    const summary_points = [{ label: "定位", text: "a".repeat(90) }, ...valid.summary_points.slice(1)];
+    expect(cardSchema.parse({ ...valid, summary_points }).summary_points[0].text).toBe("a".repeat(90));
+  });
+  it("accepts a point text that mildly overshoots the prompt's 60-char target (e.g. 75 chars), rather than failing the run", () => {
+    const summary_points = [{ label: "定位", text: "a".repeat(75) }, ...valid.summary_points.slice(1)];
+    expect(cardSchema.parse({ ...valid, summary_points }).summary_points[0].text).toBe("a".repeat(75));
   });
   it("requires summary_points (missing field fails)", () => {
     const { summary_points: _sp, ...withoutPoints } = valid as typeof valid & { summary_points: unknown };
@@ -248,7 +259,7 @@ describe("cardSchema summary_points", () => {
   it("stays representable as JSON Schema for providers", () => {
     const jsonSchema = z.toJSONSchema(cardSchema) as { properties?: Record<string, unknown> };
     expect(jsonSchema.properties?.summary_points).toMatchObject({ type: "array", minItems: 3, maxItems: 5 });
-    expect(jsonSchema.properties?.summary).toMatchObject({ type: "string", maxLength: 120 });
+    expect(jsonSchema.properties?.summary).toMatchObject({ type: "string", maxLength: 180 });
   });
 });
 

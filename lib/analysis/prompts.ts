@@ -218,7 +218,7 @@ export function enrichPrompt(subject: EnrichSubject, canonical: CanonicalResult,
     subject.pinned
       ? `硬性约束：这张卡片的 type/usage/tags 已由人工确定（type=${subject.type}、usage=${subject.usage}、tags=${subject.tags.join(", ")}），本次改写必须原样使用这三项，不得改判；playbook 必须按这个 type/usage 的形状组织内容。`
       : "",
-    `原有卡片：\n标题：${subject.title}\n类型：${subject.type}\n用途：${subject.usage}\n摘要：${subject.summary}\n摘要要点：${subject.summary_points.map((p) => `**${p.label}。** ${p.text}`).join(" ")}\n价值信号：${subject.signals.join("；")}\n标签：${subject.tags.join(", ")}\nPlaybook：${JSON.stringify(subject.playbook)}\n来源链接：${subject.source_url ?? "（无）"}`,
+    `原有卡片：\n标题：${subject.title}\n类型：${subject.type}\n用途：${subject.usage}\n摘要：${subject.summary}\n摘要要点：${subject.summary_points.length ? subject.summary_points.map((p) => `**${p.label}。** ${p.text}`).join(" ") : "（无）"}\n价值信号：${subject.signals.join("；")}\n标签：${subject.tags.join(", ")}\nPlaybook：${JSON.stringify(subject.playbook)}\n来源链接：${subject.source_url ?? "（无）"}`,
     subject.open_questions.length ? `第一轮遗留的待核实问题：${subject.open_questions.join("；")}` : "第一轮没有遗留待核实问题。",
     canonicalPromptText(canonical),
     searchResults.length
