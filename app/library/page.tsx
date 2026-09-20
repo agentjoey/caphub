@@ -19,6 +19,8 @@ import { LibraryFilters } from "./library-filters";
 export const dynamic = "force-dynamic";
 
 const TOP_TAGS = 30;
+/** Tags shown on a library list row before the `+N` remainder (M3.8 design decision 4) — few enough that the score/progress badges above them stay the row's loudest marks. */
+const LIST_ROW_TAGS = 3;
 const TYPES: CapabilityType[] = ["skill", "experience", "plugin", "prompt", "tool", "model", "other"];
 
 export default async function Page({
@@ -213,7 +215,7 @@ export default async function Page({
                       )}
                       <span>{relativeTime(row.createdAt, locale)}</span>
                     </div>
-                    <TagList tags={row.tags} />
+                    <TagList tags={row.tags} max={LIST_ROW_TAGS} quiet />
                   </div>
                 </Link>
               </li>
@@ -221,8 +223,8 @@ export default async function Page({
           </ul>
           {(hasPrev || hasNext) && (
             <nav className="pagination">
-              {hasPrev && <Link href={libraryHref(filter, { page: filter.page - 1 })}>{dict.library.prevPage}</Link>}
-              {hasNext && <Link href={libraryHref(filter, { page: filter.page + 1 })}>{dict.library.nextPage}</Link>}
+              {hasPrev && <Link className="pagination__prev" href={libraryHref(filter, { page: filter.page - 1 })}>{dict.library.prevPage}</Link>}
+              {hasNext && <Link className="pagination__next" href={libraryHref(filter, { page: filter.page + 1 })}>{dict.library.nextPage}</Link>}
             </nav>
           )}
         </>

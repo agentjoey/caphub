@@ -2,6 +2,7 @@ import type { CapabilityRow } from "../../lib/library/queries";
 import { typeLabel, usageLabel, verdictLabel } from "../../lib/library/labels";
 import { format, getDict, type Locale } from "../../lib/i18n";
 import { CapturePreview, captureTextExcerpt } from "./capture-preview";
+import { SummaryBody } from "./summary-points";
 import { TagList } from "./tag-list";
 import { VerdictBadge } from "./verdict-badge";
 
@@ -26,7 +27,7 @@ export function CardSummary({ row, locale = "zh" }: { row: CapabilityRow; locale
         {row.capture.kind === "url" && row.capture.url && (
           <p><a className="capture-url" href={row.capture.url} target="_blank" rel="noreferrer">{row.capture.url}</a></p>
         )}
-        <p className="card-summary">{row.summary}</p>
+        <SummaryBody summary={row.summary} points={row.summaryPoints} className="card-summary" />
         {row.signals.length > 0 && (
           <ul className="card-signals">
             {row.signals.map((signal) => (

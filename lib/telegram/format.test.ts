@@ -368,3 +368,69 @@ describe("formatDeepSummary", () => {
     expect(out.text).toContain("自托管的浏览器自动化框架");
   });
 });
+
+describe("formatResult — summary points (M3.8)", () => {
+  const points = [
+    { label: "定位", text: "自适应反爬抓取库" },
+    { label: "适用", text: "结构常变的站点" },
+    { label: "限制", text: "不处理登录态" }
+  ];
+
+  it("renders each point as its own <b>标签。</b> 说明 line, in one paragraph after 总结 — pending card", () => {
+    const out = formatResult({ ...base, status: "pending", summaryPoints: points });
+    const paragraphs = out.text.split("\n\n");
+    expect(paragraphs[2]).toBe("总结：这是一段摘要。");
+    expect(paragraphs[3]).toBe("<b>定位。</b> 自适应反爬抓取库\n<b>适用。</b> 结构常变的站点\n<b>限制。</b> 不处理登录态");
+  });
+
+  it("omits the points paragraph entirely for a card that has none yet — the prose 总结 stands alone", () => {
+    const out = formatResult({ ...base, status: "pending", summaryPoints: [] });
+    const paragraphs = out.text.split("\n\n");
+    expect(paragraphs[2]).toBe("总结：这是一段摘要。");
+    expect(paragraphs[3]).toBe("类型：技能 · 用法：直接整合 · 场景：编程、自动化 · 标签：rag、web-scraping");
+    expect(out.text).not.toContain("<b>定位");
+  });
+
+  it("treats an absent summaryPoints field as no points", () => {
+    const out = formatResult({ ...base, status: "pending" });
+    expect(out.text.split("\n\n")[3]).toContain("类型：技能");
+  });
+
+  it("escapes a point's label and text", () => {
+    const out = formatResult({
+      ...base,
+      status: "pending",
+      summaryPoints: [{ label: "<b>x", text: "a & <script>" }]
+    });
+    expect(out.text).toContain("<b>&lt;b&gt;x。</b> a &amp; &lt;script&gt;");
+  });
+
+  it("renders the points on a todo card too", () => {
+    const out = formatResult({ ...todoBase, summaryPoints: points });
+    expect(out.text).toContain("<b>定位。</b> 自适应反爬抓取库");
+  });
+
+  it("stays within the limit and well-formed when the points themselves are huge — points are dropped whole, markup never cut", () => {
+    const out = formatResult({
+      ...base,
+      status: "pending",
+      summary: "字".repeat(300),
+      summaryPoints: Array.from({ length: 200 }, (_, i) => ({ label: `标签${i}`, text: "说".repeat(200) }))
+    });
+    expect(Array.from(out.text).length).toBeLessThanOrEqual(TELEGRAM_MESSAGE_MAX_LEN);
+    expect((out.text.match(/</g) ?? []).length).toBe((out.text.match(/>/g) ?? []).length);
+    expect((out.text.match(/<b>/g) ?? []).length).toBe((out.text.match(/<\/b>/g) ?? []).length);
+    // The card's own lines survive: shrinking drops points, it does not eat the 建议/总结 text.
+    expect(out.text).toContain("建议：保留 · 很实用");
+  });
+
+  it("keeps the tags line when the points are what pushed the card over the limit", () => {
+    const out = formatResult({
+      ...base,
+      status: "pending",
+      summaryPoints: Array.from({ length: 100 }, (_, i) => ({ label: `标签${i}`, text: "说".repeat(100) }))
+    });
+    expect(Array.from(out.text).length).toBeLessThanOrEqual(TELEGRAM_MESSAGE_MAX_LEN);
+    expect(out.text).toContain("标签：rag、web-scraping");
+  });
+});

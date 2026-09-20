@@ -1,5 +1,5 @@
 import type { Pool } from "pg";
-import type { CapabilityType, DeepAnalysis } from "../analysis/card";
+import type { CapabilityType, DeepAnalysis, SummaryPoint } from "../analysis/card";
 import { loadScenarios } from "../analysis/scenarios";
 import type { Progress } from "../library/labels";
 import { SELF_BUILD_PROGRESS } from "../library/queries";
@@ -18,6 +18,8 @@ export interface Candidate {
   suggestedVerdict: "keep" | "discard";
   suggestedReason: string;
   summary: string;
+  /** The card's structured summary lines (M3.8); `[]` for a card never re-enriched since migration 012, and absent only in fixtures. */
+  summaryPoints?: SummaryPoint[];
   tags: string[];
   scenarios: string[];
   serial: number | null;
@@ -128,6 +130,7 @@ export function buildFormatInput(candidate: Candidate, scenarioLabel: Map<string
     suggestedVerdict: candidate.suggestedVerdict,
     suggestedReason: candidate.suggestedReason,
     summary: candidate.summary,
+    summaryPoints: candidate.summaryPoints ?? [],
     tags: candidate.tags,
     scenarioLabels: candidate.scenarios.map((slug) => scenarioLabel.get(slug) ?? slug),
     serial: candidate.serial,
@@ -154,6 +157,7 @@ export function buildTodoFormatInput(candidate: Candidate, scenarioLabel: Map<st
     title: candidate.title,
     type: candidate.type,
     summary: candidate.summary,
+    summaryPoints: candidate.summaryPoints ?? [],
     tags: candidate.tags,
     scenarioLabels: candidate.scenarios.map((slug) => scenarioLabel.get(slug) ?? slug),
     serial: candidate.serial,
@@ -183,7 +187,7 @@ function isSelfBuildCard(candidate: Candidate): boolean {
  */
 const CANDIDATE_COLUMNS = `cb.id, cb.capture_id AS "captureId", cb.title, cb.type, cb.usage,
             cb.suggested_verdict AS "suggestedVerdict", cb.suggested_reason AS "suggestedReason",
-            cb.summary, cb.tags, cb.scenarios, cb.serial, cb.score, cb.score_reason AS "scoreReason",
+            cb.summary, cb.summary_points AS "summaryPoints", cb.tags, cb.scenarios, cb.serial, cb.score, cb.score_reason AS "scoreReason",
             cb.progress, cb.verdict, cb.updated_at AS "updatedAt",
             (cb.deep_analysis IS NOT NULL) AS "deepAnalyzed",
             c.telegram_chat_id AS "telegramChatId", c.telegram_message_id AS "telegramMessageId",

@@ -1,4 +1,4 @@
-import type { CapabilityType, DeepAnalysis } from "../analysis/card";
+import { summaryPointLabel, type CapabilityType, type DeepAnalysis, type SummaryPoint } from "../analysis/card";
 import { errorLabel, progressLabel, typeLabel, usageLabel, type Progress } from "../library/labels";
 import { formatSerial } from "../library/serial";
 import { escapeHtml, type InlineKeyboardMarkup } from "./api";
@@ -37,6 +37,12 @@ export interface DecidedCardInput {
   suggestedVerdict: "keep" | "discard";
   suggestedReason: string;
   summary: string;
+  /**
+   * The card's structured summary lines (M3.8), rendered one `<b>标签。</b> 说明` line each under
+   * the prose 总结. Empty (or absent) for a card never re-enriched since migration 012 — the
+   * prose summary then stands alone, exactly as before.
+   */
+  summaryPoints?: SummaryPoint[];
   tags: string[];
   /** Chinese scenario labels, already resolved from slugs (see lib/analysis/scenarios.ts). */
   scenarioLabels: string[];
@@ -64,6 +70,8 @@ export interface TodoCardInput {
   title: string;
   type: CapabilityType;
   summary: string;
+  /** See {@link DecidedCardInput.summaryPoints}. */
+  summaryPoints?: SummaryPoint[];
   tags: string[];
   /** Chinese scenario labels, already resolved from slugs (see lib/analysis/scenarios.ts). */
   scenarioLabels: string[];
@@ -143,6 +151,8 @@ interface ShrinkableFields {
   tags: string[];
   scenarioLabels: string[];
   body?: string;
+  /** The card's summary points, shrunk by dropping whole points from the end (never by cutting one mid-sentence) right after `body`. */
+  points?: SummaryPoint[];
 }
 
 /** Truncates a plain-text field in decreasing steps, stopping as soon as `build` fits — tried before falling back to the next, lower-priority field. */
@@ -174,12 +184,18 @@ function shrinkList<T>(build: (value: T[]) => boolean, value: T[]): T[] {
  * a tag or an escaped HTML entity, unlike truncating the finished HTML string.
  */
 function shrinkUntilFits(build: (f: ShrinkableFields) => string, initial: ShrinkableFields): string {
-  const f: ShrinkableFields = { ...initial, tags: [...initial.tags], scenarioLabels: [...initial.scenarioLabels] };
+  const f: ShrinkableFields = { ...initial, tags: [...initial.tags], scenarioLabels: [...initial.scenarioLabels], points: initial.points ? [...initial.points] : undefined };
   let text = build(f);
   if (withinMessageLimit(text)) return text;
 
   if (f.body !== undefined) {
     f.body = shrinkString((v) => withinMessageLimit(build({ ...f, body: v })), f.body);
+    text = build(f);
+    if (withinMessageLimit(text)) return text;
+  }
+
+  if (f.points !== undefined && f.points.length > 0) {
+    f.points = shrinkList((v) => withinMessageLimit(build({ ...f, points: v })), f.points);
     text = build(f);
     if (withinMessageLimit(text)) return text;
   }
@@ -206,6 +222,20 @@ function scenariosLine(labels: string[]): string {
 
 function tagsLine(tags: string[]): string {
   return `标签：${tags.map(escapeHtml).join("、") || "无"}`;
+}
+
+/**
+ * The card's summary points as one paragraph, `<b>标签。</b> 说明` per line — the Telegram
+ * counterpart of the web card's structured summary (M3.8). `null` when there are none, so the
+ * caller drops the paragraph entirely rather than pushing a blank one. Escaped per field,
+ * before assembly, like every other card-derived value here.
+ */
+function summaryPointsBlock(points: SummaryPoint[] | undefined): string | null {
+  const lines = (points ?? [])
+    .map((p) => ({ label: summaryPointLabel(p.label), text: p.text.trim() }))
+    .filter((p) => p.text !== "")
+    .map((p) => (p.label === "" ? escapeHtml(p.text) : `<b>${escapeHtml(p.label)}</b> ${escapeHtml(p.text)}`));
+  return lines.length > 0 ? lines.join("\n") : null;
 }
 
 /**
@@ -285,14 +315,16 @@ function formatPending(card: DecidedCardInput): FormattedMessage {
     const paragraphs = [
       `<b>${escapeHtml(f.title)}</b>`,
       `建议：${suggestedVerdictLabel(card.suggestedVerdict)} · ${escapeHtml(card.suggestedReason)}`,
-      `总结：${escapeHtml(f.body ?? "")}`,
-      `${metaLine(card)} · ${scenariosLine(f.scenarioLabels)} · ${tagsLine(f.tags)}`
+      `总结：${escapeHtml(f.body ?? "")}`
     ];
+    const points = summaryPointsBlock(f.points);
+    if (points) paragraphs.push(points);
+    paragraphs.push(`${metaLine(card)} · ${scenariosLine(f.scenarioLabels)} · ${tagsLine(f.tags)}`);
     const score = scoreLine(card.score, card.scoreReason);
     if (score) paragraphs.push(score);
     return paragraphs.join("\n\n");
   };
-  const text = shrinkUntilFits(build, { title: card.title, tags: card.tags, scenarioLabels: card.scenarioLabels, body: summary });
+  const text = shrinkUntilFits(build, { title: card.title, tags: card.tags, scenarioLabels: card.scenarioLabels, body: summary, points: card.summaryPoints });
   const replyMarkup: InlineKeyboardMarkup = {
     inline_keyboard: [
       [
@@ -318,10 +350,12 @@ function formatTodo(card: TodoCardInput): FormattedMessage {
   const build = (f: ShrinkableFields) => {
     const paragraphs = [
       `<b>${escapeHtml(f.title)}</b>`,
-      `总结：${escapeHtml(f.body ?? "")}`,
-      `${scenariosLine(f.scenarioLabels)} · ${tagsLine(f.tags)}`,
-      `进度：${escapeHtml(progressLabel(card.progress, "zh"))}`
+      `总结：${escapeHtml(f.body ?? "")}`
     ];
+    const points = summaryPointsBlock(f.points);
+    if (points) paragraphs.push(points);
+    paragraphs.push(`${scenariosLine(f.scenarioLabels)} · ${tagsLine(f.tags)}`);
+    paragraphs.push(`进度：${escapeHtml(progressLabel(card.progress, "zh"))}`);
     const score = scoreLine(card.score, card.scoreReason);
     if (score) paragraphs.push(score);
     if (card.deepAnalyzed) paragraphs.push(DEEP_DONE_LINE);
@@ -334,7 +368,7 @@ function formatTodo(card: TodoCardInput): FormattedMessage {
     }
     return paragraphs.join("\n\n");
   };
-  const text = shrinkUntilFits(build, { title: card.title, tags: card.tags, scenarioLabels: card.scenarioLabels, body: card.summary });
+  const text = shrinkUntilFits(build, { title: card.title, tags: card.tags, scenarioLabels: card.scenarioLabels, body: card.summary, points: card.summaryPoints });
   const replyMarkup: InlineKeyboardMarkup = {
     inline_keyboard: [
       [

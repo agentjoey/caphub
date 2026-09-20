@@ -148,6 +148,18 @@ export const summaryPointSchema = z.object({
 export type SummaryPoint = z.infer<typeof summaryPointSchema>;
 
 /**
+ * `定位` → `定位。` — a summary point's bold lead-in label, as both the web card and the
+ * Telegram card render it (`**标签。** 说明`). Lives here, next to the schema, so the two render
+ * paths share one definition without the Telegram formatter importing a React component.
+ * Stored labels carry no punctuation, but a model may still write some; any trailing
+ * sentence/clause mark is normalized away rather than doubled. Returns `""` for a blank label.
+ */
+export function summaryPointLabel(label: string): string {
+  const trimmed = label.trim().replace(/[。．.:：、，,;；]+$/u, "").trim();
+  return trimmed === "" ? "" : `${trimmed}。`;
+}
+
+/**
  * The bare object shape, without the cross-field superRefine below. Exported so
  * `cardSchemaFor` can `.extend()` a field (ZodObject supports this; the ZodEffects
  * produced by `.superRefine()` does not) and then re-apply the same cross-field rules.

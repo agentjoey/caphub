@@ -12,6 +12,7 @@ import { ProgressControl } from "../../../components/capability/progress-control
 import { ScoreBadge } from "../../../components/capability/score-badge";
 import { SourceFacts } from "../../../components/capability/source-facts";
 import { StatusControl } from "../../../components/capability/status-control";
+import { SummaryBody } from "../../../components/capability/summary-points";
 import { VerdictBadge } from "../../../components/capability/verdict-badge";
 import { formatDateTime } from "../../../lib/library/format";
 import { errorLabel, typeLabel, usageLabel } from "../../../lib/library/labels";
@@ -107,7 +108,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           {hasDeepAnalysis && deepAnalysisSection}
           <section className="panel">
             <h2 className="panel-title">{dict.detail.summary}</h2>
-            <p className="card-summary detail-summary">{detail.summary}</p>
+            <SummaryBody summary={detail.summary} points={detail.summaryPoints} className="card-summary detail-summary" />
             <div className="filter-row detail-facets">
               {cardScenarios.map((s) => (
                 <Link key={s.slug} className="chip chip--scenario" href={libraryHref({ page: 1 }, { scenarios: [s.slug] })}>

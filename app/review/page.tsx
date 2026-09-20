@@ -48,8 +48,8 @@ export default async function Page({
           </div>
           {(hasPrev || hasNext) && (
             <nav className="pagination">
-              {hasPrev && <Link href={`/review?page=${page - 1}`}>{dict.library.prevPage}</Link>}
-              {hasNext && <Link href={`/review?page=${page + 1}`}>{dict.library.nextPage}</Link>}
+              {hasPrev && <Link className="pagination__prev" href={`/review?page=${page - 1}`}>{dict.library.prevPage}</Link>}
+              {hasNext && <Link className="pagination__next" href={`/review?page=${page + 1}`}>{dict.library.nextPage}</Link>}
             </nav>
           )}
         </>

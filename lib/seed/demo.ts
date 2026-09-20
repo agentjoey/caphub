@@ -434,14 +434,14 @@ export async function runSeedDemo(pool: Pick<Pool, "connect">, env: Readonly<Rec
       const c = cap.card;
       const r = await client.query<{ id: string }>(
         `INSERT INTO caphub_v2.capabilities
-           (id, capture_id, run_id, title, type, summary, signals, suggested_verdict, suggested_reason, confidence,
+           (id, capture_id, run_id, title, type, summary, summary_points, signals, suggested_verdict, suggested_reason, confidence,
             verdict, verdict_by, verdict_at, usage, playbook, tags, source_url)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, CASE WHEN $12::text IS NULL THEN NULL ELSE now() END, $13,$14,$15,$16)
+         VALUES ($1,$2,$3,$4,$5,$6,$17::jsonb,$7,$8,$9,$10,$11,$12, CASE WHEN $12::text IS NULL THEN NULL ELSE now() END, $13,$14,$15,$16)
          ON CONFLICT (id) DO NOTHING
          RETURNING id`,
         [cap.id, cap.captureId, cap.runId, c.title, c.type, c.summary, jsonStringifyStripNul(c.signals),
           c.suggested_verdict, c.suggested_reason, c.confidence, cap.verdict, cap.verdictBy, c.usage,
-          jsonStringifyStripNul(c.playbook), c.tags, c.source_url]
+          jsonStringifyStripNul(c.playbook), c.tags, c.source_url, jsonStringifyStripNul(c.summary_points)]
       );
       if (r.rows.length) {
         createdCapabilityIds.push(r.rows[0].id);

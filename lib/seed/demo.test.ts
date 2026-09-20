@@ -123,6 +123,32 @@ describe("runSeedDemo", () => {
     expect(ids).toHaveLength(8);
   });
 
+  // M3.8: the fixtures carry summary_points, but the insert (written before migration 012) did
+  // not list the column — every seeded card came up with `[]` and the structured summary never
+  // rendered locally.
+  it("persists each card's summary_points", async () => {
+    const params: unknown[][] = [];
+    const fakeClient = {
+      query: async (text: string, values?: unknown[]) => {
+        if (text.includes("INSERT INTO caphub_v2.capabilities")) {
+          expect(text).toContain("summary_points");
+          params.push(values ?? []);
+          return { rows: [{ id: "demo_cab_x" }] };
+        }
+        return { rows: [] };
+      },
+      release: () => {}
+    };
+    const fakePool = { connect: async () => fakeClient };
+    await runSeedDemo(fakePool as never, { SEED_ALLOW: "1" });
+    const data = buildDemoRows();
+    expect(params).toHaveLength(data.capabilities.length);
+    for (const [i, cap] of data.capabilities.entries()) {
+      expect(cap.card.summary_points.length).toBeGreaterThanOrEqual(3);
+      expect(params[i]).toContain(JSON.stringify(cap.card.summary_points));
+    }
+  });
+
   it("rolls back and rethrows if an insert fails", async () => {
     const queries: string[] = [];
     const fakeClient = {
