@@ -8,6 +8,16 @@
  * hand-correction of `type` specifically, so it treats the whole card as human-owned rather than
  * risk clobbering that correction.
  *
+ * A proposed change that crosses the `experience` boundary (experience -> non-experience, or
+ * non-experience -> experience) is also skipped rather than written: `experience` is the only
+ * type with its own `playbook.kind` (see card.ts's `refineCard`), so writing just `type` across
+ * that boundary would leave the card with a `playbook.kind` that contradicts its new `type` (an
+ * `experience` card without an `experience` playbook, or vice versa). Non-experience ->
+ * non-experience changes (e.g. other -> prompt) don't have this problem and still apply as
+ * normal. Boundary-crossing cards are collected into a "needs manual handling" list, printed in
+ * both the dry-run output and the final summary, so the owner can fix those few by hand (改建议
+ * or 重跑分析) instead of the script silently leaving a stale/mismatched playbook behind.
+ *
  * Dry-run by default: prints a before -> after line for every card whose type would change, but
  * writes nothing. Pass `--apply` to actually write.
  *
@@ -74,8 +84,18 @@ export interface ReclassifyRow {
   type: CapabilityType; verdictBy: "auto" | "human" | null; serial: number | null;
 }
 
+export interface NeedsManualHandling {
+  capabilityId: string; title: string; before: CapabilityType; after: CapabilityType;
+}
+
 export interface ReclassifyResult {
   candidates: number; changed: number; unchanged: number; skippedHuman: number; failed: number;
+  needsManualHandling: NeedsManualHandling[];
+}
+
+/** True when a proposed type change crosses the `experience` boundary in either direction. */
+function crossesExperienceBoundary(before: CapabilityType, after: CapabilityType): boolean {
+  return (before === "experience") !== (after === "experience");
 }
 
 /**
@@ -83,7 +103,9 @@ export interface ReclassifyResult {
  * and a fake DeepSeek call) instead of a real database/provider — same shape as
  * scripts/backfill-score.ts's `runBackfill`. Logs a before -> after row (with both the raw type
  * and the resulting displayed serial) for every card whose type would change; in dry-run that's
- * the full "would change" table, with `--apply` it's also written.
+ * the full "would change" table, with `--apply` it's also written. A change that crosses the
+ * `experience` boundary is logged separately and returned in `needsManualHandling` instead of
+ * being applied — see the module header comment for why.
  */
 export async function runReclassify(
   pool: Pick<Pool, "query">, call: ReclassifyCall, apply: boolean, log: (o: Record<string, unknown>) => void
@@ -97,6 +119,7 @@ export async function runReclassify(
   let unchanged = 0;
   let skippedHuman = 0;
   let failed = 0;
+  const needsManualHandling: NeedsManualHandling[] = [];
   for (const row of rows) {
     // The owner may have hand-corrected this card's type already; there is no column that
     // records a hand-correction of `type` specifically, so `verdict_by = 'human'` (a correction
@@ -117,6 +140,16 @@ export async function runReclassify(
         unchanged += 1;
         continue;
       }
+      if (crossesExperienceBoundary(row.type, nextType)) {
+        // Writing just `type` here would leave `playbook.kind` contradicting the new `type`
+        // (card.ts's `refineCard` invariant) — surfaced for the owner to fix by hand instead.
+        needsManualHandling.push({ capabilityId: row.id, title: row.title, before: row.type, after: nextType });
+        log({
+          capabilityId: row.id, title: row.title, before: row.type, after: nextType,
+          needsManualHandling: "crosses experience boundary — playbook.kind would contradict type"
+        });
+        continue;
+      }
       log({
         capabilityId: row.id, title: row.title,
         before: row.type, after: nextType,
@@ -130,8 +163,11 @@ export async function runReclassify(
       log({ capabilityId: row.id, title: row.title, error: error instanceof Error ? error.message : String(error) });
     }
   }
-  log({ candidates: rows.length, changed, unchanged, skippedHuman, failed, mode: apply ? "apply" : "dry-run" });
-  return { candidates: rows.length, changed, unchanged, skippedHuman, failed };
+  log({
+    candidates: rows.length, changed, unchanged, skippedHuman, failed,
+    needsManualHandling, mode: apply ? "apply" : "dry-run"
+  });
+  return { candidates: rows.length, changed, unchanged, skippedHuman, failed, needsManualHandling };
 }
 
 async function main() {
@@ -142,7 +178,13 @@ async function main() {
   const call = createDeepSeekCall({ apiKey: config.providers.deepseekApiKey });
   const log = (o: Record<string, unknown>) => process.stdout.write(`${JSON.stringify({ ts: new Date().toISOString(), ...o })}\n`);
   try {
-    const { changed, unchanged, failed } = await runReclassify(pool, call, apply, log);
+    const { changed, unchanged, failed, needsManualHandling } = await runReclassify(pool, call, apply, log);
+    if (needsManualHandling.length > 0) {
+      process.stdout.write(
+        `${needsManualHandling.length} card(s) need manual handling (crosses the experience boundary — fix by hand via 改建议 or 重跑分析):\n` +
+        needsManualHandling.map((c) => `  ${c.capabilityId}  ${c.before} -> ${c.after}  ${c.title}`).join("\n") + "\n"
+      );
+    }
     // Every attempted row failing (and none succeeding, changed or not) is the signature of a
     // systemic problem — a bad API key, DeepSeek being down, a schema mismatch — not per-row
     // noise. Exiting non-zero lets a caller (cron, CI, a human watching `$?`) notice.

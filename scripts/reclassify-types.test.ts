@@ -60,7 +60,7 @@ describe("runReclassify", () => {
     const logs: Record<string, unknown>[] = [];
     const call = { invoke: async () => ({ value: { type: "prompt" } }) };
     const result = await runReclassify(pool as never, call, true, (o) => logs.push(o));
-    expect(result).toEqual({ candidates: 1, changed: 1, unchanged: 0, skippedHuman: 0, failed: 0 });
+    expect(result).toEqual({ candidates: 1, changed: 1, unchanged: 0, skippedHuman: 0, failed: 0, needsManualHandling: [] });
     expect(updates).toEqual([["cab_1", "prompt"]]);
     const changeLog = logs.find((l) => l.before === "other" && l.after === "prompt");
     expect(changeLog).toMatchObject({ capabilityId: "cab_1", before: "other", after: "prompt", applied: true });
@@ -73,7 +73,7 @@ describe("runReclassify", () => {
     const { pool, updates } = fakeRowsPool([row]);
     const call = { invoke: async () => ({ value: { type: "prompt" } }) };
     const result = await runReclassify(pool as never, call, false, log);
-    expect(result).toEqual({ candidates: 1, changed: 1, unchanged: 0, skippedHuman: 0, failed: 0 });
+    expect(result).toEqual({ candidates: 1, changed: 1, unchanged: 0, skippedHuman: 0, failed: 0, needsManualHandling: [] });
     expect(updates).toHaveLength(0);
   });
 
@@ -81,7 +81,7 @@ describe("runReclassify", () => {
     const { pool, updates } = fakeRowsPool([row]);
     const call = { invoke: async () => ({ value: { type: "other" } }) };
     const result = await runReclassify(pool as never, call, true, log);
-    expect(result).toEqual({ candidates: 1, changed: 0, unchanged: 1, skippedHuman: 0, failed: 0 });
+    expect(result).toEqual({ candidates: 1, changed: 0, unchanged: 1, skippedHuman: 0, failed: 0, needsManualHandling: [] });
     expect(updates).toHaveLength(0);
   });
 
@@ -93,7 +93,7 @@ describe("runReclassify", () => {
     let invoked = false;
     const call = { invoke: async () => { invoked = true; return { value: { type: "prompt" } }; } };
     const result = await runReclassify(pool as never, call, true, (o) => logs.push(o));
-    expect(result).toEqual({ candidates: 1, changed: 0, unchanged: 0, skippedHuman: 1, failed: 0 });
+    expect(result).toEqual({ candidates: 1, changed: 0, unchanged: 0, skippedHuman: 1, failed: 0, needsManualHandling: [] });
     expect(invoked).toBe(false);
     expect(updates).toHaveLength(0);
     expect(logs.some((l) => l.skipped === "verdict_by=human" && l.capabilityId === "cab_1")).toBe(true);
@@ -117,6 +117,42 @@ describe("runReclassify", () => {
     const { pool } = fakeRowsPool([row, { ...row, id: "cab_2" }, { ...row, id: "cab_3", verdictBy: "human" }]);
     const call = { invoke: async () => { throw new Error("deepseek down"); } };
     const result = await runReclassify(pool as never, call, true, log);
-    expect(result).toEqual({ candidates: 3, changed: 0, unchanged: 0, skippedHuman: 1, failed: 2 });
+    expect(result).toEqual({ candidates: 3, changed: 0, unchanged: 0, skippedHuman: 1, failed: 2, needsManualHandling: [] });
+  });
+
+  // Owner ruling: writing just `type` across the `experience` boundary would leave `playbook.kind`
+  // (card.ts's refineCard invariant) contradicting the new `type`, so these must be skipped and
+  // surfaced for manual handling instead of applied.
+  it("applies a non-experience -> non-experience change (other -> prompt)", async () => {
+    const { pool, updates } = fakeRowsPool([row]);
+    const call = { invoke: async () => ({ value: { type: "prompt" } }) };
+    const result = await runReclassify(pool as never, call, true, log);
+    expect(result.changed).toBe(1);
+    expect(result.needsManualHandling).toEqual([]);
+    expect(updates).toEqual([["cab_1", "prompt"]]);
+  });
+
+  it("skips and reports (does not write) a skill -> experience change", async () => {
+    const { pool, updates } = fakeRowsPool([{ ...row, type: "skill" }]);
+    const logs: Record<string, unknown>[] = [];
+    const call = { invoke: async () => ({ value: { type: "experience" } }) };
+    const result = await runReclassify(pool as never, call, true, (o) => logs.push(o));
+    expect(result).toEqual({
+      candidates: 1, changed: 0, unchanged: 0, skippedHuman: 0, failed: 0,
+      needsManualHandling: [{ capabilityId: "cab_1", title: "t", before: "skill", after: "experience" }]
+    });
+    expect(updates).toHaveLength(0);
+    expect(logs.some((l) => l.capabilityId === "cab_1" && typeof l.needsManualHandling === "string")).toBe(true);
+  });
+
+  it("skips and reports (does not write) an experience -> skill change", async () => {
+    const { pool, updates } = fakeRowsPool([{ ...row, type: "experience" }]);
+    const call = { invoke: async () => ({ value: { type: "skill" } }) };
+    const result = await runReclassify(pool as never, call, true, log);
+    expect(result).toEqual({
+      candidates: 1, changed: 0, unchanged: 0, skippedHuman: 0, failed: 0,
+      needsManualHandling: [{ capabilityId: "cab_1", title: "t", before: "experience", after: "skill" }]
+    });
+    expect(updates).toHaveLength(0);
   });
 });
