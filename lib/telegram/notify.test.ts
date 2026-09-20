@@ -419,6 +419,42 @@ function fakePoolWithDeepRuns(deepRows: Array<Record<string, unknown>>) {
   return { calls, pool: { query } as never };
 }
 
+// Regression (M3.6 fix round 2): the candidate lateral used to take the capture's newest run of
+// ANY kind. Deep runs were unreachable before Task 4; once they exist, a failed deep run would
+// re-render the card as 「分析失败」 (and put a false 上次分析失败 note on a /todo card), and a
+// queued one would hold up a genuinely pending card's push.
+describe("runNotifyTick — a deep run is not the card's analysis run", () => {
+  it("scopes the latest-run lookup to kind = 'analysis'", async () => {
+    const { pool, calls } = fakePool([]);
+    await runNotifyTick({ pool, api: fakeApi(), ownerChatId: 1000 }, new AbortController().signal);
+    const select = calls.find((c) => c.text.includes(`lr.state AS "runState"`))!;
+    expect(select.text).toMatch(/WHERE capture_id = cb\.capture_id AND kind = 'analysis'/);
+  });
+
+  it("renders a kept card normally even though its newest deep run failed", async () => {
+    // The row the scoped lateral yields: the card's own analysis is 'done'; the failed deep run
+    // is invisible to this query.
+    const { pool } = fakePool([candidateRow({ verdict: "keep", runState: "done", errorCode: null })]);
+    const api = fakeApi();
+    await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
+    const [edit] = api.edited as Array<{ text: string }>;
+    expect(edit.text).toContain("✅ 已保留");
+    expect(edit.text).not.toContain("分析失败");
+  });
+
+  it("does not let a queued deep run hold up a pending card's push", async () => {
+    // Same scoping, seen from the other side: the pending card's analysis run is finished, so it
+    // is selected and pushed even while a deep run sits queued for the same capture.
+    const { pool, calls } = fakePool([candidateRow({ verdict: "pending", serial: null, runState: "done" })]);
+    const api = fakeApi();
+    const result = await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
+    expect(result).toBe("notified");
+    expect((api.edited as Array<{ text: string }>)[0]!.text).toContain("建议：保留");
+    const select = calls.find((c) => c.text.includes("lr.state IN ('done', 'failed')"))!;
+    expect(select.text).toMatch(/kind = 'analysis'/);
+  });
+});
+
 describe("runNotifyTick — finished deep-analysis runs", () => {
   it("sends a short summary as its own message (never editing the card) and marks the run notified", async () => {
     const { pool, calls } = fakePoolWithDeepRuns([deepRunRow()]);

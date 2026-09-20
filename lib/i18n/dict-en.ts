@@ -146,6 +146,7 @@ export const dictEn: Dict = {
     queuedNotice: "Queued — refresh once it finishes",
     runningNotice: "Deep analysis running, refresh shortly",
     failedPrefix: "Last deep analysis failed: ",
+    failedUnknownReason: "reason not recorded",
     retry: "Try again",
     genericError: "Something went wrong, please retry",
     bestFor: "Best for",
@@ -160,7 +161,6 @@ export const dictEn: Dict = {
     feedbackPositive: "Praise",
     feedbackNegative: "Criticism",
     risks: "Risks",
-    sources: "Sources",
     sourceRefAria: "Source {n}",
     basedOn: "Based on the card as of {date}"
   },

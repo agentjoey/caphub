@@ -151,6 +151,7 @@ export const dictZh = {
     queuedNotice: "已排队，完成后刷新查看",
     runningNotice: "深度分析进行中，稍后刷新查看",
     failedPrefix: "上次深度分析失败：",
+    failedUnknownReason: "原因未记录",
     retry: "重新深挖",
     genericError: "操作失败，请重试",
     bestFor: "最适合场景",
@@ -165,7 +166,6 @@ export const dictZh = {
     feedbackPositive: "好评",
     feedbackNegative: "争议",
     risks: "风险",
-    sources: "来源",
     sourceRefAria: "来源 {n}",
     basedOn: "依据 {date} 时的卡片内容"
   },

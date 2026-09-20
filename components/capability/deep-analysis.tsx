@@ -37,6 +37,14 @@ function useNarrowViewport(): boolean {
   );
 }
 
+/** Chips sit on one line on a phone, so the risk chip shows a lead-in and keeps the rest in its tooltip. */
+const RISK_CHIP_MAX = 18;
+
+function truncate(text: string, max: number): string {
+  const codepoints = Array.from(text);
+  return codepoints.length <= max ? text : `${codepoints.slice(0, max).join("")}…`;
+}
+
 function domain(url: string): string {
   try {
     return new URL(url).hostname.replace(/^www\./, "");
@@ -68,10 +76,14 @@ function Section({
   );
 }
 
-/** A `[n]` citation linking down to the collapsed source list at the bottom of the section. */
-function SourceRef({ index, label }: { index: number; label: string }) {
+/**
+ * A `[n]` citation linking down to the source list at the bottom. The list lives in a collapsed
+ * `<details>`, and only some browsers auto-open one to reveal a fragment target, so the click
+ * opens it explicitly (`onOpenSources`) instead of relying on that behavior.
+ */
+function SourceRef({ index, label, onOpenSources }: { index: number; label: string; onOpenSources: () => void }) {
   return (
-    <a className="deep-ref" href={`#deep-source-${index + 1}`} aria-label={label}>[{index + 1}]</a>
+    <a className="deep-ref" href={`#deep-source-${index + 1}`} aria-label={label} onClick={onOpenSources}>[{index + 1}]</a>
   );
 }
 
@@ -109,10 +121,16 @@ export function DeepAnalysisSection({
   // to the default below — 架构 alone, and nothing at all on a narrow viewport.
   const narrow = useNarrowViewport();
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const openSources = () => setSourcesOpen(true);
   const isOpen = (key: string) => open[key] ?? (!narrow && key === "architecture");
 
-  const active = runState === "queued" || runState === "running" || state === "queued";
-  const failed = runState === "failed" && state === "idle";
+  // The local "queued" state only covers the gap between this press and the refresh that brings
+  // the new run down: once the server reports ANY deep run state, that state wins — otherwise a
+  // finished analysis would render alongside a stale 「已排队」 notice.
+  const justQueued = state === "queued" && runState === null;
+  const active = runState === "queued" || runState === "running" || justQueued;
+  const failed = runState === "failed" && state !== "busy";
 
   async function start() {
     if (active || state === "busy") return;
@@ -158,7 +176,7 @@ export function DeepAnalysisSection({
     <li key={i}>
       {item.text}
       {item.source !== null && item.source < sources.length && (
-        <SourceRef index={item.source} label={format(dict.sourceRefAria, { n: item.source + 1 })} />
+        <SourceRef index={item.source} label={format(dict.sourceRefAria, { n: item.source + 1 })} onOpenSources={openSources} />
       )}
     </li>
     );
@@ -174,7 +192,9 @@ export function DeepAnalysisSection({
             <p className="deep-strip__headline">{analysis.headline}</p>
             <div className="deep-strip__chips">
               {useCases[0] && <span className="chip">{dict.bestFor}：{useCases[0].title}</span>}
-              {risks[0] && <span className="chip">{dict.topRisk}：{risks[0]}</span>}
+              {risks[0] && (
+                <span className="chip" title={risks[0]}>{dict.topRisk}：{truncate(risks[0], RISK_CHIP_MAX)}</span>
+              )}
               <span className="chip">{format(dict.sourceCount, { count: sources.length })}</span>
             </div>
           </div>
@@ -234,7 +254,7 @@ export function DeepAnalysisSection({
                   <li key={i}>
                     <b>{item.title}</b>　{item.detail}
                     {item.source < sources.length && (
-                      <SourceRef index={item.source} label={format(dict.sourceRefAria, { n: item.source + 1 })} />
+                      <SourceRef index={item.source} label={format(dict.sourceRefAria, { n: item.source + 1 })} onOpenSources={openSources} />
                     )}
                   </li>
                 ))}
@@ -276,7 +296,7 @@ export function DeepAnalysisSection({
           )}
 
           {sources.length > 0 && (
-            <details className="deep-sources">
+            <details className="deep-sources" open={sourcesOpen} onToggle={(e) => setSourcesOpen((e.currentTarget as HTMLDetailsElement).open)}>
               <summary>{format(dict.sourceCount, { count: sources.length })}</summary>
               <ol className="deep-sources__list">
                 {sources.map((source, i) => {
@@ -300,8 +320,9 @@ export function DeepAnalysisSection({
         </>
       )}
 
-      {active && <p className="notice">{state === "queued" ? dict.queuedNotice : dict.runningNotice}</p>}
-      {failed && <p className="inline-error">{dict.failedPrefix}{errorLabel(errorCode, locale)}</p>}
+      {active && <p className="notice">{justQueued ? dict.queuedNotice : dict.runningNotice}</p>}
+      {/* (5) errorLabel("") for an unrecorded code would leave the prefix dangling with nothing after it. */}
+      {failed && <p className="inline-error">{dict.failedPrefix}{errorLabel(errorCode, locale) || dict.failedUnknownReason}</p>}
       {!active && (
         <div className="deep-analysis__trigger">
           <button type="button" className="btn btn--primary" disabled={state === "busy"} onClick={start}>

@@ -25,6 +25,9 @@ describe("library queries", () => {
     expect(calls[0].text).toMatch(/cb\.progress = ANY\(\$1\)/);
     expect(calls[0].values).toEqual([TODO_PROGRESS, PAGE_SIZE, 0]);
     expect(TODO_PROGRESS).toEqual(["todo", "planned"]);
+    // The card's "last run" is its ANALYSIS run — a failed deep dive must not add a
+    // 上次分析失败 note to a /todo card (M3.6 fix round 2).
+    expect(calls[0].text).toMatch(/WHERE capture_id = cb\.capture_id AND kind = 'analysis'/);
   });
   it("listLibrary defaults to keep and applies search/type/tag/usage filters as parameters", async () => {
     const { pool, calls } = recorder([[], [{ total: "0" }]]);

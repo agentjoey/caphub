@@ -189,11 +189,18 @@ const CANDIDATE_COLUMNS = `cb.id, cb.capture_id AS "captureId", cb.title, cb.typ
             c.telegram_chat_id AS "telegramChatId", c.telegram_message_id AS "telegramMessageId",
             lr.state AS "runState", lr.error_code AS "errorCode"`;
 
+/**
+ * `kind = 'analysis'` is load-bearing: this lateral answers "how did this card's *analysis* go",
+ * which drives the card's whole rendering (a failed latest run re-renders it as 「分析失败」/adds a
+ * 上次分析失败 note) and gates the push on the run being finished. A deep run is a separate,
+ * optional dive — a failed one must never claim the card's analysis failed, and a queued one must
+ * never hold up a pending card's push.
+ */
 const CANDIDATE_FROM = `FROM caphub_v2.capabilities cb
      JOIN caphub_v2.captures c ON c.id = cb.capture_id
      JOIN LATERAL (
        SELECT state, error_code FROM caphub_v2.analysis_runs
-       WHERE capture_id = cb.capture_id ORDER BY created_at DESC LIMIT 1
+       WHERE capture_id = cb.capture_id AND kind = 'analysis' ORDER BY created_at DESC LIMIT 1
      ) lr ON true`;
 
 /**

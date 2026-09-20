@@ -110,5 +110,9 @@ describe("listRecentCaptures", () => {
     expect(queryText).toContain('left(c.text, 140) AS text');
     expect(queryText).toContain("c.url, cb.title, cb.verdict");
     expect(queryText).toContain('(cb.deleted_at IS NOT NULL) AS deleted');
+    // The row's run state describes the capture's ANALYSIS: a deep run must not make a recent
+    // row read 分析中/失败 (and offer 重跑) for a dive that has nothing to do with the capture's
+    // own analysis (M3.6 fix round 2).
+    expect(queryText).toContain("WHERE capture_id = c.id AND kind = 'analysis'");
   });
 });

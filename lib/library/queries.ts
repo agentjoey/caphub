@@ -119,9 +119,11 @@ export function listTodoCapabilities(pool: Q, opts: { page: number }) {
     undefined,
     {
       columns: `lr.state AS "lastRunState", lr.error_code AS "lastRunErrorCode"`,
+      // kind = 'analysis': a failed *deep* run must not put a 上次分析失败 note on a /todo card
+      // (see notify.ts's CANDIDATE_FROM, and getCapabilityDetail's own deep-scoped lateral).
       join: `LEFT JOIN LATERAL (
        SELECT state, error_code FROM caphub_v2.analysis_runs
-       WHERE capture_id = cb.capture_id ORDER BY created_at DESC LIMIT 1
+       WHERE capture_id = cb.capture_id AND kind = 'analysis' ORDER BY created_at DESC LIMIT 1
      ) lr ON true`
     }
   );

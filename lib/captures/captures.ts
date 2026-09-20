@@ -105,7 +105,7 @@ export async function listRecentCaptures(pool: Pool, limit = 20): Promise<Recent
     `SELECT c.id, c.kind, c.created_at AS "createdAt", r.state AS "runState", cb.id AS "capabilityId", r.error_code AS "errorCode",
             c.object_key AS "objectKey", c.thumb_key AS "thumbKey", left(c.text, 140) AS text, c.url, cb.title, cb.verdict, (cb.deleted_at IS NOT NULL) AS deleted
      FROM caphub_v2.captures c
-     LEFT JOIN LATERAL (SELECT state, error_code FROM caphub_v2.analysis_runs WHERE capture_id = c.id ORDER BY created_at DESC LIMIT 1) r ON true
+     LEFT JOIN LATERAL (SELECT state, error_code FROM caphub_v2.analysis_runs WHERE capture_id = c.id AND kind = 'analysis' ORDER BY created_at DESC LIMIT 1) r ON true
      LEFT JOIN caphub_v2.capabilities cb ON cb.capture_id = c.id
      ORDER BY c.created_at DESC LIMIT $1`, [limit]);
   return rows;

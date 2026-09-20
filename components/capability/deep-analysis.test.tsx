@@ -77,6 +77,25 @@ describe("DeepAnalysisSection — the three pre-result states", () => {
     expect(refresh).toHaveBeenCalled();
   });
 
+  it("drops the local 已排队 notice once the server reports the finished run", async () => {
+    deepAnalysisAction.mockResolvedValue({ ok: true, updatedAt: "2026-09-20T00:00:00.000Z" });
+    const { container, rerender } = renderSection();
+    fireEvent.click(screen.getByRole("button", { name: "开始深度分析" }));
+    await waitFor(() => expect(container.textContent).toContain("已排队"));
+    // router.refresh() brings the finished analysis down — the local queued state must yield to it
+    // instead of sitting above the result forever.
+    rerender(
+      <DeepAnalysisSection captureId="cap_1" analysis={analysis} analysisOf={null} runState="done" errorCode={null} />
+    );
+    expect(container.textContent).not.toContain("已排队");
+    expect(container.querySelector(".deep-strip__headline")).toBeTruthy();
+  });
+
+  it("names a generic reason when a failed run recorded no error code", () => {
+    const { container } = renderSection({ runState: "failed", errorCode: null });
+    expect(container.textContent).toContain("上次深度分析失败：原因未记录");
+  });
+
   it("surfaces a rejected trigger's own message and keeps the button usable", async () => {
     deepAnalysisAction.mockResolvedValue({ ok: false, reason: "CONFLICT", message: "深度分析已在排队或进行中" });
     const { container } = renderSection();
@@ -94,6 +113,15 @@ describe("DeepAnalysisSection — the result", () => {
     expect(strip.textContent).toContain("最适合场景：批量抓取");
     expect(strip.textContent).toContain("最大风险：依赖上游浏览器版本");
     expect(strip.textContent).toContain("来源 2");
+  });
+
+  it("truncates an over-long 最大风险 chip and keeps the full text in its tooltip", () => {
+    const long = "依赖上游浏览器版本，升级后可能整条抓取链路都要重新适配一遍";
+    const { container } = renderSection({ analysis: { ...analysis, risks: [long, "内存吃紧"] } });
+    const chip = [...container.querySelectorAll(".deep-strip__chips .chip")].find((c) => c.textContent!.startsWith("最大风险"))!;
+    expect(chip.textContent!.endsWith("…")).toBe(true);
+    expect(chip.textContent!.length).toBeLessThan(long.length);
+    expect(chip.getAttribute("title")).toBe(long);
   });
 
   it("renders six collapsible sections with item counts, only 架构 expanded, and bullets rather than paragraphs", () => {
@@ -141,8 +169,12 @@ describe("DeepAnalysisSection — the result", () => {
     expect(cited.textContent).toContain("案例博客");
     expect(cited.textContent).toContain("blog.example.org");
     expect(cited.querySelector("a")!.getAttribute("href")).toBe("https://blog.example.org/post");
-    // The source list itself stays collapsed.
-    expect(container.querySelector<HTMLDetailsElement>(".deep-sources")!.open).toBe(false);
+    // The source list itself stays collapsed until a citation is followed — clicking one opens it
+    // explicitly, since not every browser opens a <details> to reveal a fragment target.
+    const sources = container.querySelector<HTMLDetailsElement>(".deep-sources")!;
+    expect(sources.open).toBe(false);
+    fireEvent.click(ref);
+    expect(sources.open).toBe(true);
   });
 
   it("omits an empty section entirely rather than rendering an empty heading", () => {
