@@ -329,7 +329,7 @@ export type DeepFeedbackPoint = z.infer<typeof deepFeedbackPointSchema>;
  * 3-5 use_cases, 0-4 cases, 0-3 feedback items each, 2-4 risks) stay strict -- those counts are
  * what keep the card scannable, not the source of the length-cap failures being fixed here.
  */
-export const deepAnalysisSchema = z.object({
+const deepAnalysisObjectSchema = z.object({
   headline: deepBullet(60),
   architecture: z.object({ summary: deepBullet(120), points: z.array(deepBullet(60)).min(3).max(5) }),
   implementation: z.object({ summary: deepBullet(120), points: z.array(deepBullet(60)).min(3).max(5) }),
@@ -341,16 +341,27 @@ export const deepAnalysisSchema = z.object({
   }),
   risks: z.array(deepBullet(75)).min(2).max(4),
   sources: z.array(deepSourceSchema)
-}).transform((value) => {
-  const clampSource = (source: number | null): number | null =>
-    source !== null && source >= value.sources.length ? null : source;
-  return {
-    ...value,
-    cases: value.cases.map((c) => ({ ...c, source: clampSource(c.source) })),
-    feedback: {
-      positive: value.feedback.positive.map((p) => ({ ...p, source: clampSource(p.source) })),
-      negative: value.feedback.negative.map((p) => ({ ...p, source: clampSource(p.source) }))
-    }
-  };
 });
+
+/**
+ * The out-of-range coercion is attached transform→pipe (the same pattern as `tagsSchema` and
+ * `scenariosFieldFor`) and NOT as a bare `.transform`: `runStructured` hands this schema to
+ * `z.toJSONSchema`, which throws "Transforms cannot be represented in JSON Schema" on a
+ * transform that isn't piped back into a representable schema -- that would kill every deep
+ * analysis at the provider call, before the model ever answers.
+ */
+export const deepAnalysisSchema = deepAnalysisObjectSchema
+  .transform((value) => {
+    const clampSource = (source: number | null): number | null =>
+      source !== null && source >= value.sources.length ? null : source;
+    return {
+      ...value,
+      cases: value.cases.map((c) => ({ ...c, source: clampSource(c.source) })),
+      feedback: {
+        positive: value.feedback.positive.map((p) => ({ ...p, source: clampSource(p.source) })),
+        negative: value.feedback.negative.map((p) => ({ ...p, source: clampSource(p.source) }))
+      }
+    };
+  })
+  .pipe(deepAnalysisObjectSchema);
 export type DeepAnalysis = z.infer<typeof deepAnalysisSchema>;

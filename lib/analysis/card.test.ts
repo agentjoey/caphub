@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { cardSchema, deepAnalysisSchema, finalizeSourceFacts, isValidTag, scoreResultSchema } from "./card";
+import { cardSchema, deepAnalysisSchema, deepFactsSchema, deepPlanSchema, finalizeSourceFacts, isValidTag, scoreResultSchema } from "./card";
 
 const valid = {
   title: "用 Playwright 生成 axe 可访问性报告", type: "skill", summary: "一段摘要",
@@ -329,6 +329,27 @@ describe("finalizeSourceFacts", () => {
   it("preserves the other fields unchanged", () => {
     const result = finalizeSourceFacts({ repo_url: "https://x", stars: 5, license: "MIT" }, now);
     expect(result).toEqual({ repo_url: "https://x", stars: 5, license: "MIT", as_of: "2026-09-20" });
+  });
+});
+
+describe("deep analysis schemas render as JSON Schema", () => {
+  // runStructured hands each of these to z.toJSONSchema before calling the provider, so a
+  // bare (unpiped) .transform anywhere in them kills the run before the model ever answers.
+  it.each([
+    ["deep_plan", deepPlanSchema],
+    ["deep_facts", deepFactsSchema],
+    ["deep_analysis", deepAnalysisSchema]
+  ])("%s", (_name, schema) => {
+    const json = z.toJSONSchema(schema) as { type?: string; properties?: Record<string, unknown> };
+    expect(json.type).toBe("object");
+    expect(Object.keys(json.properties ?? {}).length).toBeGreaterThan(0);
+  });
+
+  it("still describes cases[].source as a nullable integer", () => {
+    const json = z.toJSONSchema(deepAnalysisSchema) as {
+      properties?: { cases?: { items?: { properties?: { source?: unknown } } } };
+    };
+    expect(json.properties?.cases?.items?.properties?.source).toBeDefined();
   });
 });
 
