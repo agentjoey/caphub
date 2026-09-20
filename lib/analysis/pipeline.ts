@@ -127,14 +127,19 @@ export async function runPipeline(deps: PipelineDeps, lease: Lease, signal: Abor
   ]);
   if (!scenarios.length) throw new Error("no scenarios configured in caphub_v2.scenarios; cannot run reason step");
 
+  // The pinned type is enforced at the schema layer (cardSchemaFor narrows `type` to a
+  // z.literal of it), not by mutating `card.type` after parsing: `refineCard` is what checks
+  // `playbook.kind` agrees with `type` (e.g. `experience` requires an `experience`-shaped
+  // playbook), so narrowing here makes a disobedient model's mismatched playbook fail
+  // validation and retry via the existing invalid-output retry path, instead of silently
+  // storing a card whose type and playbook shape disagree.
   const card = await runStructured({
     pool: deps.pool, runId: lease.runId, step: "reason", call: deps.reason,
     prompt: reasonPrompt({ material, extraction, sources: search.sources, similar, existingTags, scenarios, pinnedType }),
-    schemaName: "capability_card", schema: cardSchemaFor(scenarios.map((s) => s.slug)), budget, timeoutMs: TIMEOUTS.reason, signal
+    schemaName: "capability_card", schema: cardSchemaFor(scenarios.map((s) => s.slug), pinnedType ?? undefined), budget, timeoutMs: TIMEOUTS.reason, signal
   });
-  // A pinned (human-set) type must survive a rerun even if the model disobeyed the prompt's
-  // hard constraint — this is the backstop, the prompt constraint above is the first line of
-  // defense. upsertCapability independently pins `type`/`type_by` too, as a second backstop.
+  // Belt-and-braces only: validation above already guarantees card.type === pinnedType when
+  // pinnedType is set (z.literal), so this is a no-op assignment, not the enforcement itself.
   if (pinnedType) card.type = pinnedType;
 
   const decision = decideVerdict(card, deps.threshold);

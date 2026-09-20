@@ -7,6 +7,7 @@ const card = {
   scenarios: ["coding"], score: 4, score_reason: "r", source_facts: {}
 };
 const pendingCard = { ...card, confidence: 0.5 };
+const experienceCard = { ...card, type: "experience", playbook: { kind: "experience", content: "做法本身", when_to_use: "何时用" } };
 const extraction = { what: "w", visible_text: "", commands: [], prompt_text: null, source_hints: [], questions: [] };
 
 type Kind = "image" | "text" | "url";
@@ -182,18 +183,40 @@ describe("runPipeline", () => {
   });
 
   it("passes a human-pinned type into the reason prompt as a hard constraint", async () => {
-    const { d, reasonPrompt } = deps("text", { pinnedType: "experience" });
+    const { d, reasonPrompt } = deps("text", { pinnedType: "experience", reasonValue: experienceCard });
     await runPipeline(d, { runId: "run_pinned", captureId: "cap_pinned", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
     expect(reasonPrompt()).toMatch(/硬性约束/);
     expect(reasonPrompt()).toContain("experience");
   });
 
-  it("forces the stored type back to the human-pinned value even when the model disobeys", async () => {
-    const { d, sql } = deps("text", { pinnedType: "experience", reasonValue: card }); // model returns 'prompt', not the pinned 'experience'
+  it("stores the card with the pinned type when the model complies (enforced at the schema layer)", async () => {
+    const { d, sql } = deps("text", { pinnedType: "experience", reasonValue: experienceCard });
     await runPipeline(d, { runId: "run_pinned2", captureId: "cap_pinned2", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
     const insert = sql.find((q) => q.text.includes("INSERT INTO caphub_v2.capabilities"))!;
     expect(insert.values).toContain("experience");
     expect(insert.values).not.toContain("prompt");
+  });
+
+  // Owner ruling (review fix round 1): the pinned type must be enforced by the schema (a
+  // z.literal on `type`, checked together with refineCard's type/playbook coherence rule), not
+  // by mutating `card.type` after parsing — a post-hoc swap would let a disobedient model's
+  // mismatched playbook (e.g. install-shaped playbook under a forced `experience` type) get
+  // silently stored instead of caught. This exercises that a mismatch goes through the
+  // existing invalid-output retry path and ultimately fails the run, rather than being stored.
+  it("retries and then fails the run when the model returns a type/playbook that disagrees with the pinned type", async () => {
+    const { d, calls } = deps("text", { pinnedType: "experience", reasonValue: card }); // card.type is "prompt", not "experience"
+    await expect(
+      runPipeline(d, { runId: "run_pinned_bad", captureId: "cap_pinned_bad", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal)
+    ).rejects.toMatchObject({ code: "INVALID_OUTPUT" });
+    expect(calls.filter((c) => c === "reason")).toHaveLength(2); // one attempt + one correction retry
+  });
+
+  it("rejects a card that claims the pinned type but keeps a mismatched playbook shape (mismatch caught, not silently stored)", async () => {
+    const badPlaybookCard = { ...card, type: "experience" }; // type matches, but playbook is still integrate-shaped
+    const { d } = deps("text", { pinnedType: "experience", reasonValue: badPlaybookCard });
+    await expect(
+      runPipeline(d, { runId: "run_pinned_bad2", captureId: "cap_pinned_bad2", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal)
+    ).rejects.toMatchObject({ code: "INVALID_OUTPUT" });
   });
 
   it("does not add a pinned-type constraint when no capability is human-typed yet", async () => {

@@ -74,6 +74,36 @@ describe("cardSchemaFor", () => {
     expect(() => cardSchemaFor([])).toThrow();
   });
 
+  it("with a pinnedType, rejects a card whose type differs, even before checking playbook shape", () => {
+    const schema = cardSchemaFor(slugs, "experience");
+    expect(() => schema.parse({ ...valid, type: "skill", scenarios: ["coding"] })).toThrow();
+  });
+
+  it("with a pinnedType, rejects a card whose playbook doesn't match the pinned type's shape (mismatch caught, not silently stored)", () => {
+    const schema = cardSchemaFor(slugs, "experience");
+    // type: "experience" is what the model would have to claim to pass the z.literal, but an
+    // integrate-shaped playbook still violates refineCard's type/playbook coherence check.
+    expect(() => schema.parse({
+      ...valid, type: "experience", scenarios: ["coding"],
+      usage: "integrate", playbook: { kind: "integrate", install: [], repo: null, prompt_text: null }
+    })).toThrow();
+  });
+
+  it("with a pinnedType, accepts and stores a card whose type and experience-shaped playbook both match", () => {
+    const schema = cardSchemaFor(slugs, "experience");
+    const parsed = schema.parse({
+      ...valid, type: "experience", scenarios: ["coding"],
+      playbook: { kind: "experience", content: "做法本身", when_to_use: "何时用" }
+    });
+    expect(parsed.type).toBe("experience");
+    expect(parsed.playbook).toEqual({ kind: "experience", content: "做法本身", when_to_use: "何时用" });
+  });
+
+  it("without a pinnedType, behaves exactly as before (any valid type/playbook combination passes)", () => {
+    const schema = cardSchemaFor(slugs);
+    expect(schema.parse({ ...valid, type: "skill", scenarios: ["coding"] }).type).toBe("skill");
+  });
+
   it("still requires score/score_reason and defaults source_facts to {}", () => {
     const schema = cardSchemaFor(slugs);
     const { score: _score, ...withoutScore } = valid as typeof valid & { score: number };

@@ -1,6 +1,6 @@
 import type { Pool } from "pg";
 import { z } from "zod";
-import { cardObjectSchema, refineCard } from "./card";
+import { capabilityTypeSchema, cardObjectSchema, refineCard, type CapabilityType } from "./card";
 
 export interface Scenario {
   slug: string;
@@ -44,9 +44,23 @@ export function scenariosResultSchemaFor(slugs: readonly [string, ...string[]]) 
  * required enum of `slugs`, 1–3 entries, deduped. Built from `cardObjectSchema` (not
  * `cardSchema`) because `.extend()` isn't available on the ZodEffects `superRefine`
  * produces; the same cross-field rules are re-applied via `refineCard`.
+ *
+ * `pinnedType`, when given, additionally narrows `type` to a `z.literal` of that exact value
+ * (a human already set it via 改建议 — see lib/analysis/pipeline.ts's `loadPinnedType`). This
+ * must happen at the schema layer, before `refineCard` runs, rather than by mutating `card.type`
+ * after parsing: `refineCard` is what enforces that `playbook.kind` matches `type` (e.g. an
+ * `experience` type requires an `experience`-shaped playbook), so narrowing `type` here makes a
+ * disobedient model's mismatched playbook fail validation and go through the existing
+ * invalid-output retry path, instead of a post-hoc type swap silently storing a card whose type
+ * and playbook shape disagree.
  */
-export function cardSchemaFor(slugs: string[]) {
+export function cardSchemaFor(slugs: string[], pinnedType?: CapabilityType) {
   if (slugs.length === 0) throw new Error("cardSchemaFor requires at least one scenario slug");
   const nonEmpty = slugs as [string, ...string[]];
-  return cardObjectSchema.extend({ scenarios: scenariosFieldFor(nonEmpty) }).superRefine(refineCard);
+  return cardObjectSchema
+    .extend({
+      scenarios: scenariosFieldFor(nonEmpty),
+      type: pinnedType ? z.literal(pinnedType) : capabilityTypeSchema
+    })
+    .superRefine(refineCard);
 }
