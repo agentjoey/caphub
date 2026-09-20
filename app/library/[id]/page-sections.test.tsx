@@ -95,6 +95,39 @@ describe("library detail page sections", () => {
     expect(order).toEqual([...order].sort((a, b) => a - b));
   });
 
+  it("promotes 深度分析 above 一句话总结 once an analysis exists, leaving the rest of the order alone", async () => {
+    const { container } = await renderDetail({ deepAnalysis: DEEP, deepAnalysisOf: "2026-09-19T00:00:00.000Z" });
+    const text = container.textContent ?? "";
+    const at = (needle: string) => {
+      const i = text.indexOf(needle);
+      expect(i, `missing: ${needle}`).toBeGreaterThan(-1);
+      return i;
+    };
+    // "直接整合" (usage badge), not "抓取" (a scenario chip), because the DEEP fixture's use case
+    // title contains "抓取" as a substring ("批量抓取"), which would false-match once the deep
+    // analysis section is promoted ahead of the scenario chips.
+    const order = [at("深度分析"), at("一句话总结"), at("直接整合"), at("价值信号"), at("怎么用"), at("来源事实"), at("详情")];
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
+  it.each(["running", "failed"] as const)(
+    "keeps 深度分析 in its usual place (not promoted) while runState is %s and no analysis exists yet",
+    async (deepRunState) => {
+      const { container } = await renderDetail({ deepAnalysis: null, deepRunState });
+      const text = container.textContent ?? "";
+      const at = (needle: string) => {
+        const i = text.indexOf(needle);
+        expect(i, `missing: ${needle}`).toBeGreaterThan(-1);
+        return i;
+      };
+      // Unpromoted position: after 来源事实 (right column) and before 详情, same as when there
+      // is no analysis at all — i.e. the trigger/running/failed panel was NOT moved to the top.
+      expect(at("一句话总结")).toBeLessThan(at("来源事实"));
+      expect(at("来源事实")).toBeLessThan(at("深度分析"));
+      expect(at("深度分析")).toBeLessThan(at("详情"));
+    }
+  );
+
   it("puts the score badge next to the title with the reason as its tooltip, not inline with the facts", async () => {
     const { container } = await renderDetail();
     const badge = container.querySelector(".page-title .badge--score")!;

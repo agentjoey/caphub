@@ -42,11 +42,27 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   // than assume every row was written by the current analysis code.
   const overlap = detail.overlap?.relation ? detail.overlap : NO_OVERLAP;
   const cardScenarios = scenarios.filter((s) => detail.scenarios.includes(s.slug));
+  // A completed deep analysis is content the owner asked to read first (walkthrough decision);
+  // the trigger/running/failed states are a call to action, not content, so they stay put — only
+  // `Boolean(detail.deepAnalysis)` promotes the section, never runState alone.
+  const hasDeepAnalysis = Boolean(detail.deepAnalysis);
+  const deepAnalysisSection = (
+    <DeepAnalysisSection
+      captureId={detail.captureId}
+      analysis={detail.deepAnalysis}
+      analysisOf={detail.deepAnalysisOf}
+      runState={detail.deepRunState}
+      errorCode={detail.deepRunErrorCode}
+      locale={locale}
+    />
+  );
 
   // Section order is Human-decided (M3.5 design decision 2), shared with the Telegram card:
   // summary → scenarios/usage/score → value signals → playbook → source facts → folded details.
   // The right-hand column (screenshot, source facts, actions) stacks under the main column on
-  // narrow screens, which keeps that same reading order on one column.
+  // narrow screens, which keeps that same reading order on one column. When a deep analysis is
+  // present, it is promoted to the top of the main column, ahead of 一句话总结 (walkthrough
+  // decision on the two live-analyzed cards); absent, it stays at the foot of the page as today.
   return (
     <div>
       <p className="back-link"><Link href="/library">{dict.detail.back}</Link></p>
@@ -79,6 +95,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       </div>
       <div className="detail-grid">
         <div>
+          {hasDeepAnalysis && deepAnalysisSection}
           <section className="panel">
             <h2 className="panel-title">{dict.detail.summary}</h2>
             <p className="card-summary detail-summary">{detail.summary}</p>
@@ -176,14 +193,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           <p className="detail-synced">{format(dict.detail.syncedAt, { date: detail.syncedAt ? formatDateTime(detail.syncedAt, locale) : dict.detail.notSynced })}</p>
         </div>
       </div>
-      <DeepAnalysisSection
-        captureId={detail.captureId}
-        analysis={detail.deepAnalysis}
-        analysisOf={detail.deepAnalysisOf}
-        runState={detail.deepRunState}
-        errorCode={detail.deepRunErrorCode}
-        locale={locale}
-      />
+      {!hasDeepAnalysis && deepAnalysisSection}
       <AnalysisDetails detail={detail} locale={locale} />
     </div>
   );
