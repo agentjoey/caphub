@@ -111,4 +111,40 @@ describe("similarByEmbedding", () => {
     await similarByEmbedding(pool as never, { capabilityId: "cab_self", limit: 3 });
     expect(values).toEqual(["cab_self", 3]);
   });
+
+  describe("with a directly-supplied embedding (no stored capability embedding yet)", () => {
+    it("compares against the given vector and excludes the given capture id", async () => {
+      let sql = "";
+      let values: unknown[] = [];
+      const pool = {
+        query: async (text: string, v: unknown[]) => {
+          sql = text;
+          values = v;
+          return { rows: [{ id: "cab_2", title: "Existing Tool", type: "tool", summary: "一个已有工具", tags: [], serial: 9 }] };
+        }
+      };
+      const out = await similarByEmbedding(pool as never, { embedding: [1, 0, 0], excludeCaptureId: "cap_new" });
+      expect(sql).toContain("embedding <=> $1::vector");
+      expect(sql).toContain("capture_id <> $3");
+      expect(values).toEqual(["[1,0,0]", 5, "cap_new"]);
+      expect(out).toEqual([{ id: "cab_2", code: "TOL-0009", title: "Existing Tool", type: "tool", summary: "一个已有工具", tags: [] }]);
+    });
+
+    it("excludes nothing when no capture id is given", async () => {
+      let values: unknown[] = [];
+      const pool = { query: async (_text: string, v: unknown[]) => { values = v; return { rows: [] }; } };
+      await similarByEmbedding(pool as never, { embedding: [1, 0, 0] });
+      expect(values).toEqual(["[1,0,0]", 5, null]);
+    });
+
+    it("only looks at kept, active, non-deleted, embedded cards", async () => {
+      let sql = "";
+      const pool = { query: async (text: string) => { sql = text; return { rows: [] }; } };
+      await similarByEmbedding(pool as never, { embedding: [1, 0, 0] });
+      expect(sql).toContain("verdict = 'keep'");
+      expect(sql).toContain("deleted_at IS NULL");
+      expect(sql).toContain("status = 'active'");
+      expect(sql).toContain("embedding IS NOT NULL");
+    });
+  });
 });

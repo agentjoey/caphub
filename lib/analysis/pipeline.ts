@@ -10,6 +10,7 @@ import type { ObjectStore } from "../storage/s3";
 import { RunBudget } from "./budget";
 import { upsertCapability } from "./capabilities";
 import { extractionSchema, type CapabilityType, type Extraction } from "./card";
+import { embedMaterialQuery } from "./material-embedding";
 import { prepareMaterial, type MaterialDeps } from "./material";
 import { reasonPrompt, searchQuery, visionPrompt } from "./prompts";
 import { cardSchemaFor, loadScenarios } from "./scenarios";
@@ -24,12 +25,21 @@ export const TIMEOUTS = { vision: 60_000, search: 60_000, reason: 120_000, revie
 export interface PipelineDeps {
   pool: Pool; objects: ObjectStore; vision: StructuredCall; search: SearchCall; reason: StructuredCall;
   material: MaterialDeps; threshold: number;
+  /**
+   * A throwaway query embedding for overlap-candidate lookup only (see `loadSimilar` below) --
+   * never the capability's own `embedding` column, which the separate embed worker tick owns
+   * exclusively. Optional and non-fatal by contract: implementations must resolve to `null`
+   * rather than reject/throw (see material-embedding.ts's `embedMaterialQuery`, which
+   * `createPipelineDeps` wires up here).
+   */
+  embedQuery: (text: string, signal: AbortSignal) => Promise<number[] | null>;
 }
 
 export function createPipelineDeps(config: Config, pool: Pool, objects: ObjectStore, pipeline: Pipeline): PipelineDeps {
-  const { minimaxApiKey, deepseekApiKey, tavilyApiKey } = config.providers;
+  const { minimaxApiKey, deepseekApiKey, tavilyApiKey, geminiApiKey } = config.providers;
   if (!minimaxApiKey) throw new Error("MINIMAX_API_KEY is required to run analysis");
   const minimax = createMiniMaxCall({ apiKey: minimaxApiKey });
+  const embedQuery = (text: string, signal: AbortSignal) => embedMaterialQuery(geminiApiKey, text, signal);
   if (pipeline === "mixed") {
     if (!tavilyApiKey) throw new Error("TAVILY_API_KEY is required when pipeline is 'mixed'");
     if (!deepseekApiKey) throw new Error("DEEPSEEK_API_KEY is required when pipeline is 'mixed'");
@@ -37,7 +47,7 @@ export function createPipelineDeps(config: Config, pool: Pool, objects: ObjectSt
       pool, objects, vision: minimax,
       search: createTavilySearch({ apiKey: tavilyApiKey }),
       reason: createDeepSeekCall({ apiKey: deepseekApiKey }),
-      material: {}, threshold: config.verdictAutoThreshold
+      material: {}, threshold: config.verdictAutoThreshold, embedQuery
     };
   }
   if (pipeline === "minimax_tavily") {
@@ -46,10 +56,13 @@ export function createPipelineDeps(config: Config, pool: Pool, objects: ObjectSt
       pool, objects, vision: minimax,
       search: createTavilySearch({ apiKey: tavilyApiKey }),
       reason: minimax,
-      material: {}, threshold: config.verdictAutoThreshold
+      material: {}, threshold: config.verdictAutoThreshold, embedQuery
     };
   }
-  return { pool, objects, vision: minimax, search: createMiniMaxSearch({ apiKey: minimaxApiKey }), reason: minimax, material: {}, threshold: config.verdictAutoThreshold };
+  return {
+    pool, objects, vision: minimax, search: createMiniMaxSearch({ apiKey: minimaxApiKey }), reason: minimax,
+    material: {}, threshold: config.verdictAutoThreshold, embedQuery
+  };
 }
 
 /**
@@ -79,15 +92,43 @@ async function loadExistingCapability(pool: Pick<Pool, "query">, captureId: stri
 
 /**
  * Candidate cards for both the "similar capabilities" prompt context and overlap-relation
- * detection. Prefers the vector search (similarByEmbedding) once this capture's capability row
- * has an embedding -- i.e. from its second analysis run onward, after the embedding worker tick
- * has caught up -- and falls back to the existing text-based search (findSimilar) otherwise, so
- * a capture's very first run (no capability row, hence no embedding) still gets candidates.
+ * detection. In priority order:
+ *  1. The vector search against this capture's own stored capability embedding
+ *     (`similarByEmbedding({ capabilityId })`), once it has one -- from its second analysis run
+ *     onward, after the embedding worker tick has caught up.
+ *  2. Otherwise, a throwaway *query* embedding of the material itself (`embedQuery`, e.g. via
+ *     Gemini), so overlap candidates are still semantic on a capture's very first run rather
+ *     than text-matched only. This embedding is never persisted -- see `embedQuery`'s contract
+ *     on PipelineDeps -- and, being an embedding call rather than a reasoning call, it is
+ *     deliberately kept OUT of `budget` (the analysis run's 4-call/200k-token cap): it is called
+ *     directly here, never through `runStructured`/`runSearch`, so it never touches
+ *     `budget.assertCanCall()`/`budget.charge()` (same treatment the embed tick's own calls get).
+ *     `embedQuery` is optional/non-fatal by contract (null on no key, provider error or
+ *     timeout), so a Gemini outage falls through to (3) rather than failing the run.
+ *  3. The existing text-based search (`findSimilar`), when neither of the above has anything to
+ *     compare against.
+ *
+ * `analysis_steps.step`'s CHECK (widened by migration 010 to add 'plan'/'synthesize') does not
+ * include 'embed' -- adding it was out of scope for this fix -- so step (2) is logged to stdout
+ * instead of recorded as a step row.
  */
 async function loadSimilar(
-  pool: Pick<Pool, "query">, existing: { id: string; hasEmbedding: boolean } | null, seed: string, captureId: string
+  pool: Pick<Pool, "query">, existing: { id: string; hasEmbedding: boolean } | null, seed: string, captureId: string,
+  embedQuery: PipelineDeps["embedQuery"], signal: AbortSignal, runId: string
 ): Promise<SimilarCandidate[]> {
   if (existing?.hasEmbedding) return similarByEmbedding(pool, { capabilityId: existing.id });
+  // `embedQuery` is contractually non-fatal (see PipelineDeps), but this belt-and-braces
+  // try/catch guarantees "the analysis must never fail because this lookup failed" even
+  // against a misbehaving implementation, rather than relying solely on that contract.
+  let embedding: number[] | null = null;
+  try {
+    embedding = await embedQuery(seed, signal);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`analysis: material embedding lookup threw unexpectedly, falling back to text-similarity candidates (${message})`);
+  }
+  console.log(JSON.stringify({ runId, step: "embed", ok: embedding !== null }));
+  if (embedding) return similarByEmbedding(pool, { embedding, excludeCaptureId: captureId });
   return findSimilar(pool, seed, captureId);
 }
 
@@ -152,7 +193,7 @@ export async function runPipeline(deps: PipelineDeps, lease: Lease, signal: Abor
   const [existing, existingTags, scenarios, pinnedType] = await Promise.all([
     loadExistingCapability(deps.pool, lease.captureId), topTags(deps.pool), loadScenarios(deps.pool), loadPinnedType(deps.pool, lease.captureId)
   ]);
-  const similar = await loadSimilar(deps.pool, existing, similarSeed, lease.captureId);
+  const similar = await loadSimilar(deps.pool, existing, similarSeed, lease.captureId, deps.embedQuery, signal, lease.runId);
   if (!scenarios.length) throw new Error("no scenarios configured in caphub_v2.scenarios; cannot run reason step");
 
   // overlap.target is narrowed to exactly the serial codes offered in the prompt's candidate

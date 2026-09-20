@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import { formatSerial } from "../library/serial";
 import type { CapabilityType } from "./card";
+import { toVectorLiteral } from "./embedding";
 
 const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 const WORD_RUN = /[\p{L}\p{N}]+/gu;
@@ -82,24 +83,41 @@ export async function findSimilar(pool: Pick<Pool, "query">, text: string, captu
 }
 
 /**
- * Kept, active capabilities nearest to `capabilityId`'s own embedding by cosine distance
- * (`<=>`), excluding itself. The embedding value is never pulled into JS -- the comparison
- * happens entirely in SQL via a self-referencing join on the same table -- and the query
- * returns no rows at all when `capabilityId` itself has no embedding yet (a brand-new capture's
- * capability row never does; see lib/analysis/pipeline.ts, which falls back to `findSimilar`'s
- * text search in that case rather than calling this with nothing to compare against).
+ * Kept, active capabilities nearest to a given embedding by cosine distance (`<=>`). Two ways
+ * to call it:
+ *  - `{ capabilityId }`: compares against that capability's own stored embedding, excluding
+ *    itself. The embedding value is never pulled into JS -- the comparison happens entirely in
+ *    SQL via a self-referencing join on the same table -- and it returns no rows at all when
+ *    `capabilityId` itself has no embedding yet.
+ *  - `{ embedding, excludeCaptureId? }`: compares against an embedding computed elsewhere (e.g.
+ *    a throwaway query embedding of the incoming material on a capture's first analysis run,
+ *    before any capability row -- let alone its own embedding -- exists yet; see
+ *    lib/analysis/pipeline.ts's `loadSimilar`), optionally excluding one capture's own
+ *    (not-yet-existing-or-not-yet-kept) row.
+ * lib/analysis/pipeline.ts falls back to `findSimilar`'s text search when neither form has
+ * anything to compare against.
  */
 export async function similarByEmbedding(
   pool: Pick<Pool, "query">,
-  input: { capabilityId: string; limit?: number }
+  input: { capabilityId: string; limit?: number } | { embedding: number[]; excludeCaptureId?: string | null; limit?: number }
 ): Promise<SimilarCandidate[]> {
   const limit = input.limit ?? 5;
+  if ("capabilityId" in input) {
+    const r = await pool.query<CandidateRow>(
+      `SELECT c.id, c.title, c.type, c.summary, c.tags, c.serial
+       FROM caphub_v2.capabilities c, caphub_v2.capabilities self
+       WHERE self.id = $1 AND self.embedding IS NOT NULL
+         AND c.id <> $1 AND c.verdict = 'keep' AND c.deleted_at IS NULL AND c.status = 'active' AND c.embedding IS NOT NULL
+       ORDER BY c.embedding <=> self.embedding
+       LIMIT $2`, [input.capabilityId, limit]);
+    return r.rows.map(toCandidate);
+  }
+  const excludeCaptureId = input.excludeCaptureId ?? null;
   const r = await pool.query<CandidateRow>(
-    `SELECT c.id, c.title, c.type, c.summary, c.tags, c.serial
-     FROM caphub_v2.capabilities c, caphub_v2.capabilities self
-     WHERE self.id = $1 AND self.embedding IS NOT NULL
-       AND c.id <> $1 AND c.verdict = 'keep' AND c.deleted_at IS NULL AND c.status = 'active' AND c.embedding IS NOT NULL
-     ORDER BY c.embedding <=> self.embedding
-     LIMIT $2`, [input.capabilityId, limit]);
+    `SELECT ${CANDIDATE_COLUMNS} FROM caphub_v2.capabilities
+     WHERE verdict = 'keep' AND deleted_at IS NULL AND status = 'active' AND embedding IS NOT NULL
+       AND ($3::text IS NULL OR capture_id <> $3)
+     ORDER BY embedding <=> $1::vector
+     LIMIT $2`, [toVectorLiteral(input.embedding), limit, excludeCaptureId]);
   return r.rows.map(toCandidate);
 }

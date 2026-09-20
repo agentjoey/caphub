@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createPipelineDeps, runPipeline, type PipelineDeps } from "./pipeline";
 
 const card = {
@@ -16,6 +16,11 @@ function deps(kind: Kind, opts: {
   reasonValue?: unknown; failTagBump?: boolean; pinnedType?: string;
   existingCapability?: { id: string; hasEmbedding: boolean } | null;
   textSimilar?: Array<Record<string, unknown>>; embeddingSimilar?: Array<Record<string, unknown>>;
+  materialEmbeddingSimilar?: Array<Record<string, unknown>>;
+  /** Result `deps.embedQuery` resolves to; defaults to null (no key / provider unavailable). */
+  embedQueryResult?: number[] | null;
+  /** Throws instead of resolving, to exercise the belt-and-braces try/catch around it. */
+  embedQueryThrows?: boolean;
 } = {}) {
   const calls: string[] = [];
   const sql: Array<{ text: string; values: unknown[]; client?: boolean }> = [];
@@ -45,7 +50,13 @@ function deps(kind: Kind, opts: {
     if (text.startsWith("SELECT slug, label_zh, label_en, keywords FROM caphub_v2.scenarios")) {
       return { rows: [{ slug: "coding", label_zh: "编程", label_en: "Coding", keywords: ["code"] }] };
     }
-    if (text.startsWith("SELECT id, title, type, summary, tags, serial FROM caphub_v2.capabilities")) return { rows: opts.textSimilar ?? [] };
+    // The two SimilarCandidate lookups share the same SELECT column list, and only diverge
+    // further into the WHERE clause: findSimilar's text search matches on `to_tsquery`, while
+    // similarByEmbedding's directly-supplied-embedding form matches on `<=> $1::vector` instead.
+    if (text.startsWith("SELECT id, title, type, summary, tags, serial FROM caphub_v2.capabilities")) {
+      if (text.includes("to_tsquery")) return { rows: opts.textSimilar ?? [] };
+      if (text.includes("<=> $1::vector")) return { rows: opts.materialEmbeddingSimilar ?? [] };
+    }
     if (text.startsWith("SELECT c.id, c.title, c.type, c.summary, c.tags, c.serial")) return { rows: opts.embeddingSimilar ?? [] };
     if (text.includes("INSERT INTO caphub_v2.capabilities")) {
       // values: [id, captureId, runId, title, type, summary, signals, suggested_verdict,
@@ -72,7 +83,12 @@ function deps(kind: Kind, opts: {
       invoke: async (input: { prompt: string }) => { calls.push("reason"); reasonPromptSeen = input.prompt; return { value: opts.reasonValue ?? card, usage: { inputTokens: 1, outputTokens: 1 } }; }
     },
     material: { ocr: async () => "", fetch: kind === "url" ? (async () => new Response("hello world", { status: 200, headers: { "content-type": "text/plain" } })) as typeof fetch : undefined },
-    threshold: 0.8
+    threshold: 0.8,
+    embedQuery: async () => {
+      calls.push("embed");
+      if (opts.embedQueryThrows) throw new Error("embed provider exploded");
+      return opts.embedQueryResult ?? null;
+    }
   };
   return { d, calls, sql, released: () => released, reasonPrompt: () => reasonPromptSeen };
 }
@@ -85,7 +101,7 @@ describe("runPipeline", () => {
     const png = new Uint8Array(await sharp({ create: { width: 1, height: 1, channels: 3, background: "#fff" } }).png().toBuffer());
     d.objects = { get: async () => png } as never;
     const out = await runPipeline(d, { runId: "run_1", captureId: "cap_1", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
-    expect(calls).toEqual(["vision", "search", "reason"]);
+    expect(calls).toEqual(["vision", "search", "embed", "reason"]);
     expect(out).toEqual({ capabilityId: "cab_1", verdict: "keep" });
     const insert = sql.find((q) => q.text.includes("INSERT INTO caphub_v2.capabilities"))!;
     expect(insert.values).toContain("auto");
@@ -134,12 +150,79 @@ describe("runPipeline", () => {
   });
 
   it("uses the vector similar search (not the text one) on a rerun whose capability row already has an embedding", async () => {
-    const { d, sql } = deps("text", { existingCapability: { id: "cab_existing", hasEmbedding: true } });
+    const { d, sql, calls } = deps("text", { existingCapability: { id: "cab_existing", hasEmbedding: true } });
     await runPipeline(d, { runId: "run_embed", captureId: "cap_embed", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
     const vectorCall = sql.find((q) => q.text.startsWith("SELECT c.id, c.title, c.type, c.summary, c.tags, c.serial"));
     expect(vectorCall).toBeDefined();
     expect(vectorCall!.values).toEqual(["cab_existing", 5]);
     expect(sql.some((q) => q.text.startsWith("SELECT id, title, type, summary, tags, serial FROM caphub_v2.capabilities"))).toBe(false);
+    // Already has its own stored embedding -- no need to also compute a material query embedding.
+    expect(calls).not.toContain("embed");
+  });
+
+  // Controller ruling (fix round 1): "库里是不是已经有了" must be answerable on a capture's very
+  // first analysis run, not only from its second run onward -- a brand-new capture has no
+  // capability row (hence no stored embedding) yet, so compute a throwaway *query* embedding of
+  // the material itself and use that for candidate lookup instead of falling straight to text
+  // search.
+  describe("material query embedding for first-run overlap candidates", () => {
+    it("uses a freshly computed material embedding for candidates on a capture's first run when the embed provider succeeds", async () => {
+      const { d, sql, calls } = deps("text", {
+        existingCapability: null,
+        embedQueryResult: [1, 0, 0],
+        materialEmbeddingSimilar: [{ id: "cab_2", title: "Existing Tool", type: "tool", summary: "一个已有工具", tags: [], serial: 9 }]
+      });
+      await runPipeline(d, { runId: "run_material_embed", captureId: "cap_material_embed", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
+      expect(calls).toContain("embed");
+      const vectorCall = sql.find((q) => q.text.includes("<=> $1::vector"));
+      expect(vectorCall).toBeDefined();
+      expect(vectorCall!.values).toEqual(["[1,0,0]", 5, "cap_material_embed"]);
+      // The text-similarity fallback must not also run once the material embedding succeeded.
+      expect(sql.some((q) => q.text.includes("to_tsquery"))).toBe(false);
+    });
+
+    it("falls back to the text-based similar search when no embed provider/key is configured (the default)", async () => {
+      const { d, sql, calls } = deps("text", { existingCapability: null });
+      await runPipeline(d, { runId: "run_no_gemini", captureId: "cap_no_gemini", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
+      expect(calls).toContain("embed"); // still attempted...
+      expect(sql.some((q) => q.text.includes("to_tsquery"))).toBe(true); // ...but falls back
+      expect(sql.some((q) => q.text.includes("<=> $1::vector"))).toBe(false);
+    });
+
+    it("falls back to the text-based similar search, and the run still completes, when the embed provider throws", async () => {
+      const { d, sql, calls } = deps("text", { existingCapability: null, embedQueryThrows: true });
+      const out = await runPipeline(d, { runId: "run_embed_throws", captureId: "cap_embed_throws", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
+      expect(calls).toContain("embed");
+      expect(calls).toContain("reason");
+      expect(out.verdict).toBe("keep");
+      expect(sql.some((q) => q.text.includes("to_tsquery"))).toBe(true);
+    });
+
+    it("logs the embed attempt to stdout instead of recording an analysis_steps row (the CHECK doesn't allow 'embed')", async () => {
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const { d, sql } = deps("text", { existingCapability: null, embedQueryResult: [1, 0, 0] });
+      await runPipeline(d, { runId: "run_embed_log", captureId: "cap_embed_log", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
+      expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ runId: "run_embed_log", step: "embed", ok: true }));
+      const stepRows = sql.filter((q) => q.text.includes("INSERT INTO caphub_v2.analysis_steps"));
+      expect(stepRows.every((q) => q.values[1] !== "embed")).toBe(true);
+      logSpy.mockRestore();
+    });
+
+    it("does not count the material embedding call against the analysis run's budget: an image run still fits vision+search+reason in the 4-call cap", async () => {
+      // RunBudget's default cap is 4 calls / 200k tokens (see budget.ts). An image analysis
+      // already uses 3 budgeted calls (vision, search, reason); if the material embedding call
+      // were wrongly routed through `runStructured`/`runSearch` (the only two call sites that
+      // touch `budget`), a 4th accounted call would appear here. It must not: the embedding
+      // call is invoked directly in `loadSimilar`, never through either of those, so it can
+      // never call budget.assertCanCall()/budget.charge() at all.
+      const { d, calls } = deps("image", { existingCapability: null, embedQueryResult: [1, 0, 0] });
+      const sharp = (await import("sharp")).default;
+      const png = new Uint8Array(await sharp({ create: { width: 1, height: 1, channels: 3, background: "#fff" } }).png().toBuffer());
+      d.objects = { get: async () => png } as never;
+      const out = await runPipeline(d, { runId: "run_embed_budget", captureId: "cap_embed_budget", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
+      expect(calls).toEqual(["vision", "search", "embed", "reason"]);
+      expect(out.verdict).toBe("keep");
+    });
   });
 
   it("passes only the candidates' serial codes into the reason prompt's overlap section, and only those into the schema's valid targets", async () => {
@@ -179,13 +262,13 @@ describe("runPipeline", () => {
   it("skips vision for text", async () => {
     const { d, calls } = deps("text");
     await runPipeline(d, { runId: "run_2", captureId: "cap_2", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
-    expect(calls).toEqual(["search", "reason"]);
+    expect(calls).toEqual(["search", "embed", "reason"]);
   });
 
   it("skips vision for a URL capture and still runs search + reason", async () => {
     const { d, calls } = deps("url");
     const out = await runPipeline(d, { runId: "run_url", captureId: "cap_url", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
-    expect(calls).toEqual(["search", "reason"]);
+    expect(calls).toEqual(["search", "embed", "reason"]);
     expect(out).toEqual({ capabilityId: "cab_1", verdict: "keep" });
   });
 
@@ -209,7 +292,7 @@ describe("runPipeline", () => {
     const { d, calls, sql } = deps("text");
     d.search = { provider: "tavily", model: "s", search: async () => { calls.push("search"); throw new Error("network down"); } };
     const out = await runPipeline(d, { runId: "run_search_fail", captureId: "cap_search_fail", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
-    expect(calls).toEqual(["search", "reason"]);
+    expect(calls).toEqual(["search", "embed", "reason"]);
     expect(out.verdict).toBe("keep");
     const failedStep = sql.find((q) => q.text.includes("caphub_v2.analysis_steps") && q.values[1] === "search" && q.values[8] === false);
     expect(failedStep).toBeDefined();
@@ -323,5 +406,11 @@ describe("createPipelineDeps", () => {
     expect(out.search.provider).toBe("tavily");
     expect(out.vision.provider).toBe("minimax");
     expect(out.reason.provider).toBe("minimax");
+  });
+
+  it("wires embedQuery to resolve null (never reject) when no Gemini key is configured", async () => {
+    const config = { ...baseConfig, providers: { ...baseConfig.providers, tavilyApiKey: "tv" } };
+    const out = createPipelineDeps(config as never, {} as never, {} as never, "mixed");
+    await expect(out.embedQuery("some material text", new AbortController().signal)).resolves.toBeNull();
   });
 });
