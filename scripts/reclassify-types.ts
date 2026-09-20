@@ -3,10 +3,15 @@
  * best `type` (skill/experience/plugin/prompt/other) from the card's own stored fields — no new
  * web search, no re-analysis of anything else. Only `type` is written when it differs from the
  * model's pick; `updated_at` and every other column (including `playbook`, `tags`, `serial`) are
- * left alone. A card whose `verdict_by = 'human'` is skipped and logged instead of reclassified —
- * the owner may have hand-corrected it, and this script has no column that records a
- * hand-correction of `type` specifically, so it treats the whole card as human-owned rather than
- * risk clobbering that correction.
+ * left alone.
+ *
+ * There is no `verdict_by = 'human'` skip. That column turns 'human' whenever the owner presses
+ * 保留/丢弃 on a card (see lib/library/actions.ts's `decide`) — it records that a verdict was made
+ * by a human, not that a human edited the card's `type`. The schema has no column that records a
+ * hand-correction of `type` specifically, so `verdict_by` can't be used as a proxy for one: a
+ * dry-run against production skipped 6 of 15 cards this way, including the very card the owner
+ * asked to retype. The safety net here is the dry-run -> human review -> `--apply` flow below, not
+ * a per-row skip the schema can't actually express.
  *
  * A proposed change that crosses the `experience` boundary (experience -> non-experience, or
  * non-experience -> experience) is also skipped rather than written: `experience` is the only
@@ -18,8 +23,11 @@
  * both the dry-run output and the final summary, so the owner can fix those few by hand (改建议
  * or 重跑分析) instead of the script silently leaving a stale/mismatched playbook behind.
  *
- * Dry-run by default: prints a before -> after line for every card whose type would change, but
- * writes nothing. Pass `--apply` to actually write.
+ * Dry-run by default: prints a before -> after table for every card whose type would change
+ * (id-free — shows the displayed serial code when the card has one, else the title, since ids
+ * aren't useful for a human review pass), plus the unchanged count and the experience-boundary
+ * "needs manual handling" list, but writes nothing. Pass `--apply` to actually write. This dry-run
+ * review is the gate the owner uses before trusting `--apply` against production.
  *
  * Note: a card's displayed serial (see lib/library/serial.ts's `formatSerial`) prefixes the
  * stored number with a type-derived code (SKL/EXP/PLG/PRM/OTH). Changing `type` here therefore
@@ -88,8 +96,14 @@ export interface NeedsManualHandling {
   capabilityId: string; title: string; before: CapabilityType; after: CapabilityType;
 }
 
+/** One applied (or would-be-applied) change, for the id-free dry-run review table. */
+export interface ReclassifyChange {
+  label: string; before: CapabilityType; after: CapabilityType;
+}
+
 export interface ReclassifyResult {
-  candidates: number; changed: number; unchanged: number; skippedHuman: number; failed: number;
+  candidates: number; changed: number; unchanged: number; failed: number;
+  changes: ReclassifyChange[];
   needsManualHandling: NeedsManualHandling[];
 }
 
@@ -117,18 +131,10 @@ export async function runReclassify(
   log({ mode: apply ? "apply" : "dry-run", candidates: rows.length });
   let changed = 0;
   let unchanged = 0;
-  let skippedHuman = 0;
   let failed = 0;
+  const changes: ReclassifyChange[] = [];
   const needsManualHandling: NeedsManualHandling[] = [];
   for (const row of rows) {
-    // The owner may have hand-corrected this card's type already; there is no column that
-    // records a hand-correction of `type` specifically, so `verdict_by = 'human'` (a correction
-    // of the card at all) is treated as reason enough to leave `type` alone too.
-    if (row.verdictBy === "human") {
-      skippedHuman += 1;
-      log({ capabilityId: row.id, title: row.title, skipped: "verdict_by=human" });
-      continue;
-    }
     const prompt = reclassifyTypePrompt(row);
     try {
       // A bare `new AbortController().signal` never fires — a hung DeepSeek call would block this
@@ -150,10 +156,13 @@ export async function runReclassify(
         });
         continue;
       }
+      const serialBefore = formatSerial(row.type, row.serial);
+      const serialAfter = formatSerial(nextType, row.serial);
+      changes.push({ label: serialBefore ?? row.title, before: row.type, after: nextType });
       log({
         capabilityId: row.id, title: row.title,
         before: row.type, after: nextType,
-        serialBefore: formatSerial(row.type, row.serial), serialAfter: formatSerial(nextType, row.serial),
+        serialBefore, serialAfter,
         applied: apply
       });
       if (apply) await applyTypeReclassification(pool, row.id, nextType);
@@ -164,10 +173,10 @@ export async function runReclassify(
     }
   }
   log({
-    candidates: rows.length, changed, unchanged, skippedHuman, failed,
+    candidates: rows.length, changed, unchanged, failed,
     needsManualHandling, mode: apply ? "apply" : "dry-run"
   });
-  return { candidates: rows.length, changed, unchanged, skippedHuman, failed, needsManualHandling };
+  return { candidates: rows.length, changed, unchanged, failed, changes, needsManualHandling };
 }
 
 async function main() {
@@ -178,7 +187,16 @@ async function main() {
   const call = createDeepSeekCall({ apiKey: config.providers.deepseekApiKey });
   const log = (o: Record<string, unknown>) => process.stdout.write(`${JSON.stringify({ ts: new Date().toISOString(), ...o })}\n`);
   try {
-    const { changed, unchanged, failed, needsManualHandling } = await runReclassify(pool, call, apply, log);
+    const { changed, unchanged, failed, changes, needsManualHandling } = await runReclassify(pool, call, apply, log);
+    if (!apply) {
+      process.stdout.write(
+        changes.length > 0
+          ? `${changes.length} proposed change(s):\n` +
+            changes.map((c) => `  ${c.label}  ${c.before} -> ${c.after}`).join("\n") + "\n"
+          : "0 proposed changes.\n"
+      );
+      process.stdout.write(`${unchanged} card(s) unchanged.\n`);
+    }
     if (needsManualHandling.length > 0) {
       process.stdout.write(
         `${needsManualHandling.length} card(s) need manual handling (crosses the experience boundary — fix by hand via 改建议 or 重跑分析):\n` +

@@ -60,7 +60,11 @@ describe("runReclassify", () => {
     const logs: Record<string, unknown>[] = [];
     const call = { invoke: async () => ({ value: { type: "prompt" } }) };
     const result = await runReclassify(pool as never, call, true, (o) => logs.push(o));
-    expect(result).toEqual({ candidates: 1, changed: 1, unchanged: 0, skippedHuman: 0, failed: 0, needsManualHandling: [] });
+    expect(result).toEqual({
+      candidates: 1, changed: 1, unchanged: 0, failed: 0,
+      changes: [{ label: "OTH-0012", before: "other", after: "prompt" }],
+      needsManualHandling: []
+    });
     expect(updates).toEqual([["cab_1", "prompt"]]);
     const changeLog = logs.find((l) => l.before === "other" && l.after === "prompt");
     expect(changeLog).toMatchObject({ capabilityId: "cab_1", before: "other", after: "prompt", applied: true });
@@ -73,7 +77,11 @@ describe("runReclassify", () => {
     const { pool, updates } = fakeRowsPool([row]);
     const call = { invoke: async () => ({ value: { type: "prompt" } }) };
     const result = await runReclassify(pool as never, call, false, log);
-    expect(result).toEqual({ candidates: 1, changed: 1, unchanged: 0, skippedHuman: 0, failed: 0, needsManualHandling: [] });
+    expect(result).toEqual({
+      candidates: 1, changed: 1, unchanged: 0, failed: 0,
+      changes: [{ label: "OTH-0012", before: "other", after: "prompt" }],
+      needsManualHandling: []
+    });
     expect(updates).toHaveLength(0);
   });
 
@@ -81,22 +89,28 @@ describe("runReclassify", () => {
     const { pool, updates } = fakeRowsPool([row]);
     const call = { invoke: async () => ({ value: { type: "other" } }) };
     const result = await runReclassify(pool as never, call, true, log);
-    expect(result).toEqual({ candidates: 1, changed: 0, unchanged: 1, skippedHuman: 0, failed: 0, needsManualHandling: [] });
+    expect(result).toEqual({ candidates: 1, changed: 0, unchanged: 1, failed: 0, changes: [], needsManualHandling: [] });
     expect(updates).toHaveLength(0);
   });
 
-  // Regression guard for the owner's ruling: a card the owner already hand-corrected (verdict_by
-  // = 'human') must never be silently re-typed by this script.
-  it("skips and logs a card whose verdict_by is 'human', never calling the model or writing", async () => {
+  // Owner ruling: `verdict_by = 'human'` only means the owner pressed 保留/丢弃 on the card at some
+  // point (lib/library/actions.ts's `decide`) — it says nothing about whether the *type* was ever
+  // hand-checked. A card in this state must still be considered and, when its type differs,
+  // applied like any other card; the dry-run -> human review -> `--apply` flow is the real gate.
+  it("considers and applies a card whose verdict_by is 'human' when its type differs", async () => {
     const { pool, updates } = fakeRowsPool([{ ...row, verdictBy: "human" }]);
     const logs: Record<string, unknown>[] = [];
     let invoked = false;
     const call = { invoke: async () => { invoked = true; return { value: { type: "prompt" } }; } };
     const result = await runReclassify(pool as never, call, true, (o) => logs.push(o));
-    expect(result).toEqual({ candidates: 1, changed: 0, unchanged: 0, skippedHuman: 1, failed: 0, needsManualHandling: [] });
-    expect(invoked).toBe(false);
-    expect(updates).toHaveLength(0);
-    expect(logs.some((l) => l.skipped === "verdict_by=human" && l.capabilityId === "cab_1")).toBe(true);
+    expect(result).toEqual({
+      candidates: 1, changed: 1, unchanged: 0, failed: 0,
+      changes: [{ label: "OTH-0012", before: "other", after: "prompt" }],
+      needsManualHandling: []
+    });
+    expect(invoked).toBe(true);
+    expect(updates).toEqual([["cab_1", "prompt"]]);
+    expect(logs.some((l) => l.capabilityId === "cab_1" && l.before === "other" && l.after === "prompt" && l.applied === true)).toBe(true);
   });
 
   it("calls DeepSeek with a signal that has a timeout (not a bare, never-firing controller)", async () => {
@@ -113,11 +127,11 @@ describe("runReclassify", () => {
     expect(receivedSignal?.aborted).toBe(false);
   });
 
-  it("reports the changed/unchanged/skippedHuman/failed counts so main() can decide the exit code", async () => {
+  it("reports the changed/unchanged/failed counts so main() can decide the exit code", async () => {
     const { pool } = fakeRowsPool([row, { ...row, id: "cab_2" }, { ...row, id: "cab_3", verdictBy: "human" }]);
     const call = { invoke: async () => { throw new Error("deepseek down"); } };
     const result = await runReclassify(pool as never, call, true, log);
-    expect(result).toEqual({ candidates: 3, changed: 0, unchanged: 0, skippedHuman: 1, failed: 2, needsManualHandling: [] });
+    expect(result).toEqual({ candidates: 3, changed: 0, unchanged: 0, failed: 3, changes: [], needsManualHandling: [] });
   });
 
   // Owner ruling: writing just `type` across the `experience` boundary would leave `playbook.kind`
@@ -138,7 +152,7 @@ describe("runReclassify", () => {
     const call = { invoke: async () => ({ value: { type: "experience" } }) };
     const result = await runReclassify(pool as never, call, true, (o) => logs.push(o));
     expect(result).toEqual({
-      candidates: 1, changed: 0, unchanged: 0, skippedHuman: 0, failed: 0,
+      candidates: 1, changed: 0, unchanged: 0, failed: 0, changes: [],
       needsManualHandling: [{ capabilityId: "cab_1", title: "t", before: "skill", after: "experience" }]
     });
     expect(updates).toHaveLength(0);
@@ -150,7 +164,7 @@ describe("runReclassify", () => {
     const call = { invoke: async () => ({ value: { type: "skill" } }) };
     const result = await runReclassify(pool as never, call, true, log);
     expect(result).toEqual({
-      candidates: 1, changed: 0, unchanged: 0, skippedHuman: 0, failed: 0,
+      candidates: 1, changed: 0, unchanged: 0, failed: 0, changes: [],
       needsManualHandling: [{ capabilityId: "cab_1", title: "t", before: "experience", after: "skill" }]
     });
     expect(updates).toHaveLength(0);
