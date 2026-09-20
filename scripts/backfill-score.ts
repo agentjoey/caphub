@@ -4,6 +4,7 @@ import { backfillScorePrompt } from "../lib/analysis/prompts";
 import { loadConfig } from "../lib/config";
 import { createPool } from "../lib/db/pool";
 import { createDeepSeekCall } from "../lib/providers/deepseek";
+import { jsonStringifyStripNul, stripNul } from "../lib/text/sanitize";
 
 function parseArgs(args: string[]): { apply: boolean } {
   return { apply: args.includes("--apply") };
@@ -13,13 +14,21 @@ function parseArgs(args: string[]): { apply: boolean } {
  * Writes the backfilled score for one card. Only `score`, `score_reason` and `source_facts`
  * are touched: this is a one-off scoring pass over already-built cards, not a re-analysis, so
  * `updated_at` (and everything else the card contains) must not move.
+ *
+ * `score_reason`/`source_facts` come straight from a model response, which — like every other
+ * provider-text write path in this repo (see `upsertCapability` in lib/analysis/capabilities.ts)
+ * — is sanitized with `stripNul`/`jsonStringifyStripNul` before it reaches a SQL parameter.
+ * Postgres rejects U+0000 in text/jsonb columns outright (22P05); without this, a NUL from the
+ * model would make the UPDATE throw, the row would be logged as failed with `score` still NULL,
+ * and every future run would re-score (and re-fail) it forever. `source_facts` is bound as the
+ * stripped JSON *text*, not the object, so jsonb doesn't need to re-parse an already-safe value.
  */
 export function applyScoreBackfill(
   pool: Pick<Pool, "query">, id: string, score: number, scoreReason: string, sourceFacts: SourceFacts
 ) {
   return pool.query(
     "UPDATE caphub_v2.capabilities SET score = $2, score_reason = $3, source_facts = $4 WHERE id = $1",
-    [id, score, scoreReason, sourceFacts]
+    [id, score, stripNul(scoreReason), jsonStringifyStripNul(sourceFacts)]
   );
 }
 
