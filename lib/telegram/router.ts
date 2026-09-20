@@ -60,8 +60,12 @@ export interface RouterUpdate extends TelegramUpdate {
  * `"progress-building"`/`"progress-done"`/`"progress-dropped"` (the `/todo` card's 🔨/✅/🚫
  * buttons — see commands.ts and decide.ts) carry a capability id, like `"keep"`/`"discard"`, and
  * are handled the same optimistic-lock way, just calling `setProgress` instead of `decide`.
+ *
+ * `"deep"` (the 🔬 深度分析 button on a kept card) carries a capability id too, but queues a
+ * deep-analysis run instead of writing the card — so, like `"rerun-capture"`, it never consumes
+ * the optimistic-lock token it carries (see decide.ts's handleDeep).
  */
-export type DecisionAction = "keep" | "discard" | "rerun" | "rerun-capture" | "progress-building" | "progress-done" | "progress-dropped";
+export type DecisionAction = "keep" | "discard" | "rerun" | "rerun-capture" | "progress-building" | "progress-done" | "progress-dropped" | "deep";
 
 export type ClassifiedUpdate =
   | { kind: "ignored"; reason: string }
@@ -289,7 +293,8 @@ const ACTION_TO_CODE: Record<DecisionAction, string> = {
   "rerun-capture": "rc",
   "progress-building": "pb",
   "progress-done": "pd",
-  "progress-dropped": "px"
+  "progress-dropped": "px",
+  deep: "da"
 };
 const CODE_TO_ACTION: Record<string, DecisionAction> = {
   k: "keep",
@@ -298,7 +303,8 @@ const CODE_TO_ACTION: Record<string, DecisionAction> = {
   rc: "rerun-capture",
   pb: "progress-building",
   pd: "progress-done",
-  px: "progress-dropped"
+  px: "progress-dropped",
+  da: "deep"
 };
 
 /**

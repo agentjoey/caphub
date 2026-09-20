@@ -31,4 +31,12 @@ describe("library search params", () => {
     expect(libraryHref(f, {})).toBe("/library?includeRetired=1");
     expect(parseLibraryParams({}).includeRetired).toBeUndefined();
   });
+
+  it("parses the 已深度分析 toggle (deep=1) and round-trips it through libraryHref", () => {
+    const f = parseLibraryParams({ deep: "1" });
+    expect(f.deepAnalyzed).toBe(true);
+    expect(libraryHref(f, {})).toBe("/library?deep=1");
+    expect(parseLibraryParams({ deep: "yes" }).deepAnalyzed).toBeUndefined();
+    expect(parseLibraryParams({}).deepAnalyzed).toBeUndefined();
+  });
 });

@@ -3,7 +3,7 @@ import { loadScenarios } from "../analysis/scenarios";
 import { recordTelegramReceipt } from "../captures/captures";
 import type { Pipeline } from "../config";
 import { getDict } from "../i18n";
-import { decide, requestRerun, setProgress } from "../library/actions";
+import { decide, requestDeepAnalysis, requestRerun, setProgress } from "../library/actions";
 import type { Progress } from "../library/labels";
 import type { InlineKeyboardMarkup, TelegramApi } from "./api";
 import { buildFormatInput, buildTodoFormatInput, loadCandidateById, type Candidate } from "./notify";
@@ -42,7 +42,8 @@ const TOAST = {
   notOwner: "无权操作",
   "progress-building": "已标记为自研中",
   "progress-done": "已标记为已完成",
-  "progress-dropped": "已标记为放弃"
+  "progress-dropped": "已标记为放弃",
+  deep: "已排队"
 } as const;
 
 /** Maps a `/todo` card's callback action to the `Progress` value `setProgress` should write. */
@@ -160,6 +161,14 @@ export async function handleCallback(deps: HandleCallbackDeps, cb: CallbackDecod
     if (!candidate) {
       await safeAnswer(deps, cb, dict.cardNotFound, signal);
       return { outcome: "rejected", reason: "not-found", capabilityId: cb.capabilityId };
+    }
+
+    // Deep analysis queues a separate run instead of writing this card's row, so it neither
+    // consumes nor invalidates the optimistic-lock token — handled before the staleness check
+    // below, which would otherwise refuse a perfectly valid 深度分析 press (and rewrite the card
+    // message) just because the card was edited since the button was rendered.
+    if (cb.action === "deep") {
+      return await handleDeep(deps, cb, candidate, signal);
     }
 
     if (candidate.updatedAt.toISOString() !== cb.updatedAt) {
@@ -300,6 +309,27 @@ async function handleProgress(
     });
     return { outcome: "conflict", capabilityId: cb.capabilityId };
   }
+  if (result.reason === "NOT_FOUND") return { outcome: "rejected", reason: "not-found", capabilityId: cb.capabilityId };
+  return { outcome: "rejected", reason: "invalid", capabilityId: cb.capabilityId };
+}
+
+/**
+ * Handles a 🔬 深度分析 button press: queues a deep-analysis run via the shared
+ * {@link requestDeepAnalysis} action and answers 「已排队」. The card message is deliberately left
+ * untouched (buttons included) — the result arrives later as its own summary push (see notify.ts's
+ * deep-run branch), so the owner keeps the card they were looking at.
+ */
+async function handleDeep(deps: HandleCallbackDeps, cb: CallbackDecoded, candidate: Candidate, signal?: AbortSignal): Promise<CallbackOutcome> {
+  const result = await requestDeepAnalysis(deps.pool, { captureId: candidate.captureId }, "zh");
+  if (result.ok) {
+    // So the eventual summary push lands in the chat the owner pressed the button in, even for a
+    // web-sourced capture that has no stored receipt yet (see recordCallbackReceipt).
+    await recordCallbackReceipt(deps, cb, candidate.captureId);
+    await safeAnswer(deps, cb, TOAST.deep, signal);
+    return { outcome: "decided", action: "deep", capabilityId: cb.capabilityId };
+  }
+  await safeAnswer(deps, cb, result.message, signal);
+  if (result.reason === "CONFLICT") return { outcome: "rejected", reason: "already-queued", capabilityId: cb.capabilityId };
   if (result.reason === "NOT_FOUND") return { outcome: "rejected", reason: "not-found", capabilityId: cb.capabilityId };
   return { outcome: "rejected", reason: "invalid", capabilityId: cb.capabilityId };
 }

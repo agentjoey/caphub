@@ -110,6 +110,7 @@ export const dictZh = {
     searchButton: "搜索",
     discarded: "已丢弃",
     includeRetired: "显示失效/被替代",
+    deepAnalyzed: "已深度分析",
     emptyWithFilters: "没有符合条件的能力。",
     clearFilters: "清除筛选",
     emptyNoFilters: "库里还没有保留的能力。",
@@ -139,6 +140,34 @@ export const dictZh = {
   scoreBadge: {
     label: "★ {score}/5",
     aria: "价值评分 {score} / 5"
+  },
+  deepAnalysis: {
+    title: "深度分析",
+    badge: "🔬 已深挖",
+    badgeAria: "已做过深度分析",
+    costNote: "深挖一张卡约 8 次检索与分析调用（上限 10）。",
+    start: "开始深度分析",
+    starting: "排队中…",
+    queuedNotice: "已排队，完成后刷新查看",
+    runningNotice: "深度分析进行中，稍后刷新查看",
+    failedPrefix: "上次深度分析失败：",
+    retry: "重新深挖",
+    genericError: "操作失败，请重试",
+    bestFor: "最适合场景",
+    topRisk: "最大风险",
+    sourceCount: "来源 {count}",
+    itemCount: "{count} 条",
+    architecture: "架构",
+    implementation: "技术实现",
+    useCases: "适用场景",
+    cases: "案例",
+    feedback: "口碑与争议",
+    feedbackPositive: "好评",
+    feedbackNegative: "争议",
+    risks: "风险",
+    sources: "来源",
+    sourceRefAria: "来源 {n}",
+    basedOn: "依据 {date} 时的卡片内容"
   },
   statusBadge: {
     deprecated: "失效",
@@ -259,6 +288,8 @@ export const dictZh = {
     statusSupersededByNotFound: "找不到对应编号的卡片",
     statusSupersededBySelf: "不能设置为被自己替代",
     overlapNoTarget: "没有可处理的比对结果",
-    overlapTargetInvalid: "比对结果中的卡片编号不合法"
+    overlapTargetInvalid: "比对结果中的卡片编号不合法",
+    deepNotKept: "只有已保留的卡片可以深度分析",
+    deepAlreadyQueued: "深度分析已在排队或进行中"
   }
 } as const;

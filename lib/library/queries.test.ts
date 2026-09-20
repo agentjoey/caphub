@@ -144,6 +144,34 @@ describe("library queries", () => {
     await listPending(pool, { page: 1 });
     expect(calls[0].text).toMatch(/'thumbKey', c\.thumb_key/);
   });
+  it("listLibrary narrows to deep-analyzed cards only when the filter is set, and every row says whether it has one", async () => {
+    const { pool, calls } = recorder([[], [{ total: "0" }]]);
+    await listLibrary(pool, { page: 1 });
+    expect(calls[0].text).toMatch(/\(cb\.deep_analysis IS NOT NULL\) AS "hasDeepAnalysis"/);
+    expect(calls[0].text).not.toMatch(/WHERE[\s\S]*cb\.deep_analysis IS NOT NULL/);
+
+    const { pool: pool2, calls: calls2 } = recorder([[], [{ total: "0" }]]);
+    await listLibrary(pool2, { deepAnalyzed: true, page: 1 });
+    expect(calls2[0].text).toMatch(/WHERE[\s\S]*cb\.deep_analysis IS NOT NULL/);
+    // The count query must carry the same filter, or the pager would disagree with the list.
+    expect(calls2[1].text).toMatch(/cb\.deep_analysis IS NOT NULL/);
+  });
+
+  it("getCapabilityDetail returns the stored deep analysis plus the latest deep run's state", async () => {
+    const analysis = { headline: "好用", sources: [] };
+    const { pool, calls } = recorder([
+      [{ id: "cab_1", runId: "run_1", capture: { kind: "text", objectKey: null, thumbKey: null, text: "x", url: null },
+        deepAnalysis: analysis, deepAnalysisOf: new Date("2026-09-19T00:00:00.000Z"), deepRunState: "failed", deepRunErrorCode: "TIMEOUT" }],
+      []
+    ]);
+    const detail = await getCapabilityDetail(pool, "cab_1");
+    expect(calls[0].text).toMatch(/WHERE capture_id = cb\.capture_id AND kind = 'deep'/);
+    expect(detail?.deepAnalysis).toEqual(analysis);
+    expect(detail?.deepAnalysisOf).toBe("2026-09-19T00:00:00.000Z");
+    expect(detail?.deepRunState).toBe("failed");
+    expect(detail?.deepRunErrorCode).toBe("TIMEOUT");
+  });
+
   it("getCapabilityDetail joins retention by object_key and returns eligible/purged dates", async () => {
     const { pool, calls } = recorder([
       [{ id: "cab_1", runId: "run_1", capture: { kind: "image", objectKey: "sha256/ab/x", thumbKey: null, text: null, url: null },

@@ -4,6 +4,7 @@ import { NO_OVERLAP } from "../../../lib/analysis/card";
 import { loadScenarios } from "../../../lib/analysis/scenarios";
 import { AnalysisDetails } from "../../../components/capability/analysis-details";
 import { CapturePreview } from "../../../components/capability/capture-preview";
+import { DeepAnalysisSection } from "../../../components/capability/deep-analysis";
 import { OverlapNotice } from "../../../components/capability/overlap-notice";
 import { PlaybookView } from "../../../components/capability/playbook-view";
 import { ProgressControl } from "../../../components/capability/progress-control";
@@ -55,6 +56,9 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             {detail.title}
             {serial && <span className="serial"> {serial}</span>}
             <ScoreBadge score={detail.score} reason={detail.scoreReason} locale={locale} />
+            {detail.deepAnalysis && (
+              <span className="badge badge--deep" title={dict.deepAnalysis.badgeAria}>{dict.deepAnalysis.badge}</span>
+            )}
             {detail.status === "deprecated" && (
               <span className="badge badge--status-deprecated">{dict.statusBadge.deprecated}</span>
             )}
@@ -172,6 +176,14 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           <p className="detail-synced">{format(dict.detail.syncedAt, { date: detail.syncedAt ? formatDateTime(detail.syncedAt, locale) : dict.detail.notSynced })}</p>
         </div>
       </div>
+      <DeepAnalysisSection
+        captureId={detail.captureId}
+        analysis={detail.deepAnalysis}
+        analysisOf={detail.deepAnalysisOf}
+        runState={detail.deepRunState}
+        errorCode={detail.deepRunErrorCode}
+        locale={locale}
+      />
       <AnalysisDetails detail={detail} locale={locale} />
     </div>
   );

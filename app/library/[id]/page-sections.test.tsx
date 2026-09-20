@@ -18,7 +18,7 @@ vi.mock("../../../lib/i18n/locale", () => ({ getLocale: async () => "zh" }));
 const setProgressAction = vi.fn();
 vi.mock("../../actions", () => ({
   decideAction: vi.fn(), editSuggestionAction: vi.fn(), rerunAction: vi.fn(),
-  reviewAction: vi.fn(), softDeleteAction: vi.fn(),
+  reviewAction: vi.fn(), softDeleteAction: vi.fn(), deepAnalysisAction: vi.fn(),
   setProgressAction: (...args: unknown[]) => setProgressAction(...args)
 }));
 
@@ -33,7 +33,19 @@ const baseDetail = {
   retentionEligibleAt: null, retentionPurgedAt: null,
   score: 4, scoreReason: "成熟且好装", sourceFacts: { repo_url: "https://github.com/a/b", stars: 12, as_of: "2026-09-20" },
   progress: "todo", progressLink: null, progressAt: null,
-  steps: [], sources: [], runPipeline: "mixed", runState: "done", runId: "run_1"
+  steps: [], sources: [], runPipeline: "mixed", runState: "done", runId: "run_1",
+  deepAnalysis: null, deepAnalysisOf: null, deepRunState: null, deepRunErrorCode: null
+};
+
+const DEEP = {
+  headline: "自托管的浏览器自动化框架",
+  architecture: { summary: "三层", points: ["a", "b", "c"] },
+  implementation: { summary: "Python", points: ["a", "b", "c"] },
+  use_cases: [{ title: "批量抓取", detail: "定时抓取" }, { title: "b", detail: "d" }, { title: "c", detail: "e" }],
+  cases: [],
+  feedback: { positive: [], negative: [] },
+  risks: ["依赖上游浏览器版本", "内存吃紧"],
+  sources: []
 };
 
 async function renderDetail(overrides: Record<string, unknown> = {}) {
@@ -101,6 +113,18 @@ describe("library detail page sections", () => {
     const { container } = await renderDetail({ sourceFacts: {} });
     expect(container.querySelector(".source-facts")).toBeNull();
     expect(container.textContent).not.toContain("来源事实");
+  });
+
+  it("always offers the 深度分析 section, and badges the title only once an analysis exists", async () => {
+    const without = await renderDetail();
+    expect(without.container.querySelector(".deep-analysis")).toBeTruthy();
+    expect(without.container.querySelector(".page-title .badge--deep")).toBeNull();
+    cleanup();
+    vi.resetModules();
+
+    const withDeep = await renderDetail({ deepAnalysis: DEEP, deepAnalysisOf: "2026-09-19T00:00:00.000Z" });
+    expect(withDeep.container.querySelector(".page-title .badge--deep")!.textContent).toBe("🔬 已深挖");
+    expect(withDeep.container.querySelector(".deep-strip__headline")!.textContent).toBe("自托管的浏览器自动化框架");
   });
 
   it("shows the progress control only for reference cards", async () => {

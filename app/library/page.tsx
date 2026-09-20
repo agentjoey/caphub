@@ -49,7 +49,7 @@ export default async function Page({
   ]);
   const { items, total } = await listLibrary(pool, filter, { queryEmbedding, matchedScenarioSlugs });
   const topTags = tags.slice(0, TOP_TAGS);
-  const hasFilters = Boolean(filter.q || filter.types?.length || filter.tags?.length || filter.scenarios?.length || filter.usage || filter.progress?.length || filter.discarded || filter.includeRetired);
+  const hasFilters = Boolean(filter.q || filter.types?.length || filter.tags?.length || filter.scenarios?.length || filter.usage || filter.progress?.length || filter.discarded || filter.includeRetired || filter.deepAnalyzed);
   const hasPrev = filter.page > 1;
   const hasNext = filter.page * PAGE_SIZE < total;
 
@@ -67,7 +67,8 @@ export default async function Page({
     ...(filter.usage ? [{ name: "usage", value: filter.usage }] : []),
     ...(filter.progress ?? []).map((value) => ({ name: "progress", value })),
     ...(filter.discarded ? [{ name: "discarded", value: "1" }] : []),
-    ...(filter.includeRetired ? [{ name: "includeRetired", value: "1" }] : [])
+    ...(filter.includeRetired ? [{ name: "includeRetired", value: "1" }] : []),
+    ...(filter.deepAnalyzed ? [{ name: "deep", value: "1" }] : [])
   ];
 
   return (
@@ -202,6 +203,9 @@ export default async function Page({
                         <span className="badge badge--status-superseded">{dict.statusBadge.supersededGeneric}</span>
                       )}
                       <ScoreBadge score={row.score} reason={row.scoreReason} locale={locale} />
+                      {row.hasDeepAnalysis && (
+                        <span className="badge badge--deep" title={dict.deepAnalysis.badgeAria}>{dict.deepAnalysis.badge}</span>
+                      )}
                       {row.usage === "reference" && (
                         <span className={`badge badge--progress${row.progress === "done" ? " badge--progress-done" : ""}`}>
                           {progressLabel(row.progress, locale)}

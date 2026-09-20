@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decide, editSuggestion, ignoreOverlap, requestReview, requestRerun, setProgress, setStatus, softDelete, supersedeOverlapTarget } from "./actions";
+import { decide, editSuggestion, ignoreOverlap, requestDeepAnalysis, requestReview, requestRerun, setProgress, setStatus, softDelete, supersedeOverlapTarget } from "./actions";
 
 type Handler = (text: string, values: unknown[]) => { rows: unknown[]; rowCount?: number };
 function fakePool(handler: Handler) {
@@ -383,5 +383,57 @@ describe("supersedeOverlapTarget", () => {
       : t.startsWith("SELECT id FROM caphub_v2.capabilities WHERE serial") ? { rows: [] }
       : { rows: [] });
     expect(await supersedeOverlapTarget(pool, { id: "cab_1" })).toMatchObject({ ok: false, reason: "INVALID", message: "找不到对应编号的卡片" });
+  });
+});
+
+describe("requestDeepAnalysis", () => {
+  const deepPool = (row: { verdict: string; pipeline: string; active: boolean } | null, opts: { insertThrows?: unknown } = {}) =>
+    fakePool((t) => {
+      if (t.startsWith("SELECT cb.verdict")) return { rows: row ? [row] : [] };
+      if (t.startsWith("INSERT INTO caphub_v2.analysis_runs")) {
+        if (opts.insertThrows) throw opts.insertThrows;
+        return { rows: [] };
+      }
+      return { rows: [] };
+    });
+
+  it("queues a kind='deep' run reusing the card's own run pipeline", async () => {
+    const { pool, calls } = deepPool({ verdict: "keep", pipeline: "mixed", active: false });
+    const r = await requestDeepAnalysis(pool, { captureId: "cap_1" });
+    expect(r.ok).toBe(true);
+    const insert = calls.find((c) => c.text.startsWith("INSERT INTO caphub_v2.analysis_runs"))!;
+    expect(insert.text).toMatch(/'queued', 'deep'/);
+    expect(insert.values.slice(1)).toEqual(["cap_1", "mixed"]);
+  });
+
+  it("refuses a card that is not kept, and one that does not exist", async () => {
+    const pending = deepPool({ verdict: "pending", pipeline: "mixed", active: false });
+    expect(await requestDeepAnalysis(pending.pool, { captureId: "cap_1" })).toMatchObject({ ok: false, reason: "INVALID", message: "只有已保留的卡片可以深度分析" });
+    expect(pending.calls.some((c) => c.text.startsWith("INSERT"))).toBe(false);
+
+    const discarded = deepPool({ verdict: "discard", pipeline: "mixed", active: false });
+    expect(await requestDeepAnalysis(discarded.pool, { captureId: "cap_1" })).toMatchObject({ ok: false, reason: "INVALID" });
+
+    // The lookup itself is scoped to `deleted_at IS NULL`, so a deleted card reads as missing.
+    const missing = deepPool(null);
+    expect(await requestDeepAnalysis(missing.pool, { captureId: "cap_1" })).toMatchObject({ ok: false, reason: "NOT_FOUND" });
+    expect(missing.calls[0].text).toMatch(/cb\.deleted_at IS NULL/);
+    expect(missing.calls[0].text).toMatch(/d\.kind = 'deep' AND d\.state IN \('queued','running'\)/);
+  });
+
+  it("returns CONFLICT for an already active deep run, both from the pre-check and from the unique index", async () => {
+    const precheck = deepPool({ verdict: "keep", pipeline: "mixed", active: true });
+    expect(await requestDeepAnalysis(precheck.pool, { captureId: "cap_1" })).toMatchObject({ ok: false, reason: "CONFLICT", message: "深度分析已在排队或进行中" });
+    expect(precheck.calls.some((c) => c.text.startsWith("INSERT"))).toBe(false);
+
+    // A concurrent request that wins the pre-check race is caught by analysis_runs_one_active_deep.
+    const raced = deepPool({ verdict: "keep", pipeline: "mixed", active: false }, { insertThrows: Object.assign(new Error("dup"), { code: "23505" }) });
+    expect(await requestDeepAnalysis(raced.pool, { captureId: "cap_1" })).toMatchObject({ ok: false, reason: "CONFLICT" });
+  });
+
+  it("rejects malformed input without touching the database", async () => {
+    const { pool, calls } = deepPool(null);
+    expect(await requestDeepAnalysis(pool, { captureId: "" })).toMatchObject({ ok: false, reason: "INVALID" });
+    expect(calls.length).toBe(0);
   });
 });

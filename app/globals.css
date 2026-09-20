@@ -681,3 +681,33 @@ a.stat--accent:hover { background: #fcebcc; border-color: var(--amber-border); }
   max-width: 100%;
 }
 .detail-grid > *, .review-card > *, .panel { min-width: 0; }
+
+/* Deep analysis (M3.6): a summary strip plus collapsible, count-labeled sections of short
+   bullets — never a wall of prose. Sections stack full-width under the detail grid. */
+.badge--deep { background: var(--paper-recessed); border: 1px solid var(--hairline-strong); color: var(--ink-muted); white-space: nowrap; }
+.page-title .badge--deep { margin-left: var(--space-3); font-size: var(--text-sm); vertical-align: middle; }
+.deep-analysis { margin-top: var(--space-6); }
+.deep-strip { padding-bottom: var(--space-3); border-bottom: 1px solid var(--hairline); }
+.deep-strip__headline { max-width: var(--measure); font-size: var(--text-md); font-weight: 600; line-height: var(--leading-heading); }
+.deep-strip__chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: var(--space-3); }
+.deep-section { border-bottom: 1px solid var(--hairline); }
+.deep-section > summary { display: flex; align-items: baseline; gap: var(--space-3); padding: 10px 0; font-weight: 600; cursor: pointer; list-style: none; }
+.deep-section > summary::-webkit-details-marker { display: none; }
+.deep-section > summary::before { content: "▸"; display: inline-block; width: 10px; color: var(--ink-faint); font-size: var(--text-xs); transition: transform 0.15s var(--ease); }
+.deep-section[open] > summary::before { transform: rotate(90deg); }
+.deep-section__count { color: var(--ink-faint); font-family: var(--font-mono); font-size: var(--text-xs); font-weight: 400; }
+.deep-section__summary { max-width: var(--measure); margin-bottom: var(--space-3); color: var(--ink-muted); font-size: var(--text-sm); line-height: 1.6; }
+.deep-section__label { margin: var(--space-3) 0 6px; color: var(--ink-faint); font-size: var(--text-xs); font-weight: 600; }
+.deep-points { max-width: var(--measure); margin-bottom: var(--space-4); padding-left: 1.2em; list-style: disc; font-size: var(--text-sm); line-height: 1.7; }
+.deep-points li::marker { color: var(--ink-faint); }
+.deep-ref { margin-left: 4px; color: var(--ink-faint); font-family: var(--font-mono); font-size: var(--text-xs); text-decoration: none; vertical-align: super; }
+.deep-ref:hover { color: var(--ink); }
+.deep-sources { margin-top: var(--space-4); color: var(--ink-muted); font-size: var(--text-sm); }
+.deep-sources > summary { padding: 4px 0; font-weight: 600; cursor: pointer; }
+.deep-sources__list { max-width: var(--measure); margin-top: var(--space-2); padding-left: 1.6em; list-style: decimal; line-height: 1.7; }
+.deep-sources__list li::marker { color: var(--ink-faint); font-family: var(--font-mono); font-size: var(--text-xs); }
+.deep-sources__domain { color: var(--ink-faint); font-family: var(--font-mono); font-size: var(--text-xs); }
+.deep-analysis__based-on { margin-top: var(--space-4); color: var(--ink-faint); font-size: var(--text-xs); }
+.deep-analysis__trigger { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-top: var(--space-4); }
+.deep-analysis__cost { color: var(--ink-faint); font-size: var(--text-xs); }
+.deep-analysis .notice, .deep-analysis .inline-error { margin-top: var(--space-3); }

@@ -363,6 +363,14 @@ describe("encodeDecision / decodeDecision", () => {
     }
   });
 
+  it("round-trips the deep-analysis action under the 'da' code, within the byte limit", () => {
+    const iso = "2026-01-15T12:30:00.000Z";
+    const data = encodeDecision("deep", "cab_a1b2c3d4e5f60718", iso);
+    expect(data.startsWith("da|")).toBe(true);
+    expect(new TextEncoder().encode(data).length).toBeLessThanOrEqual(CALLBACK_DATA_MAX_BYTES);
+    expect(decodeDecision(data)).toEqual({ action: "deep", capabilityId: "cab_a1b2c3d4e5f60718", updatedAt: iso });
+  });
+
   it("uses single-letter prefixes k|d|r", () => {
     const iso = "2026-01-15T12:30:00.000Z";
     expect(encodeDecision("keep", "cab_1", iso).startsWith("k|")).toBe(true);

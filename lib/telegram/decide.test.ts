@@ -52,6 +52,8 @@ function routedPool(opts: {
   progressUsage?: string | null;
   /** Only consulted when `progressRow` is `null` and `progressUsage` is `"reference"`, to distinguish a discarded card from CONFLICT. Defaults to `"keep"`. */
   progressVerdict?: string;
+  /** `requestDeepAnalysis`'s pre-check row (verdict/pipeline/active deep run), or `null` for a missing card. */
+  deepCheck?: { verdict: string; pipeline: string; active: boolean } | null;
 }) {
   const candidate = opts.candidate === undefined ? candidateRow() : opts.candidate;
   const candidateAfter = opts.candidateAfterMutation === undefined ? candidate : opts.candidateAfterMutation;
@@ -80,6 +82,7 @@ function routedPool(opts: {
     if (text.startsWith("UPDATE caphub_v2.capabilities SET notified_at = NULL")) return { rows: [], rowCount: 1 };
     if (text.startsWith("UPDATE caphub_v2.captures SET telegram_chat_id")) return { rows: [], rowCount: 1 };
     if (text.startsWith("SELECT c.kind,")) return { rows: opts.rerunCapture ? [opts.rerunCapture] : [] };
+    if (text.startsWith("SELECT cb.verdict, r.pipeline")) return { rows: opts.deepCheck ? [opts.deepCheck] : [] };
     if (text.startsWith("INSERT INTO caphub_v2.analysis_runs")) return { rows: [] };
     return undefined;
   });
@@ -109,6 +112,64 @@ function cb(overrides: Partial<CallbackDecoded> = {}): CallbackDecoded {
 function deps(pool: unknown, api: HandleCallbackDeps["api"], overrides: Partial<HandleCallbackDeps> = {}): HandleCallbackDeps {
   return { pool: pool as HandleCallbackDeps["pool"], api, ownerChatId: 1000, pipeline: "mixed", ...overrides };
 }
+
+describe("handleCallback — 🔬 深度分析", () => {
+  it("queues a deep run for the card's capture, answers 已排队 and leaves the card message alone", async () => {
+    const { pool, calls } = routedPool({
+      candidate: candidateRow({ verdict: "keep" }),
+      deepCheck: { verdict: "keep", pipeline: "mixed", active: false }
+    });
+    const { api, answered, edited } = fakeApi();
+    const result = await handleCallback(deps(pool, api), cb({ action: "deep" }));
+
+    expect(result).toEqual({ outcome: "decided", action: "deep", capabilityId: "cab_1" });
+    expect(answered[0]).toMatchObject({ callbackQueryId: "cbq_1", text: "已排队" });
+    // The result arrives later as its own summary push — the card the owner is looking at (and
+    // its buttons) must survive untouched.
+    expect(edited).toHaveLength(0);
+    const insert = calls.find((c) => c.text.startsWith("INSERT INTO caphub_v2.analysis_runs"))!;
+    expect(insert.text).toMatch(/'queued', 'deep'/);
+    expect(insert.values.slice(1)).toEqual(["cap_1", "mixed"]);
+    // The summary push should land in the chat the button was pressed in.
+    expect(calls.some((c) => c.text.startsWith("UPDATE caphub_v2.captures SET telegram_chat_id"))).toBe(true);
+  });
+
+  it("answers with the action's own message when a deep run is already queued", async () => {
+    const { pool, calls } = routedPool({
+      candidate: candidateRow({ verdict: "keep" }),
+      deepCheck: { verdict: "keep", pipeline: "mixed", active: true }
+    });
+    const { api, answered } = fakeApi();
+    const result = await handleCallback(deps(pool, api), cb({ action: "deep" }));
+    expect(result).toEqual({ outcome: "rejected", reason: "already-queued", capabilityId: "cab_1" });
+    expect(answered[0]).toMatchObject({ text: "深度分析已在排队或进行中" });
+    expect(calls.some((c) => c.text.startsWith("INSERT INTO caphub_v2.analysis_runs"))).toBe(false);
+  });
+
+  it("still queues on a stale lock token — a deep run writes no card state, so it never conflicts", async () => {
+    const { pool, calls } = routedPool({
+      candidate: candidateRow({ verdict: "keep", updatedAt: new Date(T2) }),
+      deepCheck: { verdict: "keep", pipeline: "mixed", active: false }
+    });
+    const { api, answered, edited } = fakeApi();
+    const result = await handleCallback(deps(pool, api), cb({ action: "deep", updatedAt: T }));
+    expect(result).toEqual({ outcome: "decided", action: "deep", capabilityId: "cab_1" });
+    expect(answered[0]).toMatchObject({ text: "已排队" });
+    expect(edited).toHaveLength(0);
+    expect(calls.some((c) => c.text.startsWith("INSERT INTO caphub_v2.analysis_runs"))).toBe(true);
+  });
+
+  it("rejects a deep press on a card that is no longer kept", async () => {
+    const { pool } = routedPool({
+      candidate: candidateRow({ verdict: "discard" }),
+      deepCheck: { verdict: "discard", pipeline: "mixed", active: false }
+    });
+    const { api, answered } = fakeApi();
+    const result = await handleCallback(deps(pool, api), cb({ action: "deep" }));
+    expect(result).toEqual({ outcome: "rejected", reason: "invalid", capabilityId: "cab_1" });
+    expect(answered[0]).toMatchObject({ text: "只有已保留的卡片可以深度分析" });
+  });
+});
 
 describe("handleCallback", () => {
   it("keeps: answers with a keep toast and re-renders the message without buttons", async () => {
@@ -173,7 +234,7 @@ describe("handleCallback", () => {
       progress: "building", lastRunError: "INVALID_OUTPUT", updatedAt: T
     };
     const keyboard = formatResult(todo).replyMarkup!.inline_keyboard;
-    expect(keyboard.flat()).toHaveLength(5);
+    expect(keyboard.flat()).toHaveLength(6);
     const rerunButton = keyboard.flat().find((b) => b.text === "♻️ 重跑分析")!;
     const decoded = decodeDecision(rerunButton.callback_data!);
     expect(decoded).toEqual({ action: "rerun", capabilityId: "cab_1", updatedAt: T });

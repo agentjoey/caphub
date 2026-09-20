@@ -21,7 +21,8 @@ const HELP_TEXT = [
   "· 发链接 = 投递",
   "· /add 文字 = 投递（也可以回复一条消息发送 /add 投递）",
   "· 直接打字 = 搜索",
-  "· 待处理卡片下方的按钮可以直接保留 / 丢弃 / 重跑分析"
+  "· 待处理卡片下方的按钮可以直接保留 / 丢弃 / 重跑分析",
+  "· 已保留卡片下方的 🔬 深度分析 会深挖这张卡，完成后推送摘要，全文在 web 看"
 ].join("\n");
 
 const ADD_USAGE_TEXT = "用法：/add <文字>，或回复一条消息发送 /add 投递";
@@ -86,6 +87,7 @@ function toDecidedCardInput(row: CapabilityRow, scenarioLabel: Map<string, strin
     serial: row.serial,
     score: row.score,
     scoreReason: row.scoreReason,
+    deepAnalyzed: row.hasDeepAnalysis,
     updatedAt: row.updatedAt
   };
 }
@@ -110,6 +112,7 @@ function toTodoCardInput(row: TodoCapabilityRow, scenarioLabel: Map<string, stri
     score: row.score,
     scoreReason: row.scoreReason,
     progress: row.progress,
+    deepAnalyzed: row.hasDeepAnalysis,
     updatedAt: row.updatedAt
   };
 }

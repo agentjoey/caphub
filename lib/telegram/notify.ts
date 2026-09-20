@@ -1,11 +1,11 @@
 import type { Pool } from "pg";
-import type { CapabilityType } from "../analysis/card";
+import type { CapabilityType, DeepAnalysis } from "../analysis/card";
 import { loadScenarios } from "../analysis/scenarios";
 import type { Progress } from "../library/labels";
 import { SELF_BUILD_PROGRESS } from "../library/queries";
 import type { InlineKeyboardMarkup, TelegramApi } from "./api";
 import { TelegramError } from "./errors";
-import { formatResult, type DecidedCardInput, type FailedCardInput, type FormatCardInput, type TodoCardInput } from "./format";
+import { formatDeepSummary, formatResult, type DecidedCardInput, type FailedCardInput, type FormatCardInput, type TodoCardInput } from "./format";
 
 const BATCH_SIZE = 10;
 
@@ -32,6 +32,8 @@ export interface Candidate {
   telegramMessageId: string | null;
   runState: "done" | "failed";
   errorCode: string | null;
+  /** Whether the card already carries a stored deep analysis — renders the 🔬 已深挖 line. */
+  deepAnalyzed?: boolean;
 }
 
 export interface NotifyTickDeps {
@@ -131,6 +133,7 @@ export function buildFormatInput(candidate: Candidate, scenarioLabel: Map<string
     serial: candidate.serial,
     score: candidate.score,
     scoreReason: candidate.scoreReason,
+    deepAnalyzed: candidate.deepAnalyzed ?? false,
     updatedAt: candidate.updatedAt.toISOString()
   };
   return input;
@@ -157,6 +160,7 @@ export function buildTodoFormatInput(candidate: Candidate, scenarioLabel: Map<st
     score: candidate.score,
     scoreReason: candidate.scoreReason,
     progress: candidate.progress,
+    deepAnalyzed: candidate.deepAnalyzed ?? false,
     updatedAt: candidate.updatedAt.toISOString()
   };
 }
@@ -181,6 +185,7 @@ const CANDIDATE_COLUMNS = `cb.id, cb.capture_id AS "captureId", cb.title, cb.typ
             cb.suggested_verdict AS "suggestedVerdict", cb.suggested_reason AS "suggestedReason",
             cb.summary, cb.tags, cb.scenarios, cb.serial, cb.score, cb.score_reason AS "scoreReason",
             cb.progress, cb.verdict, cb.updated_at AS "updatedAt",
+            (cb.deep_analysis IS NOT NULL) AS "deepAnalyzed",
             c.telegram_chat_id AS "telegramChatId", c.telegram_message_id AS "telegramMessageId",
             lr.state AS "runState", lr.error_code AS "errorCode"`;
 
@@ -306,6 +311,44 @@ async function recordMessageIdForCapture(pool: Pool, captureId: string, messageI
   await pool.query("UPDATE caphub_v2.captures SET telegram_message_id = $2 WHERE id = $1", [captureId, String(messageId)]);
 }
 
+/**
+ * A finished deep-analysis run (`analysis_runs.kind = 'deep'`, M3.6) that hasn't been pushed yet.
+ * Unlike a card push, this is always a NEW message: the deep summary is an event ("深挖完成"),
+ * not a new version of the card, so it must not overwrite the card message the owner is looking
+ * at. There is therefore no stored-receipt/edit path and no message id to record.
+ */
+export interface DeepRun {
+  runId: string;
+  capabilityId: string;
+  title: string;
+  state: "done" | "failed";
+  errorCode: string | null;
+  deepAnalysis: DeepAnalysis | null;
+  telegramChatId: string | null;
+}
+
+/**
+ * Selects up to {@link BATCH_SIZE} finished, unnotified deep runs whose card still exists. Every
+ * run is pushed on its own (no `DISTINCT ON`): each row carries its own `notified_at`, so an
+ * older run is never silently skipped the way {@link selectFailedCaptureRuns}'s TODO describes.
+ * Not gated on the capture having Telegram ids — a deep run triggered from the web is still worth
+ * telling the owner about, and falls back to the owner chat.
+ */
+async function selectDeepRuns(pool: Pool): Promise<DeepRun[]> {
+  const { rows } = await pool.query<DeepRun>(
+    `SELECT ar.id AS "runId", ar.state, ar.error_code AS "errorCode",
+            cb.id AS "capabilityId", cb.title, cb.deep_analysis AS "deepAnalysis",
+            c.telegram_chat_id AS "telegramChatId"
+     FROM caphub_v2.analysis_runs ar
+     JOIN caphub_v2.capabilities cb ON cb.capture_id = ar.capture_id AND cb.deleted_at IS NULL
+     JOIN caphub_v2.captures c ON c.id = ar.capture_id
+     WHERE ar.kind = 'deep' AND ar.state IN ('done','failed') AND ar.notified_at IS NULL
+     ORDER BY ar.created_at
+     LIMIT ${BATCH_SIZE}`
+  );
+  return rows;
+}
+
 /** The subset of a {@link Candidate} or {@link CaptureFailure} that {@link deliver} needs — just enough to address and identify a push, regardless of what kind of row it came from. */
 interface PushTarget {
   /** Logged/passed to `recordMessageId` to identify the row — a capability id or a capture id, depending on the caller. */
@@ -422,7 +465,8 @@ export async function runNotifyTick(deps: NotifyTickDeps, signal: AbortSignal): 
   if (signal.aborted) return "idle";
   const candidates = await selectCandidates(deps.pool);
   const captureFailures = await selectFailedCaptureRuns(deps.pool);
-  if (candidates.length === 0 && captureFailures.length === 0) return "idle";
+  const deepRuns = await selectDeepRuns(deps.pool);
+  if (candidates.length === 0 && captureFailures.length === 0 && deepRuns.length === 0) return "idle";
 
   const scenarios = await loadScenarios(deps.pool);
   const scenarioLabel = new Map(scenarios.map((s) => [s.slug, s.labelZh]));
@@ -485,7 +529,51 @@ export async function runNotifyTick(deps: NotifyTickDeps, signal: AbortSignal): 
     }
   }
 
-  deps.log?.({ notify: "done", notified, total: candidates.length + captureFailures.length });
+  // Third selection branch (M3.6 Task 4): a finished deep-analysis run. Always a fresh message
+  // (see DeepRun) — the card's own message is left exactly as it is.
+  for (const run of deepRuns) {
+    if (signal.aborted) break;
+    let rendered;
+    try {
+      rendered = formatDeepSummary({
+        id: run.capabilityId,
+        title: run.title,
+        analysis: run.state === "done" ? run.deepAnalysis : null,
+        errorCode: run.errorCode
+      });
+    } catch (error) {
+      deps.log?.({ notify: "deep-format-failed", capability: run.capabilityId, error: error instanceof Error ? error.message : String(error) });
+      continue;
+    }
+    // "sent" means the owner actually got it; "retired" (below) only means the run must stop
+    // being re-selected — the same distinction `deliver` draws, so a retired push never inflates
+    // this tick's notified count.
+    let outcome: "sent" | "retired" | "retry" = "sent";
+    try {
+      await deps.api.sendMessage({ chatId: run.telegramChatId ?? deps.ownerChatId, text: rendered.text });
+    } catch (error) {
+      if (isTransient(error) || isGlobalAuthFailure(error) || isEntityParseError(error)) {
+        deps.log?.({ notify: "deep-send-failed-retryable", capability: run.capabilityId });
+        outcome = "retry";
+        sawError = true;
+      } else {
+        // Permanent, push-local failure (chat gone, bot blocked): retire the run rather than
+        // re-selecting it forever, exactly as `deliver` retires a card-local permanent failure.
+        deps.log?.({ notify: "deep-send-failed-permanent-retired", capability: run.capabilityId });
+        outcome = "retired";
+      }
+    }
+    if (outcome === "retry") continue;
+    try {
+      await markRunNotified(deps.pool, run.runId);
+      if (outcome === "sent") notified += 1;
+    } catch (error) {
+      deps.log?.({ notify: "mark-deep-run-notified-failed", runId: run.runId, code: dbErrorCode(error) });
+      sawError = true;
+    }
+  }
+
+  deps.log?.({ notify: "done", notified, total: candidates.length + captureFailures.length + deepRuns.length });
   // A transient/DB error anywhere in the batch means the caller should back off, even if other
   // candidates in the same batch were pushed successfully — "notified" is reserved for a
   // fully-clean tick.

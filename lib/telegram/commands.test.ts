@@ -193,7 +193,8 @@ describe("handleCommand", () => {
     expect(sent[0]!.replyMarkup).toMatchObject({
       inline_keyboard: [
         [{ text: "🔨 开始自研" }, { text: "✅ 已完成" }],
-        [{ text: "🚫 放弃" }, { text: "🔗 去 web" }]
+        [{ text: "🚫 放弃" }, { text: "🔗 去 web" }],
+        [{ text: "🔬 深度分析" }]
       ]
     });
   });
@@ -218,7 +219,8 @@ describe("handleCommand", () => {
       inline_keyboard: [
         [{ text: "🔨 开始自研" }, { text: "✅ 已完成" }],
         [{ text: "🚫 放弃" }, { text: "🔗 去 web" }],
-        [{ text: "♻️ 重跑分析" }]
+        [{ text: "♻️ 重跑分析" }],
+        [{ text: "🔬 深度分析" }]
       ]
     });
   });
@@ -231,8 +233,8 @@ describe("handleCommand", () => {
     await handleCommand({ pool, api, config }, { ...base, name: "todo", arg: "" });
     expect(sent[0]!.text).toContain("进度：自研中");
     expect(sent[0]!.text).not.toContain("上次分析失败");
-    // A healthy todo card keeps exactly its four self-build buttons — no rerun row.
-    expect((sent[0]!.replyMarkup as { inline_keyboard: unknown[][] }).inline_keyboard.flat()).toHaveLength(4);
+    // A healthy todo card keeps its four self-build buttons plus 深度分析 — no rerun row.
+    expect((sent[0]!.replyMarkup as { inline_keyboard: unknown[][] }).inline_keyboard.flat()).toHaveLength(5);
   });
 
   it("/todo with none due replies with a plain empty-state message", async () => {

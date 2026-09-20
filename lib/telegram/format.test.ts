@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { errorLabel } from "../library/labels";
 import { decodeDecision } from "./router";
-import { formatResult, TELEGRAM_MESSAGE_MAX_LEN, type DecidedCardInput, type FailedCardInput, type TodoCardInput } from "./format";
+import { formatDeepSummary, formatResult, TELEGRAM_MESSAGE_MAX_LEN, type DecidedCardInput, type FailedCardInput, type TodoCardInput } from "./format";
+import type { DeepAnalysis } from "../analysis/card";
 
 const base: DecidedCardInput = {
   status: "keep",
@@ -26,7 +27,7 @@ const failedBase: FailedCardInput = {
 };
 
 describe("formatResult — keep", () => {
-  it("renders the serial, title, meta, scenarios, tags and a web link; no buttons", () => {
+  it("renders the serial, title, meta, scenarios, tags and a web link, plus the 深度分析 button row", () => {
     const out = formatResult(base);
     expect(out.text).toContain("✅ 已保留 · SKL-0007");
     expect(out.text).toContain("<b>示例标题</b>");
@@ -34,7 +35,17 @@ describe("formatResult — keep", () => {
     expect(out.text).toContain("场景：编程、自动化");
     expect(out.text).toContain("标签：rag、web-scraping");
     expect(out.text).toContain("/library/cab_deadbeefcafef00d");
-    expect(out.replyMarkup).toBeUndefined();
+    // M3.6 Task 4: a kept card is the one card deep analysis applies to, so it carries the
+    // 🔬 深度分析 button (decoding back to the "deep" action) and a web link.
+    const kb = out.replyMarkup?.inline_keyboard;
+    expect(kb?.flat().map((b) => b.text)).toEqual(["🔬 深度分析", "🔗 去 web"]);
+    expect(decodeDecision(kb![0]![0]!.callback_data!)).toEqual({ action: "deep", capabilityId: base.id, updatedAt: base.updatedAt });
+    expect(kb?.[0]?.[1]?.url).toContain("/library/cab_deadbeefcafef00d");
+  });
+
+  it("shows 🔬 已深挖 only once the card has a stored deep analysis", () => {
+    expect(formatResult(base).text).not.toContain("已深挖");
+    expect(formatResult({ ...base, deepAnalyzed: true }).text).toContain("🔬 已深挖");
   });
 
   it("omits the serial segment when none is stored", () => {
@@ -257,7 +268,8 @@ describe("formatResult — todo", () => {
     expect(paragraphs[4]).toBe("评分：★4/5 · 生态成熟");
 
     const kb = out.replyMarkup?.inline_keyboard;
-    expect(kb).toHaveLength(2);
+    expect(kb).toHaveLength(3);
+    expect(kb?.[2]?.[0]?.text).toBe("🔬 深度分析");
     expect(kb?.[0]?.[0]?.text).toBe("🔨 开始自研");
     expect(kb?.[0]?.[1]?.text).toBe("✅ 已完成");
     expect(kb?.[1]?.[0]?.text).toBe("🚫 放弃");
@@ -269,9 +281,9 @@ describe("formatResult — todo", () => {
     expect(kb?.[1]?.[1]?.url).toContain("/library/cab_deadbeefcafef00d");
   });
 
-  it("keeps four buttons and no failure note for a healthy todo card", () => {
+  it("keeps the four self-build buttons plus 深度分析, and no failure note, for a healthy todo card", () => {
     const out = formatResult(todoBase);
-    expect(out.replyMarkup?.inline_keyboard.flat()).toHaveLength(4);
+    expect(out.replyMarkup?.inline_keyboard.flat()).toHaveLength(5);
     expect(out.text).not.toContain("上次分析失败");
   });
 
@@ -286,15 +298,15 @@ describe("formatResult — todo", () => {
     expect(out.text).not.toContain("❌ 分析失败");
 
     const kb = out.replyMarkup?.inline_keyboard;
-    expect(kb).toHaveLength(3);
-    expect(kb?.flat().map((b) => b.text)).toEqual(["🔨 开始自研", "✅ 已完成", "🚫 放弃", "🔗 去 web", "♻️ 重跑分析"]);
+    expect(kb).toHaveLength(4);
+    expect(kb?.flat().map((b) => b.text)).toEqual(["🔨 开始自研", "✅ 已完成", "🚫 放弃", "🔗 去 web", "♻️ 重跑分析", "🔬 深度分析"]);
     expect(decodeDecision(kb![2]![0]!.callback_data!)).toEqual({ action: "rerun", capabilityId: todoBase.id, updatedAt: todoBase.updatedAt });
   });
 
   it("notes a failed latest run with no error code without an empty reason", () => {
     const out = formatResult({ ...todoBase, lastRunError: null });
     expect(out.text).toContain("<i>上次分析失败</i>");
-    expect(out.replyMarkup?.inline_keyboard.flat()).toHaveLength(5);
+    expect(out.replyMarkup?.inline_keyboard.flat()).toHaveLength(6);
   });
 
   it("omits the 评分 line when the card has no score", () => {
@@ -305,5 +317,54 @@ describe("formatResult — todo", () => {
   it("shows the current progress label", () => {
     const out = formatResult({ ...todoBase, progress: "building" });
     expect(out.text).toContain("进度：自研中");
+  });
+});
+
+describe("formatDeepSummary", () => {
+  const analysis = {
+    headline: "自托管的浏览器自动化框架",
+    architecture: { summary: "三层", points: ["a", "b", "c"] },
+    implementation: { summary: "Python", points: ["a", "b", "c"] },
+    use_cases: [{ title: "批量抓取", detail: "定时抓取" }, { title: "b", detail: "d" }, { title: "c", detail: "e" }],
+    cases: [],
+    feedback: { positive: [], negative: [] },
+    risks: ["依赖上游浏览器版本", "内存吃紧"],
+    sources: [{ title: "文档", url: "https://example.com" }]
+  } satisfies DeepAnalysis;
+
+  it("pushes only the headline, best-fit scenario, top risk and a link — never the whole analysis", () => {
+    const out = formatDeepSummary({ id: "cab_deadbeefcafef00d", title: "示例标题", analysis });
+    const lines = out.text.split("\n");
+    expect(lines[0]).toBe("🔬 深度分析完成");
+    expect(lines[1]).toBe("<b>示例标题</b>");
+    expect(lines[2]).toBe("自托管的浏览器自动化框架");
+    expect(lines[3]).toBe("最适合场景：批量抓取");
+    expect(lines[4]).toBe("最大风险：依赖上游浏览器版本");
+    expect(lines[5]).toContain("查看完整分析");
+    expect(lines).toHaveLength(6);
+    // The six-section detail stays on the web.
+    expect(out.text).not.toContain("三层");
+    expect(out.text).not.toContain("架构");
+    expect(out.replyMarkup).toBeUndefined();
+  });
+
+  it("reports a failed deep run with its reason instead of an empty summary", () => {
+    const out = formatDeepSummary({ id: "cab_1", title: "示例标题", analysis: null, errorCode: "TIMEOUT" });
+    expect(out.text).toContain(`🔬 深度分析失败 · ${errorLabel("TIMEOUT", "zh")}`);
+    expect(out.text).toContain("<b>示例标题</b>");
+  });
+
+  it("escapes card- and model-derived text and never renders the internal id as text", () => {
+    const out = formatDeepSummary({ id: "cab_deadbeefcafef00d", title: "<script>", analysis: { ...analysis, headline: "a & b" } });
+    expect(out.text).toContain("&lt;script&gt;");
+    expect(out.text).toContain("a &amp; b");
+    expect(out.text.replace(/https:\/\/\S+/g, "")).not.toContain("cab_deadbeefcafef00d");
+  });
+
+  it("drops the scenario/risk lines when the stored blob has none", () => {
+    const out = formatDeepSummary({ id: "cab_1", title: "示例标题", analysis: { ...analysis, use_cases: [], risks: [] } as unknown as DeepAnalysis });
+    expect(out.text).not.toContain("最适合场景");
+    expect(out.text).not.toContain("最大风险");
+    expect(out.text).toContain("自托管的浏览器自动化框架");
   });
 });

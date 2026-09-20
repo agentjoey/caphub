@@ -1,4 +1,4 @@
-import type { CapabilityType } from "../analysis/card";
+import type { CapabilityType, DeepAnalysis } from "../analysis/card";
 import { errorLabel, progressLabel, typeLabel, usageLabel, type Progress } from "../library/labels";
 import { formatSerial } from "../library/serial";
 import { escapeHtml, type InlineKeyboardMarkup } from "./api";
@@ -48,6 +48,8 @@ export interface DecidedCardInput {
   scoreReason?: string | null;
   /** The capability's `updated_at`, ISO — used to encode the optimistic-lock token in button callback_data. */
   updatedAt: string;
+  /** Whether the card already carries a stored deep analysis — adds the 🔬 已深挖 line (M3.6 Task 4). */
+  deepAnalyzed?: boolean;
 }
 
 /**
@@ -80,6 +82,8 @@ export interface TodoCardInput {
   lastRunError?: string | null;
   /** The capability's `updated_at`, ISO — used to encode the optimistic-lock token in button callback_data. */
   updatedAt: string;
+  /** Whether the card already carries a stored deep analysis — adds the 🔬 已深挖 line (M3.6 Task 4). */
+  deepAnalyzed?: boolean;
 }
 
 /**
@@ -217,6 +221,14 @@ function scoreLine(score: number | null | undefined, reason: string | null | und
   return reason ? `${base} · ${escapeHtml(reason)}` : base;
 }
 
+/** `🔬 已深挖` — the Telegram counterpart of the web card's 已深挖 badge; omitted entirely otherwise. */
+const DEEP_DONE_LINE = "🔬 已深挖";
+
+/** The 🔬 深度分析 button row shown on a kept card (queues a deep run — see decide.ts's handleDeep). */
+function deepButton(id: string, updatedAt: string) {
+  return { text: "🔬 深度分析", callback_data: encodeDecision("deep", id, updatedAt) };
+}
+
 function formatKeep(card: DecidedCardInput): FormattedMessage {
   const serial = formatSerial(card.type, card.serial);
   const header = serial ? `✅ 已保留 · ${escapeHtml(serial)}` : "✅ 已保留";
@@ -230,11 +242,17 @@ function formatKeep(card: DecidedCardInput): FormattedMessage {
     ];
     const score = scoreLine(card.score, card.scoreReason);
     if (score) lines.push(score);
+    if (card.deepAnalyzed) lines.push(DEEP_DONE_LINE);
     lines.push(libraryLinkHtml(card.id, "详情"));
     return lines.join("\n");
   };
   const text = shrinkUntilFits(build, { title: card.title, tags: card.tags, scenarioLabels: card.scenarioLabels });
-  return { text };
+  // A kept card is the one card deep analysis applies to (requestDeepAnalysis rejects anything
+  // else), so this is where the 🔬 深度分析 button lives.
+  const replyMarkup: InlineKeyboardMarkup = {
+    inline_keyboard: [[deepButton(card.id, card.updatedAt), { text: "🔗 去 web", url: libraryLink(card.id) }]]
+  };
+  return { text, replyMarkup };
 }
 
 function formatDiscard(card: DecidedCardInput): FormattedMessage {
@@ -306,6 +324,7 @@ function formatTodo(card: TodoCardInput): FormattedMessage {
     ];
     const score = scoreLine(card.score, card.scoreReason);
     if (score) paragraphs.push(score);
+    if (card.deepAnalyzed) paragraphs.push(DEEP_DONE_LINE);
     // A failed latest run is a footnote on a self-build card, not a different card: the progress
     // buttons below stay, so the owner can still move the card along — the note only adds a
     // ♻️ 重跑分析 row so the failure is actionable from Telegram too.
@@ -336,6 +355,8 @@ function formatTodo(card: TodoCardInput): FormattedMessage {
       { text: "♻️ 重跑分析", callback_data: encodeDecision("rerun", card.id, card.updatedAt) }
     ]);
   }
+  // Last row, after any rerun row, so the existing buttons keep their positions.
+  replyMarkup.inline_keyboard.push([deepButton(card.id, card.updatedAt)]);
   return { text, replyMarkup };
 }
 
@@ -347,6 +368,39 @@ function formatFailed(card: FailedCardInput): FormattedMessage {
     inline_keyboard: [[{ text: "♻️ 重跑分析", callback_data: encodeDecision(action, card.id, card.updatedAt) }]]
   };
   return { text, replyMarkup };
+}
+
+/**
+ * Input to {@link formatDeepSummary}: a finished deep-analysis run. `analysis` is null when the
+ * run failed, in which case `errorCode` says why.
+ */
+export interface DeepSummaryInput {
+  id: string;
+  title: string;
+  analysis: DeepAnalysis | null;
+  errorCode?: string | null;
+}
+
+/**
+ * Renders the short Telegram push for a finished deep-analysis run (M3.6 Task 4): the headline,
+ * the best-fit scenario and the top risk, then a link. The full six-section analysis deliberately
+ * stays on the web — Telegram gets the four lines worth glancing at, not the whole thing. Read
+ * defensively (`?.`/`??`) since `analysis` comes from stored jsonb.
+ */
+export function formatDeepSummary(input: DeepSummaryInput): FormattedMessage {
+  const title = `<b>${escapeHtml(truncate(input.title, 60))}</b>`;
+  if (!input.analysis) {
+    const reason = errorLabel(input.errorCode ?? null, "zh");
+    return { text: capMessageSafely([`🔬 深度分析失败 · ${escapeHtml(reason)}`, title, libraryLinkHtml(input.id, "详情")].join("\n")) };
+  }
+  const a = input.analysis;
+  const lines = ["🔬 深度分析完成", title, escapeHtml(a.headline ?? "")];
+  const bestFor = a.use_cases?.[0]?.title;
+  if (bestFor) lines.push(`最适合场景：${escapeHtml(bestFor)}`);
+  const topRisk = a.risks?.[0];
+  if (topRisk) lines.push(`最大风险：${escapeHtml(topRisk)}`);
+  lines.push(libraryLinkHtml(input.id, "查看完整分析"));
+  return { text: capMessageSafely(lines.join("\n")) };
 }
 
 /**

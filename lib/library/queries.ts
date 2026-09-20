@@ -1,5 +1,5 @@
 import type { Pool } from "pg";
-import type { CapabilityType, Overlap, Playbook, ReviewNote, SourceFacts } from "../analysis/card";
+import type { CapabilityType, DeepAnalysis, Overlap, Playbook, ReviewNote, SourceFacts } from "../analysis/card";
 import { type Progress } from "./labels";
 import { toVectorLiteral } from "../analysis/embedding";
 import { formatSerial, parseSerialQuery } from "./serial";
@@ -18,6 +18,7 @@ const CARD_COLUMNS = `
   cb.progress, cb.progress_link AS "progressLink", cb.progress_at AS "progressAt",
   cb.review_note AS "reviewNote", cb.review_requested_at AS "reviewRequestedAt", cb.review_error AS "reviewError",
   cb.status, cb.superseded_by AS "supersededBy", cb.status_at AS "statusAt", cb.status_note AS "statusNote", cb.overlap,
+  (cb.deep_analysis IS NOT NULL) AS "hasDeepAnalysis",
   cb.synced_at AS "syncedAt", cb.deleted_at AS "deletedAt", cb.created_at AS "createdAt", cb.updated_at AS "updatedAt",
   json_build_object('kind', c.kind, 'objectKey', c.object_key, 'thumbKey', c.thumb_key, 'text', c.text, 'url', c.url) AS capture`;
 
@@ -37,6 +38,8 @@ export interface CapabilityRow {
   status: CapabilityStatus; supersededBy: string | null; statusAt: string | null; statusNote: string | null;
   /** Library-overlap finding written by the analysis reason step; `target` is a serial code (e.g. "TOL-0009") or null. */
   overlap: Overlap;
+  /** Whether this card has a stored deep analysis (M3.6 Task 4) — the 🔬 已深挖 badge and the 已深度分析 filter. The blob itself is only loaded on the detail page (see {@link CapabilityDetail}). */
+  hasDeepAnalysis: boolean;
   syncedAt: string | null; deletedAt: string | null; createdAt: string; updatedAt: string;
   capture: { kind: "image" | "text" | "url"; objectKey: string | null; thumbKey: string | null; text: string | null; url: string | null };
 }
@@ -127,6 +130,8 @@ export function listTodoCapabilities(pool: Q, opts: { page: number }) {
 export interface LibraryFilter {
   q?: string; types?: CapabilityType[]; tags?: string[]; scenarios?: string[];
   usage?: "integrate" | "reference"; progress?: Progress[]; discarded?: boolean;
+  /** When set, only cards that already carry a stored deep analysis are listed. */
+  deepAnalyzed?: boolean;
   /** When falsy (the default), only `status = 'active'` cards are listed — deprecated/superseded ones are hidden. */
   includeRetired?: boolean;
   page: number;
@@ -154,6 +159,7 @@ export function listLibrary(pool: Q, f: LibraryFilter, search: LibrarySearchCont
   // to 'todo' with no self-build meaning), so pin usage here rather than relying on the caller
   // (UI stat tile, future Telegram, etc.) to also pass usage='reference'.
   if (f.progress?.length) add((i) => `cb.usage = 'reference' AND cb.progress = ANY($${i})`, f.progress);
+  if (f.deepAnalyzed) clauses.push("cb.deep_analysis IS NOT NULL");
 
   const q = f.q?.trim();
   const serial = q ? parseSerialQuery(q) : null;
@@ -244,17 +250,30 @@ export interface CapabilityDetail extends CapabilityRow {
   retentionEligibleAt: string | null; retentionPurgedAt: string | null;
   /** Formatted serial (e.g. "TOL-0009") of the card named by `supersededBy`, for the header badge's link label. Null unless status='superseded' and that card still exists. */
   supersededBySerial: string | null;
+  /** The stored deep analysis (M3.6 Task 3/4), or null when this card has never been deep-analyzed. */
+  deepAnalysis: DeepAnalysis | null;
+  /** The card's `updated_at` at the time the deep analysis ran — rendered as 依据 X 时的卡片内容. */
+  deepAnalysisOf: string | null;
+  /** State/error of this capture's most recent `kind='deep'` run, for the detail page's queued/running/failed states. Null when no deep run was ever queued. */
+  deepRunState: string | null;
+  deepRunErrorCode: string | null;
 }
 
 export async function getCapabilityDetail(pool: Q, id: string): Promise<CapabilityDetail | null> {
-  const row = (await pool.query<CapabilityRow & { runPipeline: string; runState: string; runId: string; retentionEligibleAt: string | null; retentionPurgedAt: string | null; supersededByType: CapabilityType | null; supersededBySerialNum: number | null }>(
+  const row = (await pool.query<CapabilityRow & { runPipeline: string; runState: string; runId: string; retentionEligibleAt: string | null; retentionPurgedAt: string | null; supersededByType: CapabilityType | null; supersededBySerialNum: number | null; deepAnalysis: DeepAnalysis | null; deepAnalysisOf: string | null; deepRunState: string | null; deepRunErrorCode: string | null }>(
     `SELECT ${CARD_COLUMNS}, r.pipeline AS "runPipeline", r.state AS "runState", r.id AS "runId",
             ret.eligible_at AS "retentionEligibleAt", ret.purged_at AS "retentionPurgedAt",
-            sup.type AS "supersededByType", sup.serial AS "supersededBySerialNum"
+            sup.type AS "supersededByType", sup.serial AS "supersededBySerialNum",
+            cb.deep_analysis AS "deepAnalysis", cb.deep_analysis_of AS "deepAnalysisOf",
+            dr.state AS "deepRunState", dr.error_code AS "deepRunErrorCode"
      FROM caphub_v2.capabilities cb JOIN caphub_v2.captures c ON c.id = cb.capture_id
      JOIN caphub_v2.analysis_runs r ON r.id = cb.run_id
      LEFT JOIN caphub_v2.retention ret ON ret.object_key = c.object_key
      LEFT JOIN caphub_v2.capabilities sup ON sup.id = cb.superseded_by
+     LEFT JOIN LATERAL (
+       SELECT state, error_code FROM caphub_v2.analysis_runs
+       WHERE capture_id = cb.capture_id AND kind = 'deep' ORDER BY created_at DESC LIMIT 1
+     ) dr ON true
      WHERE cb.id = $1`, [id])).rows[0];
   if (!row) return null;
   const { supersededByType, supersededBySerialNum, ...rowRest } = row;

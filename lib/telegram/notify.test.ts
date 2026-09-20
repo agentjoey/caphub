@@ -67,9 +67,9 @@ describe("runNotifyTick", () => {
     expect(edit.messageId).toBe(500);
     expect(edit.text).toContain("✅ 已保留 · SKL-0007");
     expect(edit.text).toContain("场景：编程");
-    // A keep card has no buttons — Telegram keeps whatever keyboard the message already had
+    // A keep card carries the 🔬 深度分析 / 去 web row (M3.6 Task 4) — and Telegram keeps whatever keyboard the message already had
     // (e.g. the pending card's 保留/丢弃/重跑分析 row) unless reply_markup is explicitly emptied.
-    expect(edit.replyMarkup).toEqual({ inline_keyboard: [] });
+    expect((edit.replyMarkup as { inline_keyboard: Array<Array<{ text?: string }>> }).inline_keyboard.flat().map((b) => b.text)).toEqual(["🔬 深度分析", "🔗 去 web"]);
     const notifyUpdate = calls.find((c) => c.text.includes("UPDATE caphub_v2.capabilities SET notified_at"));
     expect(notifyUpdate?.values).toEqual(["cab_1"]);
   });
@@ -113,7 +113,7 @@ describe("runNotifyTick", () => {
     expect(edit.text).toContain("进度：自研中");
     expect(edit.text).toContain("上次分析失败：模型响应超时");
     expect(edit.replyMarkup?.inline_keyboard.map((row) => row.map((b) => b.text))).toEqual([
-      ["🔨 开始自研", "✅ 已完成"], ["🚫 放弃", "🔗 去 web"], ["♻️ 重跑分析"]
+      ["🔨 开始自研", "✅ 已完成"], ["🚫 放弃", "🔗 去 web"], ["♻️ 重跑分析"], ["🔬 深度分析"]
     ]);
   });
 
@@ -385,5 +385,97 @@ describe("runNotifyTick — failed-run-with-no-capability branch", () => {
     const result = await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
     expect(result).toBe("error");
     expect(calls.some((c) => c.text.includes("UPDATE caphub_v2.analysis_runs SET notified_at"))).toBe(false);
+  });
+});
+
+const DEEP_ANALYSIS = {
+  headline: "自托管的浏览器自动化框架",
+  architecture: { summary: "三层", points: ["a", "b", "c"] },
+  implementation: { summary: "Python", points: ["a", "b", "c"] },
+  use_cases: [{ title: "批量抓取", detail: "定时抓取" }, { title: "b", detail: "d" }, { title: "c", detail: "e" }],
+  cases: [],
+  feedback: { positive: [], negative: [] },
+  risks: ["依赖上游浏览器版本", "内存吃紧"],
+  sources: [{ title: "文档", url: "https://example.com" }]
+};
+
+function deepRunRow(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    runId: "run_deep_1", capabilityId: "cab_1", title: "示例标题",
+    state: "done", errorCode: null, deepAnalysis: DEEP_ANALYSIS, telegramChatId: "1000",
+    ...overrides
+  };
+}
+
+function fakePoolWithDeepRuns(deepRows: Array<Record<string, unknown>>) {
+  const calls: Array<{ text: string; values: unknown[] }> = [];
+  const query = async (text: string, values: unknown[] = []) => {
+    calls.push({ text, values });
+    if (text.includes("ar.kind = 'deep'")) return { rows: deepRows };
+    if (text.includes("UPDATE caphub_v2.analysis_runs SET notified_at")) return { rows: [], rowCount: 1 };
+    if (text.includes("FROM caphub_v2.scenarios")) return { rows: SCENARIO_ROWS };
+    return { rows: [] };
+  };
+  return { calls, pool: { query } as never };
+}
+
+describe("runNotifyTick — finished deep-analysis runs", () => {
+  it("sends a short summary as its own message (never editing the card) and marks the run notified", async () => {
+    const { pool, calls } = fakePoolWithDeepRuns([deepRunRow()]);
+    const api = fakeApi();
+    const result = await runNotifyTick({ pool, api, ownerChatId: 9999 }, new AbortController().signal);
+    expect(result).toBe("notified");
+    expect(api.edited).toHaveLength(0);
+    expect(api.sent).toHaveLength(1);
+    const [sent] = api.sent as Array<{ chatId: unknown; text: string }>;
+    expect(sent.chatId).toBe("1000");
+    expect(sent.text).toContain("🔬 深度分析完成");
+    expect(sent.text).toContain("最适合场景：批量抓取");
+    expect(sent.text).toContain("最大风险：依赖上游浏览器版本");
+    expect(sent.text).toContain("/library/cab_1");
+    // A one-glance summary, not the six-section analysis.
+    expect(sent.text).not.toContain("三层");
+    const notified = calls.find((c) => c.text.includes("UPDATE caphub_v2.analysis_runs SET notified_at"));
+    expect(notified?.values).toEqual(["run_deep_1"]);
+  });
+
+  it("falls back to the owner chat for a capture with no Telegram receipt (a web-triggered deep run)", async () => {
+    const { pool } = fakePoolWithDeepRuns([deepRunRow({ telegramChatId: null })]);
+    const api = fakeApi();
+    await runNotifyTick({ pool, api, ownerChatId: 9999 }, new AbortController().signal);
+    expect((api.sent as Array<{ chatId: unknown }>)[0]!.chatId).toBe(9999);
+  });
+
+  it("pushes a failed deep run's reason rather than going silent", async () => {
+    const { pool } = fakePoolWithDeepRuns([deepRunRow({ state: "failed", errorCode: "TIMEOUT", deepAnalysis: null })]);
+    const api = fakeApi();
+    await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
+    expect((api.sent as Array<{ text: string }>)[0]!.text).toContain("🔬 深度分析失败 · 模型响应超时");
+  });
+
+  it("leaves a transiently-failed push unnotified and reports the tick as an error", async () => {
+    const { pool, calls } = fakePoolWithDeepRuns([deepRunRow()]);
+    const api = fakeApi({ sendMessage: async () => { throw new TelegramError(429, "Too Many Requests"); } });
+    const result = await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
+    expect(result).toBe("error");
+    expect(calls.some((c) => c.text.includes("UPDATE caphub_v2.analysis_runs SET notified_at"))).toBe(false);
+  });
+
+  it("retires a permanently-undeliverable push so it cannot block later runs forever", async () => {
+    const { pool, calls } = fakePoolWithDeepRuns([deepRunRow()]);
+    const api = fakeApi({ sendMessage: async () => { throw new TelegramError(400, "chat not found"); } });
+    const result = await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
+    // Retired, not delivered: the run stops being re-selected, but the tick doesn't claim a push.
+    expect(result).toBe("idle");
+    expect(calls.some((c) => c.text.includes("UPDATE caphub_v2.analysis_runs SET notified_at"))).toBe(true);
+  });
+
+  it("selects only finished, unnotified deep runs of still-existing cards, one row per run", async () => {
+    const { pool, calls } = fakePoolWithDeepRuns([]);
+    await runNotifyTick({ pool, api: fakeApi(), ownerChatId: 1000 }, new AbortController().signal);
+    const select = calls.find((c) => c.text.includes("ar.kind = 'deep'"))!;
+    expect(select.text).toContain("ar.state IN ('done','failed') AND ar.notified_at IS NULL");
+    expect(select.text).toContain("cb.deleted_at IS NULL");
+    expect(select.text).not.toContain("DISTINCT ON");
   });
 });

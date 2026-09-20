@@ -2,7 +2,7 @@
 import { revalidatePath } from "next/cache";
 import type { CapabilityType } from "../lib/analysis/card";
 import {
-  decide, editSuggestion, ignoreOverlap, requestRerun, requestReview, setProgress, setStatus, softDelete,
+  decide, editSuggestion, ignoreOverlap, requestDeepAnalysis, requestRerun, requestReview, setProgress, setStatus, softDelete,
   supersedeOverlapTarget, type ActionResult, type CapabilityStatus
 } from "../lib/library/actions";
 import type { Progress } from "../lib/library/labels";
@@ -31,6 +31,10 @@ export async function rerunAction(captureId: string): Promise<ActionResult> {
   const locale = await getLocale();
   const { pool, config } = getRuntime();
   const r = await requestRerun(pool, { captureId, pipeline: config.pipeline }, locale); refresh(); return r;
+}
+export async function deepAnalysisAction(captureId: string): Promise<ActionResult> {
+  const locale = await getLocale();
+  const r = await requestDeepAnalysis(getRuntime().pool, { captureId }, locale); refresh(); return r;
 }
 export async function reviewAction(id: string): Promise<ActionResult> {
   const locale = await getLocale();

@@ -183,6 +183,43 @@ export async function requestRerun(pool: Pool, input: { captureId: string; pipel
   return { ok: true, updatedAt: new Date().toISOString() };
 }
 
+/**
+ * Queues a deep-analysis run (`analysis_runs.kind = 'deep'`, see migration 010) for a capture's
+ * card. Only a kept, non-deleted card can be deep-analyzed: deep analysis spends ~8 provider
+ * calls (see deep.ts's DEEP_BUDGET_LIMITS), which is not worth doing for a card that was
+ * discarded or is still awaiting a verdict.
+ *
+ * `pipeline` is NOT NULL on `analysis_runs` but carries no meaning for a deep run (its providers
+ * are fixed — DeepSeek + Tavily, see createDeepAnalysisDeps), so the card's own run's pipeline is
+ * reused rather than asking the caller for one it cannot sensibly choose.
+ *
+ * Concurrency is guarded exactly like {@link requestRerun}: a pre-check for readability, with
+ * migration 010's `analysis_runs_one_active_deep` partial unique index (one active deep run per
+ * capture) as the real guard — a concurrent request that wins the race surfaces as 23505.
+ */
+export async function requestDeepAnalysis(pool: Pool, input: { captureId: string }, locale: Locale = "zh"): Promise<ActionResult> {
+  const dict = getDict(locale).actions;
+  if (!isNonEmptyString(input.captureId)) return invalid(dict.invalid);
+  const row = (await pool.query<{ verdict: string; pipeline: string; active: boolean }>(
+    `SELECT cb.verdict, r.pipeline,
+            EXISTS (SELECT 1 FROM caphub_v2.analysis_runs d
+                    WHERE d.capture_id = $1 AND d.kind = 'deep' AND d.state IN ('queued','running')) AS active
+     FROM caphub_v2.capabilities cb
+     JOIN caphub_v2.analysis_runs r ON r.id = cb.run_id
+     WHERE cb.capture_id = $1 AND cb.deleted_at IS NULL`, [input.captureId])).rows[0];
+  if (!row) return { ok: false, reason: "NOT_FOUND", message: dict.cardNotFound };
+  if (row.verdict !== "keep") return invalid(dict.deepNotKept);
+  if (row.active) return conflict(dict.deepAlreadyQueued);
+  try {
+    await pool.query("INSERT INTO caphub_v2.analysis_runs (id, capture_id, pipeline, state, kind) VALUES ($1, $2, $3, 'queued', 'deep')",
+      [newId("run"), input.captureId, row.pipeline]);
+  } catch (e) {
+    if (isUniqueViolation(e)) return conflict(dict.deepAlreadyQueued);
+    throw e;
+  }
+  return { ok: true, updatedAt: new Date().toISOString() };
+}
+
 export async function requestReview(pool: Pool, input: { id: string }, locale: Locale = "zh"): Promise<ActionResult> {
   const dict = getDict(locale).actions;
   if (!isNonEmptyString(input.id)) return invalid(dict.invalid);

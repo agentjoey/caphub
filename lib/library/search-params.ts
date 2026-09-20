@@ -24,6 +24,7 @@ export function parseLibraryParams(sp: RawParams): LibraryFilter {
   const usage = usageRaw === "integrate" || usageRaw === "reference" ? usageRaw : undefined;
   const discarded = first(sp.discarded) === "1" ? true : undefined;
   const includeRetired = first(sp.includeRetired) === "1" ? true : undefined;
+  const deepAnalyzed = first(sp.deep) === "1" ? true : undefined;
   const pageNum = Number(first(sp.page));
   const page = Number.isFinite(pageNum) && pageNum >= 1 ? Math.floor(pageNum) : 1;
 
@@ -36,6 +37,7 @@ export function parseLibraryParams(sp: RawParams): LibraryFilter {
     progress: progress.length > 0 ? progress : undefined,
     discarded,
     includeRetired,
+    deepAnalyzed,
     page
   };
 }
@@ -59,6 +61,7 @@ export function libraryHref(filter: LibraryFilter, patch: Partial<LibraryFilter>
   for (const progress of merged.progress ?? []) params.append("progress", progress);
   if (merged.discarded) params.set("discarded", "1");
   if (merged.includeRetired) params.set("includeRetired", "1");
+  if (merged.deepAnalyzed) params.set("deep", "1");
   if (merged.page && merged.page > 1) params.set("page", String(merged.page));
 
   const qs = params.toString();

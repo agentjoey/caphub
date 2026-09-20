@@ -105,6 +105,7 @@ export const dictEn: Dict = {
     searchButton: "Search",
     discarded: "Discarded",
     includeRetired: "Show deprecated/superseded",
+    deepAnalyzed: "Deep-analyzed",
     emptyWithFilters: "No capabilities match these filters.",
     clearFilters: "Clear filters",
     emptyNoFilters: "No kept capabilities in the library yet.",
@@ -134,6 +135,34 @@ export const dictEn: Dict = {
   scoreBadge: {
     label: "★ {score}/5",
     aria: "Value score {score} of 5"
+  },
+  deepAnalysis: {
+    title: "Deep analysis",
+    badge: "🔬 Deep-analyzed",
+    badgeAria: "Has a deep analysis",
+    costNote: "A deep dive costs about 8 search/analysis calls (10 max).",
+    start: "Run deep analysis",
+    starting: "Queueing…",
+    queuedNotice: "Queued — refresh once it finishes",
+    runningNotice: "Deep analysis running, refresh shortly",
+    failedPrefix: "Last deep analysis failed: ",
+    retry: "Try again",
+    genericError: "Something went wrong, please retry",
+    bestFor: "Best for",
+    topRisk: "Top risk",
+    sourceCount: "{count} sources",
+    itemCount: "{count}",
+    architecture: "Architecture",
+    implementation: "Implementation",
+    useCases: "Use cases",
+    cases: "Real-world cases",
+    feedback: "Praise & criticism",
+    feedbackPositive: "Praise",
+    feedbackNegative: "Criticism",
+    risks: "Risks",
+    sources: "Sources",
+    sourceRefAria: "Source {n}",
+    basedOn: "Based on the card as of {date}"
   },
   statusBadge: {
     deprecated: "Deprecated",
@@ -254,6 +283,8 @@ export const dictEn: Dict = {
     statusSupersededByNotFound: "No card found for that serial",
     statusSupersededBySelf: "A card cannot be superseded by itself",
     overlapNoTarget: "No overlap finding to act on",
-    overlapTargetInvalid: "The overlap finding's card serial is invalid"
+    overlapTargetInvalid: "The overlap finding's card serial is invalid",
+    deepNotKept: "Only kept cards can be deep-analyzed",
+    deepAlreadyQueued: "Deep analysis already queued or running"
   }
 };
