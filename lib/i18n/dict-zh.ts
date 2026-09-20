@@ -24,6 +24,7 @@ export const dictZh = {
     verdictBy: { auto: "自动", human: "人工" },
     runState: { queued: "排队中", running: "分析中", done: "已建卡", failed: "失败" },
     progress: { todo: "未处理", planned: "已排期", building: "自研中", done: "已完成", dropped: "放弃" },
+    status: { active: "有效", deprecated: "失效", superseded: "被替代" },
     errors: {
       OBJECT_UNAVAILABLE: "原图已过期，无法重跑",
       BUDGET: "超出单次分析预算",
@@ -108,6 +109,7 @@ export const dictZh = {
     searchAria: "搜索能力",
     searchButton: "搜索",
     discarded: "已丢弃",
+    includeRetired: "显示失效/被替代",
     emptyWithFilters: "没有符合条件的能力。",
     clearFilters: "清除筛选",
     emptyNoFilters: "库里还没有保留的能力。",
@@ -137,6 +139,29 @@ export const dictZh = {
   scoreBadge: {
     label: "★ {score}/5",
     aria: "价值评分 {score} / 5"
+  },
+  statusBadge: {
+    deprecated: "失效",
+    supersededBy: "被 {target} 替代",
+    supersededGeneric: "被替代"
+  },
+  statusControl: {
+    title: "有效性状态",
+    markDeprecated: "置为失效",
+    restoreActive: "恢复有效",
+    markSupersededLabel: "标记被替代",
+    serialPlaceholder: "替代它的卡片编号，如 TOL-0009",
+    noteLabel: "备注",
+    notePlaceholder: "可选",
+    markSuperseded: "标记被替代",
+    saving: "保存中…",
+    genericError: "操作失败，请重试"
+  },
+  overlapNotice: {
+    notice: "疑似与 {target} 重复 · {reason}",
+    markOtherSuperseded: "把 {target} 标为被本卡替代",
+    ignore: "忽略",
+    genericError: "操作失败，请重试"
   },
   progressControl: {
     title: "自研进度",
@@ -227,6 +252,13 @@ export const dictZh = {
     progressInvalid: "进度状态不合法",
     progressLinkInvalid: "链接需以 http:// 或 https:// 开头",
     progressNotReference: "只有参考自研的卡片可以记录进度",
-    progressNotKept: "只有已保留的卡片可以记录进度"
+    progressNotKept: "只有已保留的卡片可以记录进度",
+    statusNoteInvalid: "备注过长",
+    statusSupersededByRequired: "标记被替代需要填写对方卡片编号",
+    statusSupersededByNotAllowed: "只有标记被替代时才能填写对方卡片编号",
+    statusSupersededByNotFound: "找不到对应编号的卡片",
+    statusSupersededBySelf: "不能设置为被自己替代",
+    overlapNoTarget: "没有可处理的比对结果",
+    overlapTargetInvalid: "比对结果中的卡片编号不合法"
   }
 } as const;

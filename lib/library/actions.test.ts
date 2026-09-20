@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decide, editSuggestion, requestReview, requestRerun, setProgress, softDelete } from "./actions";
+import { decide, editSuggestion, ignoreOverlap, requestReview, requestRerun, setProgress, setStatus, softDelete, supersedeOverlapTarget } from "./actions";
 
 type Handler = (text: string, values: unknown[]) => { rows: unknown[]; rowCount?: number };
 function fakePool(handler: Handler) {
@@ -241,5 +241,129 @@ describe("setProgress", () => {
     const { pool } = fakePool(() => ({ rows: [] }));
     expect(await setProgress(pool, { id: "cab_1", expectedUpdatedAt: T, progress: "todo", link: "ftp://x" }, "en"))
       .toMatchObject({ ok: false, reason: "INVALID", message: "Link must start with http:// or https://" });
+  });
+});
+
+describe("setStatus", () => {
+  it("rejects malformed input without touching the database", async () => {
+    const { pool, calls } = fakePool(() => ({ rows: [] }));
+    expect(await setStatus(pool, { id: "", expectedUpdatedAt: T, status: "active" })).toMatchObject({ ok: false, reason: "INVALID" });
+    expect(await setStatus(pool, { id: "cab_1", expectedUpdatedAt: "nope", status: "active" })).toMatchObject({ ok: false, reason: "INVALID" });
+    expect(await setStatus(pool, { id: "cab_1", expectedUpdatedAt: T, status: "bogus" as never })).toMatchObject({ ok: false, reason: "INVALID" });
+    expect(calls.length).toBe(0);
+  });
+
+  it("rejects supersededBy unless status is 'superseded'", async () => {
+    const { pool, calls } = fakePool(() => ({ rows: [] }));
+    expect(await setStatus(pool, { id: "cab_1", expectedUpdatedAt: T, status: "active", supersededBy: "TOL-0009" }))
+      .toMatchObject({ ok: false, reason: "INVALID", message: "只有标记被替代时才能填写对方卡片编号" });
+    expect(await setStatus(pool, { id: "cab_1", expectedUpdatedAt: T, status: "deprecated", supersededBy: "TOL-0009" }))
+      .toMatchObject({ ok: false, reason: "INVALID" });
+    expect(calls.length).toBe(0);
+  });
+
+  it("requires supersededBy when status is 'superseded'", async () => {
+    const { pool, calls } = fakePool(() => ({ rows: [] }));
+    expect(await setStatus(pool, { id: "cab_1", expectedUpdatedAt: T, status: "superseded" }))
+      .toMatchObject({ ok: false, reason: "INVALID", message: "标记被替代需要填写对方卡片编号" });
+    expect(calls.length).toBe(0);
+  });
+
+  it("resolves a serial-code supersededBy to the target's id before writing", async () => {
+    const { pool, calls } = fakePool((t) =>
+      t.startsWith("SELECT id FROM caphub_v2.capabilities WHERE serial") ? { rows: [{ id: "cab_2" }] }
+      : t.startsWith("UPDATE caphub_v2.capabilities") ? { rows: [{ updated_at: new Date(T) }] }
+      : { rows: [] });
+    const r = await setStatus(pool, { id: "cab_1", expectedUpdatedAt: T, status: "superseded", supersededBy: "TOL-0009" });
+    expect(r).toEqual({ ok: true, updatedAt: T });
+    const upd = calls.find((c) => c.text.startsWith("UPDATE caphub_v2.capabilities"))!;
+    expect(upd.values).toEqual(["cab_1", T, "superseded", "cab_2", null]);
+    expect(upd.text).toMatch(/date_trunc\('milliseconds', updated_at\) = \$2::timestamptz/);
+  });
+
+  it("rejects an unresolvable serial", async () => {
+    const { pool } = fakePool((t) => t.startsWith("SELECT id FROM caphub_v2.capabilities WHERE serial") ? { rows: [] } : { rows: [] });
+    expect(await setStatus(pool, { id: "cab_1", expectedUpdatedAt: T, status: "superseded", supersededBy: "TOL-9999" }))
+      .toMatchObject({ ok: false, reason: "INVALID", message: "找不到对应编号的卡片" });
+  });
+
+  it("rejects a self-reference", async () => {
+    const { pool } = fakePool((t) => t.startsWith("SELECT id FROM caphub_v2.capabilities WHERE serial") ? { rows: [{ id: "cab_1" }] } : { rows: [] });
+    expect(await setStatus(pool, { id: "cab_1", expectedUpdatedAt: T, status: "superseded", supersededBy: "TOL-0001" }))
+      .toMatchObject({ ok: false, reason: "INVALID", message: "不能设置为被自己替代" });
+  });
+
+  it("writes a null superseded_by and status_note for a plain deprecate/restore", async () => {
+    const { pool, calls } = fakePool((t) => t.startsWith("UPDATE caphub_v2.capabilities") ? { rows: [{ updated_at: new Date(T) }] } : { rows: [] });
+    await setStatus(pool, { id: "cab_1", expectedUpdatedAt: T, status: "deprecated", note: " 已被更好的方案取代 " });
+    const upd = calls.find((c) => c.text.startsWith("UPDATE caphub_v2.capabilities"))!;
+    expect(upd.values).toEqual(["cab_1", T, "deprecated", null, "已被更好的方案取代"]);
+  });
+
+  it("returns CONFLICT when the row changed and NOT_FOUND when missing", async () => {
+    const conflict = fakePool((t) => t.startsWith("SELECT 1") ? { rows: [{ "?column?": 1 }] } : { rows: [] });
+    expect(await setStatus(conflict.pool, { id: "cab_1", expectedUpdatedAt: T, status: "active" })).toMatchObject({ ok: false, reason: "CONFLICT" });
+    const missing = fakePool(() => ({ rows: [] }));
+    expect(await setStatus(missing.pool, { id: "cab_1", expectedUpdatedAt: T, status: "active" })).toMatchObject({ ok: false, reason: "NOT_FOUND" });
+  });
+});
+
+describe("ignoreOverlap", () => {
+  it("rejects malformed input without touching the database", async () => {
+    const { pool, calls } = fakePool(() => ({ rows: [] }));
+    expect(await ignoreOverlap(pool, { id: "", expectedUpdatedAt: T })).toMatchObject({ ok: false, reason: "INVALID" });
+    expect(calls.length).toBe(0);
+  });
+
+  it("clears this card's overlap with its own optimistic lock", async () => {
+    const { pool, calls } = fakePool((t) => t.startsWith("UPDATE") ? { rows: [{ updated_at: new Date(T) }] } : { rows: [] });
+    expect(await ignoreOverlap(pool, { id: "cab_1", expectedUpdatedAt: T })).toEqual({ ok: true, updatedAt: T });
+    expect(calls[0].text).toMatch(/overlap = '\{"relation":"none","target":null,"reason":""\}'::jsonb/);
+    expect(calls[0].text).toMatch(/date_trunc\('milliseconds', updated_at\) = \$2::timestamptz/);
+  });
+
+  it("returns CONFLICT when the row moved on", async () => {
+    const { pool } = fakePool(() => ({ rows: [] }));
+    expect(await ignoreOverlap(pool, { id: "cab_1", expectedUpdatedAt: T })).toMatchObject({ ok: false });
+  });
+});
+
+describe("supersedeOverlapTarget", () => {
+  it("rejects malformed input without touching the database", async () => {
+    const { pool, calls } = fakePool(() => ({ rows: [] }));
+    expect(await supersedeOverlapTarget(pool, { id: "" })).toMatchObject({ ok: false, reason: "INVALID" });
+    expect(calls.length).toBe(0);
+  });
+
+  it("marks the other card superseded by this one, without touching this card's own row", async () => {
+    const { pool, calls } = fakePool((t) =>
+      t.startsWith("SELECT overlap") ? { rows: [{ overlap: { relation: "duplicate", target: "TOL-0009", reason: "same tool" } }] }
+      : t.startsWith("SELECT id FROM caphub_v2.capabilities WHERE serial") ? { rows: [{ id: "cab_2" }] }
+      : t.startsWith("UPDATE caphub_v2.capabilities") ? { rows: [{ updated_at: new Date(T) }] }
+      : { rows: [] });
+    const r = await supersedeOverlapTarget(pool, { id: "cab_1" });
+    expect(r).toEqual({ ok: true, updatedAt: T });
+    const upd = calls.find((c) => c.text.startsWith("UPDATE caphub_v2.capabilities"))!;
+    expect(upd.text).toMatch(/status = 'superseded'/);
+    expect(upd.values).toEqual(["cab_2", "cab_1", "same tool"]);
+    expect(calls.some((c) => c.text.includes("FOR UPDATE"))).toBe(true);
+  });
+
+  it("rejects a source card with no overlap finding", async () => {
+    const { pool } = fakePool((t) => t.startsWith("SELECT overlap") ? { rows: [{ overlap: { relation: "none", target: null, reason: "" } }] } : { rows: [] });
+    expect(await supersedeOverlapTarget(pool, { id: "cab_1" })).toMatchObject({ ok: false, reason: "INVALID", message: "没有可处理的比对结果" });
+  });
+
+  it("returns NOT_FOUND when the source card is gone", async () => {
+    const { pool } = fakePool(() => ({ rows: [] }));
+    expect(await supersedeOverlapTarget(pool, { id: "cab_1" })).toMatchObject({ ok: false, reason: "NOT_FOUND" });
+  });
+
+  it("rejects when the target serial cannot be resolved", async () => {
+    const { pool } = fakePool((t) =>
+      t.startsWith("SELECT overlap") ? { rows: [{ overlap: { relation: "duplicate", target: "TOL-0009", reason: "x" } }] }
+      : t.startsWith("SELECT id FROM caphub_v2.capabilities WHERE serial") ? { rows: [] }
+      : { rows: [] });
+    expect(await supersedeOverlapTarget(pool, { id: "cab_1" })).toMatchObject({ ok: false, reason: "INVALID", message: "找不到对应编号的卡片" });
   });
 });

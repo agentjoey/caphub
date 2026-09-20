@@ -31,6 +31,13 @@ export function LibraryFilters({ filter, locale = "zh" }: { filter: LibraryFilte
         >
           {dict.discarded}
         </Link>
+        <Link
+          className="chip"
+          aria-current={filter.includeRetired ? "true" : undefined}
+          href={libraryHref(filter, { includeRetired: filter.includeRetired ? undefined : true })}
+        >
+          {dict.includeRetired}
+        </Link>
       </div>
       {/* Shown regardless of the usage filter above: listLibrary's SQL pins usage='reference'
           whenever a progress filter is set, so these chips can never surface integrate cards —

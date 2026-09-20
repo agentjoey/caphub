@@ -1,8 +1,8 @@
 import type { Pool } from "pg";
-import type { CapabilityType, Playbook, ReviewNote, SourceFacts } from "../analysis/card";
+import type { CapabilityType, Overlap, Playbook, ReviewNote, SourceFacts } from "../analysis/card";
 import { type Progress } from "./labels";
 import { toVectorLiteral } from "../analysis/embedding";
-import { parseSerialQuery } from "./serial";
+import { formatSerial, parseSerialQuery } from "./serial";
 
 export const PAGE_SIZE = 20;
 /** Minimum cosine similarity for an embedding-only match to count as a search candidate. */
@@ -17,8 +17,11 @@ const CARD_COLUMNS = `
   cb.score, cb.score_reason AS "scoreReason", cb.source_facts AS "sourceFacts",
   cb.progress, cb.progress_link AS "progressLink", cb.progress_at AS "progressAt",
   cb.review_note AS "reviewNote", cb.review_requested_at AS "reviewRequestedAt", cb.review_error AS "reviewError",
+  cb.status, cb.superseded_by AS "supersededBy", cb.status_at AS "statusAt", cb.status_note AS "statusNote", cb.overlap,
   cb.synced_at AS "syncedAt", cb.deleted_at AS "deletedAt", cb.created_at AS "createdAt", cb.updated_at AS "updatedAt",
   json_build_object('kind', c.kind, 'objectKey', c.object_key, 'thumbKey', c.thumb_key, 'text', c.text, 'url', c.url) AS capture`;
+
+export type CapabilityStatus = "active" | "deprecated" | "superseded";
 
 export interface CapabilityRow {
   id: string; captureId: string; title: string; type: CapabilityType; summary: string; signals: string[];
@@ -30,6 +33,10 @@ export interface CapabilityRow {
   score: number | null; scoreReason: string | null; sourceFacts: SourceFacts;
   progress: Progress; progressLink: string | null; progressAt: string | null;
   reviewNote: ReviewNote | null; reviewRequestedAt: string | null; reviewError: string | null;
+  /** Human-managed lifecycle status (M3.6 Task 2); `supersededBy` is the other card's id, only set when status='superseded'. */
+  status: CapabilityStatus; supersededBy: string | null; statusAt: string | null; statusNote: string | null;
+  /** Library-overlap finding written by the analysis reason step; `target` is a serial code (e.g. "TOL-0009") or null. */
+  overlap: Overlap;
   syncedAt: string | null; deletedAt: string | null; createdAt: string; updatedAt: string;
   capture: { kind: "image" | "text" | "url"; objectKey: string | null; thumbKey: string | null; text: string | null; url: string | null };
 }
@@ -119,7 +126,10 @@ export function listTodoCapabilities(pool: Q, opts: { page: number }) {
 
 export interface LibraryFilter {
   q?: string; types?: CapabilityType[]; tags?: string[]; scenarios?: string[];
-  usage?: "integrate" | "reference"; progress?: Progress[]; discarded?: boolean; page: number;
+  usage?: "integrate" | "reference"; progress?: Progress[]; discarded?: boolean;
+  /** When falsy (the default), only `status = 'active'` cards are listed — deprecated/superseded ones are hidden. */
+  includeRetired?: boolean;
+  page: number;
 }
 
 /** Extra context for the `q`-driven hybrid search, computed by the caller (web-only concerns). */
@@ -132,6 +142,7 @@ export interface LibrarySearchContext {
 
 export function listLibrary(pool: Q, f: LibraryFilter, search: LibrarySearchContext = {}) {
   const clauses = [`cb.verdict = '${f.discarded ? "discard" : "keep"}'`, "cb.deleted_at IS NULL"];
+  if (!f.includeRetired) clauses.push("cb.status = 'active'");
   const values: unknown[] = [];
   const add = (sql: (i: number) => string, v: unknown) => { values.push(v); clauses.push(sql(values.length)); };
 
@@ -188,18 +199,24 @@ export interface LibraryStats { byType: Record<CapabilityType, number>; total: n
  */
 export const TO_BUILD_PROGRESS: Progress[] = TODO_PROGRESS;
 
+/**
+ * Per-type counts, tag count and 待自研 count all count `status = 'active'` cards only —
+ * deprecated/superseded cards stay in the library (unless explicitly deleted) but no longer
+ * count toward these headline numbers. `pending` is unaffected: a card awaiting its first
+ * verdict has no meaningful status yet.
+ */
 export async function libraryStats(pool: Q): Promise<LibraryStats> {
   const byType: Record<CapabilityType, number> = { skill: 0, experience: 0, plugin: 0, prompt: 0, tool: 0, model: 0, other: 0 };
   const rows = (await pool.query<{ type: CapabilityType; n: string }>(
-    "SELECT type, count(*)::text AS n FROM caphub_v2.capabilities WHERE verdict = 'keep' AND deleted_at IS NULL GROUP BY type")).rows;
+    "SELECT type, count(*)::text AS n FROM caphub_v2.capabilities WHERE verdict = 'keep' AND deleted_at IS NULL AND status = 'active' GROUP BY type")).rows;
   for (const r of rows) byType[r.type] = Number(r.n);
   const tagCount = Number((await pool.query<{ n: string }>(
-    "SELECT count(DISTINCT t)::text AS n FROM caphub_v2.capabilities, unnest(tags) AS t WHERE verdict = 'keep' AND deleted_at IS NULL")).rows[0]?.n ?? 0);
+    "SELECT count(DISTINCT t)::text AS n FROM caphub_v2.capabilities, unnest(tags) AS t WHERE verdict = 'keep' AND deleted_at IS NULL AND status = 'active'")).rows[0]?.n ?? 0);
   const pending = Number((await pool.query<{ n: string }>(
     "SELECT count(*)::text AS n FROM caphub_v2.capabilities WHERE verdict = 'pending' AND deleted_at IS NULL")).rows[0]?.n ?? 0);
   const toBuild = Number((await pool.query<{ n: string }>(
     `SELECT count(*)::text AS n FROM caphub_v2.capabilities
-     WHERE verdict = 'keep' AND deleted_at IS NULL AND usage = 'reference' AND progress = ANY($1)`,
+     WHERE verdict = 'keep' AND deleted_at IS NULL AND status = 'active' AND usage = 'reference' AND progress = ANY($1)`,
     [TO_BUILD_PROGRESS])).rows[0]?.n ?? 0);
   return { byType, total: Object.values(byType).reduce((a, b) => a + b, 0), tagCount, pending, toBuild };
 }
@@ -225,25 +242,32 @@ export interface CapabilityDetail extends CapabilityRow {
   steps: StepSummary[]; sources: Array<{ title: string; url: string }>; runPipeline: string; runState: string; runId: string;
   /** The original image's retention window, so a purged original's card can point at its thumbnail with an honest date. Null for non-image captures or ones never tracked for retention. */
   retentionEligibleAt: string | null; retentionPurgedAt: string | null;
+  /** Formatted serial (e.g. "TOL-0009") of the card named by `supersededBy`, for the header badge's link label. Null unless status='superseded' and that card still exists. */
+  supersededBySerial: string | null;
 }
 
 export async function getCapabilityDetail(pool: Q, id: string): Promise<CapabilityDetail | null> {
-  const row = (await pool.query<CapabilityRow & { runPipeline: string; runState: string; runId: string; retentionEligibleAt: string | null; retentionPurgedAt: string | null }>(
+  const row = (await pool.query<CapabilityRow & { runPipeline: string; runState: string; runId: string; retentionEligibleAt: string | null; retentionPurgedAt: string | null; supersededByType: CapabilityType | null; supersededBySerialNum: number | null }>(
     `SELECT ${CARD_COLUMNS}, r.pipeline AS "runPipeline", r.state AS "runState", r.id AS "runId",
-            ret.eligible_at AS "retentionEligibleAt", ret.purged_at AS "retentionPurgedAt"
+            ret.eligible_at AS "retentionEligibleAt", ret.purged_at AS "retentionPurgedAt",
+            sup.type AS "supersededByType", sup.serial AS "supersededBySerialNum"
      FROM caphub_v2.capabilities cb JOIN caphub_v2.captures c ON c.id = cb.capture_id
      JOIN caphub_v2.analysis_runs r ON r.id = cb.run_id
      LEFT JOIN caphub_v2.retention ret ON ret.object_key = c.object_key
+     LEFT JOIN caphub_v2.capabilities sup ON sup.id = cb.superseded_by
      WHERE cb.id = $1`, [id])).rows[0];
   if (!row) return null;
+  const { supersededByType, supersededBySerialNum, ...rowRest } = row;
+  const supersededBySerial = supersededByType ? formatSerial(supersededByType, supersededBySerialNum) : null;
   const steps = (await pool.query<StepSummary & { output: unknown }>(
     `SELECT step, provider, model, attempt, ok, error, duration_ms AS "durationMs", input_tokens AS "inputTokens",
             output_tokens AS "outputTokens", CASE WHEN step = 'search' AND ok THEN output ELSE NULL END AS output
      FROM caphub_v2.analysis_steps WHERE run_id = $1 ORDER BY id`, [row.runId])).rows;
   const search = steps.find((s) => s.step === "search" && s.ok)?.output as { sources?: Array<{ title: string; url: string }> } | undefined;
-  const rest = toIso(row);
+  const rest = toIso(rowRest);
   return {
     ...rest,
+    supersededBySerial,
     steps: steps.map(({ output: _o, ...s }) => { void _o; return s; }),
     sources: (search?.sources ?? []).map((s) => ({ title: s.title, url: s.url }))
   };

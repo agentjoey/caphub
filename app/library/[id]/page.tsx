@@ -1,12 +1,15 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { NO_OVERLAP } from "../../../lib/analysis/card";
 import { loadScenarios } from "../../../lib/analysis/scenarios";
 import { AnalysisDetails } from "../../../components/capability/analysis-details";
 import { CapturePreview } from "../../../components/capability/capture-preview";
+import { OverlapNotice } from "../../../components/capability/overlap-notice";
 import { PlaybookView } from "../../../components/capability/playbook-view";
 import { ProgressControl } from "../../../components/capability/progress-control";
 import { ScoreBadge } from "../../../components/capability/score-badge";
 import { SourceFacts } from "../../../components/capability/source-facts";
+import { StatusControl } from "../../../components/capability/status-control";
 import { VerdictBadge } from "../../../components/capability/verdict-badge";
 import { formatDateTime } from "../../../lib/library/format";
 import { errorLabel, typeLabel, usageLabel } from "../../../lib/library/labels";
@@ -33,6 +36,10 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   // so it must run outside any try/catch.
   if (detail.verdict === "pending") redirect(`/review#${id}`);
   const serial = displaySerial(detail.verdict, detail.type, detail.serial);
+  // A card kept before migration 010 (or never re-analyzed since) has `overlap = '{}'::jsonb` in
+  // the database, not the full { relation: 'none', ... } shape — normalize defensively rather
+  // than assume every row was written by the current analysis code.
+  const overlap = detail.overlap?.relation ? detail.overlap : NO_OVERLAP;
   const cardScenarios = scenarios.filter((s) => detail.scenarios.includes(s.slug));
 
   // Section order is Human-decided (M3.5 design decision 2), shared with the Telegram card:
@@ -48,6 +55,18 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             {detail.title}
             {serial && <span className="serial"> {serial}</span>}
             <ScoreBadge score={detail.score} reason={detail.scoreReason} locale={locale} />
+            {detail.status === "deprecated" && (
+              <span className="badge badge--status-deprecated">{dict.statusBadge.deprecated}</span>
+            )}
+            {detail.status === "superseded" && (
+              detail.supersededBy && detail.supersededBySerial ? (
+                <Link className="badge badge--status-superseded" href={`/library/${detail.supersededBy}`}>
+                  {format(dict.statusBadge.supersededBy, { target: detail.supersededBySerial })}
+                </Link>
+              ) : (
+                <span className="badge badge--status-superseded">{dict.statusBadge.supersededGeneric}</span>
+              )
+            )}
           </h1>
           <p className="page-subtitle detail-meta">
             {typeLabel(detail.type, locale)} · <VerdictBadge verdict={detail.verdict} verdictBy={detail.verdictBy} locale={locale} /> · {format(dict.detail.createdAt, { date: formatDateTime(detail.createdAt, locale) })}
@@ -102,6 +121,10 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             locale={locale}
           />
           <SourceFacts facts={detail.sourceFacts} locale={locale} />
+          {overlap.relation !== "none" && (
+            <OverlapNotice id={detail.id} updatedAt={detail.updatedAt} overlap={overlap} locale={locale} />
+          )}
+          <StatusControl id={detail.id} updatedAt={detail.updatedAt} status={detail.status} statusNote={detail.statusNote} locale={locale} />
           {detail.usage === "reference" && (
             // No `key` here (nor on DetailActions): these are two siblings of the same children
             // list, so keying both on detail.updatedAt gave them the SAME key and React rendered

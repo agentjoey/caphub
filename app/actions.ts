@@ -1,7 +1,10 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import type { CapabilityType } from "../lib/analysis/card";
-import { decide, editSuggestion, requestRerun, requestReview, setProgress, softDelete, type ActionResult } from "../lib/library/actions";
+import {
+  decide, editSuggestion, ignoreOverlap, requestRerun, requestReview, setProgress, setStatus, softDelete,
+  supersedeOverlapTarget, type ActionResult, type CapabilityStatus
+} from "../lib/library/actions";
 import type { Progress } from "../lib/library/labels";
 import { getLocale } from "../lib/i18n/locale";
 import { getRuntime } from "../lib/runtime";
@@ -32,4 +35,16 @@ export async function rerunAction(captureId: string): Promise<ActionResult> {
 export async function reviewAction(id: string): Promise<ActionResult> {
   const locale = await getLocale();
   const r = await requestReview(getRuntime().pool, { id }, locale); refresh(); return r;
+}
+export async function setStatusAction(id: string, expectedUpdatedAt: string, status: CapabilityStatus, supersededBy: string | null, note: string | null): Promise<ActionResult> {
+  const locale = await getLocale();
+  const r = await setStatus(getRuntime().pool, { id, expectedUpdatedAt, status, supersededBy, note }, locale); refresh(); return r;
+}
+export async function ignoreOverlapAction(id: string, expectedUpdatedAt: string): Promise<ActionResult> {
+  const locale = await getLocale();
+  const r = await ignoreOverlap(getRuntime().pool, { id, expectedUpdatedAt }, locale); refresh(); return r;
+}
+export async function supersedeOverlapTargetAction(id: string): Promise<ActionResult> {
+  const locale = await getLocale();
+  const r = await supersedeOverlapTarget(getRuntime().pool, { id }, locale); refresh(); return r;
 }

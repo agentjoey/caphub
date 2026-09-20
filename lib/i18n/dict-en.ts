@@ -19,6 +19,7 @@ export const dictEn: Dict = {
     verdictBy: { auto: "Auto", human: "Human" },
     runState: { queued: "Queued", running: "Analyzing", done: "Filed", failed: "Failed" },
     progress: { todo: "Not started", planned: "Planned", building: "Building", done: "Done", dropped: "Dropped" },
+    status: { active: "Active", deprecated: "Deprecated", superseded: "Superseded" },
     errors: {
       OBJECT_UNAVAILABLE: "Original image expired, cannot rerun",
       BUDGET: "Exceeded per-run analysis budget",
@@ -103,6 +104,7 @@ export const dictEn: Dict = {
     searchAria: "Search capabilities",
     searchButton: "Search",
     discarded: "Discarded",
+    includeRetired: "Show deprecated/superseded",
     emptyWithFilters: "No capabilities match these filters.",
     clearFilters: "Clear filters",
     emptyNoFilters: "No kept capabilities in the library yet.",
@@ -132,6 +134,29 @@ export const dictEn: Dict = {
   scoreBadge: {
     label: "★ {score}/5",
     aria: "Value score {score} of 5"
+  },
+  statusBadge: {
+    deprecated: "Deprecated",
+    supersededBy: "Superseded by {target}",
+    supersededGeneric: "Superseded"
+  },
+  statusControl: {
+    title: "Validity status",
+    markDeprecated: "Mark deprecated",
+    restoreActive: "Restore to active",
+    markSupersededLabel: "Mark superseded by",
+    serialPlaceholder: "Serial of the card that replaces it, e.g. TOL-0009",
+    noteLabel: "Note",
+    notePlaceholder: "Optional",
+    markSuperseded: "Mark superseded",
+    saving: "Saving…",
+    genericError: "Something went wrong, please retry"
+  },
+  overlapNotice: {
+    notice: "Possible duplicate of {target} · {reason}",
+    markOtherSuperseded: "Mark {target} as superseded by this card",
+    ignore: "Ignore",
+    genericError: "Something went wrong, please retry"
   },
   progressControl: {
     title: "Self-build progress",
@@ -222,6 +247,13 @@ export const dictEn: Dict = {
     progressInvalid: "Invalid progress state",
     progressLinkInvalid: "Link must start with http:// or https://",
     progressNotReference: "Only reference cards track self-build progress",
-    progressNotKept: "Only kept cards track progress"
+    progressNotKept: "Only kept cards track progress",
+    statusNoteInvalid: "Note is too long",
+    statusSupersededByRequired: "Marking superseded requires the replacing card's serial",
+    statusSupersededByNotAllowed: "The replacing card's serial is only allowed when marking superseded",
+    statusSupersededByNotFound: "No card found for that serial",
+    statusSupersededBySelf: "A card cannot be superseded by itself",
+    overlapNoTarget: "No overlap finding to act on",
+    overlapTargetInvalid: "The overlap finding's card serial is invalid"
   }
 };

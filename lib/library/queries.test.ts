@@ -42,6 +42,15 @@ describe("library queries", () => {
     await listLibrary(pool, { discarded: true, page: 1 });
     expect(calls[0].text).toMatch(/cb\.verdict = 'discard'/);
   });
+  it("listLibrary defaults to status='active' and drops that filter when includeRetired is set", async () => {
+    const { pool, calls } = recorder([[], [{ total: "0" }]]);
+    await listLibrary(pool, { page: 1 });
+    expect(calls[0].text).toMatch(/cb\.status = 'active'/);
+
+    const { pool: pool2, calls: calls2 } = recorder([[], [{ total: "0" }]]);
+    await listLibrary(pool2, { includeRetired: true, page: 1 });
+    expect(calls2[0].text).not.toMatch(/cb\.status = 'active'/);
+  });
   it("listLibrary filters by scenarios via array overlap", async () => {
     const { pool, calls } = recorder([[], [{ total: "0" }]]);
     await listLibrary(pool, { scenarios: ["coding", "writing"], page: 1 });
@@ -122,6 +131,9 @@ describe("library queries", () => {
     expect(toBuildCall.text).toMatch(/usage = 'reference'/);
     expect(toBuildCall.text).toMatch(/progress = ANY\(\$1\)/);
     expect(toBuildCall.values).toEqual([TO_BUILD_PROGRESS]);
+    expect(calls[0].text).toMatch(/status = 'active'/);
+    expect(calls[1].text).toMatch(/status = 'active'/);
+    expect(toBuildCall.text).toMatch(/status = 'active'/);
   });
   it("getCapabilityDetail returns null when missing", async () => {
     const { pool } = recorder([[]]);
@@ -144,5 +156,26 @@ describe("library queries", () => {
     expect(calls[0].text).toMatch(/ret\.purged_at AS "retentionPurgedAt"/);
     expect(detail?.retentionEligibleAt).toBe("2026-10-01T00:00:00.000Z");
     expect(detail?.retentionPurgedAt).toBe("2026-10-02T00:00:00.000Z");
+  });
+  it("getCapabilityDetail resolves supersededBy to a formatted serial via a self-join", async () => {
+    const { pool, calls } = recorder([
+      [{ id: "cab_1", runId: "run_1", status: "superseded", supersededBy: "cab_2",
+        supersededByType: "tool", supersededBySerialNum: 9,
+        capture: { kind: "text", objectKey: null, thumbKey: null, text: "x", url: null } }],
+      []
+    ]);
+    const detail = await getCapabilityDetail(pool, "cab_1");
+    expect(calls[0].text).toMatch(/LEFT JOIN caphub_v2\.capabilities sup ON sup\.id = cb\.superseded_by/);
+    expect(detail?.supersededBySerial).toBe("TOL-0009");
+    expect((detail as unknown as Record<string, unknown>).supersededByType).toBeUndefined();
+  });
+  it("getCapabilityDetail leaves supersededBySerial null when there is no superseded_by target", async () => {
+    const { pool } = recorder([
+      [{ id: "cab_1", runId: "run_1", status: "active", supersededBy: null,
+        capture: { kind: "text", objectKey: null, thumbKey: null, text: "x", url: null } }],
+      []
+    ]);
+    const detail = await getCapabilityDetail(pool, "cab_1");
+    expect(detail?.supersededBySerial).toBeNull();
   });
 });

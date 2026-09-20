@@ -49,7 +49,7 @@ export default async function Page({
   ]);
   const { items, total } = await listLibrary(pool, filter, { queryEmbedding, matchedScenarioSlugs });
   const topTags = tags.slice(0, TOP_TAGS);
-  const hasFilters = Boolean(filter.q || filter.types?.length || filter.tags?.length || filter.scenarios?.length || filter.usage || filter.progress?.length || filter.discarded);
+  const hasFilters = Boolean(filter.q || filter.types?.length || filter.tags?.length || filter.scenarios?.length || filter.usage || filter.progress?.length || filter.discarded || filter.includeRetired);
   const hasPrev = filter.page > 1;
   const hasNext = filter.page * PAGE_SIZE < total;
 
@@ -66,7 +66,8 @@ export default async function Page({
     ...(filter.scenarios ?? []).map((value) => ({ name: "scenario", value })),
     ...(filter.usage ? [{ name: "usage", value: filter.usage }] : []),
     ...(filter.progress ?? []).map((value) => ({ name: "progress", value })),
-    ...(filter.discarded ? [{ name: "discarded", value: "1" }] : [])
+    ...(filter.discarded ? [{ name: "discarded", value: "1" }] : []),
+    ...(filter.includeRetired ? [{ name: "includeRetired", value: "1" }] : [])
   ];
 
   return (
@@ -182,7 +183,7 @@ export default async function Page({
           <ul className="list">
             {items.map((row) => (
               <li key={row.id}>
-                <Link className="list-row" href={`/library/${row.id}`}>
+                <Link className={`list-row${row.status !== "active" ? " list-row--muted" : ""}`} href={`/library/${row.id}`}>
                   <CapturePreview capture={row.capture} size="thumb" locale={locale} />
                   <div>
                     <div className="list-row__title">
@@ -194,6 +195,12 @@ export default async function Page({
                     <div className="list-row__meta">
                       <span className="badge badge--type">{typeLabel(row.type, locale)}</span>
                       <span className="badge badge--usage">{usageLabel(row.usage, locale)}</span>
+                      {row.status === "deprecated" && (
+                        <span className="badge badge--status-deprecated">{dict.statusBadge.deprecated}</span>
+                      )}
+                      {row.status === "superseded" && (
+                        <span className="badge badge--status-superseded">{dict.statusBadge.supersededGeneric}</span>
+                      )}
                       <ScoreBadge score={row.score} reason={row.scoreReason} locale={locale} />
                       {row.usage === "reference" && (
                         <span className={`badge badge--progress${row.progress === "done" ? " badge--progress-done" : ""}`}>

@@ -25,4 +25,10 @@ describe("library search params", () => {
     expect(f.progress).toEqual(["todo", "planned"]);
     expect(libraryHref(f, {})).toBe("/library?progress=todo&progress=planned");
   });
+  it("parses includeRetired and round-trips it through libraryHref", () => {
+    const f = parseLibraryParams({ includeRetired: "1" });
+    expect(f.includeRetired).toBe(true);
+    expect(libraryHref(f, {})).toBe("/library?includeRetired=1");
+    expect(parseLibraryParams({}).includeRetired).toBeUndefined();
+  });
 });
