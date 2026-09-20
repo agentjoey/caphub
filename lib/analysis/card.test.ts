@@ -368,7 +368,18 @@ describe("deepAnalysisSchema grounding", () => {
     sources: [{ title: "Docs", url: "https://a.example/1" }]
   };
 
-  it("accepts a feedback point citing a real source, and one citing none at all", () => {
+  it("accepts an architecture point that lists sub-skill identifiers (SKL-0031's real output)", () => {
+    // The 73-char ASCII line that failed SKL-0031's third deep-analysis run against the 60-char cap.
+    const listing = "拆为 core/timeline/scrolltrigger/plugins/utils/react/performance/frameworks";
+    expect(listing.length).toBeGreaterThan(60);
+    const parsed = deepAnalysisSchema.parse({
+      ...base,
+      architecture: { summary: "s1", points: [listing, "p2", "p3"] }
+    });
+    expect(parsed.architecture.points[0]).toBe(listing);
+  });
+
+    it("accepts a feedback point citing a real source, and one citing none at all", () => {
     const parsed = deepAnalysisSchema.parse({
       ...base,
       feedback: { positive: [{ text: "上手快", source: 0 }], negative: [{ text: "文档薄", source: null }] }

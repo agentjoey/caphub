@@ -332,11 +332,18 @@ export type DeepFeedbackPoint = z.infer<typeof deepFeedbackPointSchema>;
  * model that slightly overshot the prompt's shaping target. Array-length bounds (3-5 points,
  * 3-5 use_cases, 0-4 cases, 0-3 feedback items each, 2-4 risks) stay strict -- those counts are
  * what keep the card scannable, not the source of the length-cap failures being fixed here.
+ *
+ * Round 3 (SKL-0031's third failed run): `points` needed 90, not 60. A cap counts characters,
+ * but an architecture point that legitimately lists identifiers --
+ * "拆为 core/timeline/scrolltrigger/plugins/utils/react/performance/frameworks", 73 chars --
+ * spends them on ASCII at a fraction of the information density of the same number of CJK
+ * characters. The prompt's 40-char target still shapes the prose; the cap only has to catch
+ * a paragraph.
  */
 const deepAnalysisObjectSchema = z.object({
   headline: deepBullet(60),
-  architecture: z.object({ summary: deepBullet(120), points: z.array(deepBullet(60)).min(3).max(5) }),
-  implementation: z.object({ summary: deepBullet(120), points: z.array(deepBullet(60)).min(3).max(5) }),
+  architecture: z.object({ summary: deepBullet(120), points: z.array(deepBullet(90)).min(3).max(5) }),
+  implementation: z.object({ summary: deepBullet(120), points: z.array(deepBullet(90)).min(3).max(5) }),
   use_cases: z.array(z.object({ title: deepBullet(30), detail: deepBullet(90) })).min(3).max(5),
   cases: z.array(z.object({ title: deepBullet(45), detail: deepBullet(90), source: z.number().int().min(0).nullable() })).max(4),
   feedback: z.object({
