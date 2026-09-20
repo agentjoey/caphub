@@ -398,7 +398,7 @@ body {
 @media (max-width: 1080px) {
   .caphub-intro { grid-template-columns: minmax(0, 1fr); gap: 20px; }
   .caphub-intro > .caphub-quiet-button { justify-self: start; }
-  /* Nine stat tiles (six type + tags/pending/toBuild) no longer fit one row at auto-fit
+  /* Ten stat tiles (seven type + tags/pending/toBuild) no longer fit one row at auto-fit
      minmax(110px) once viewport narrows below ~1080px; pin 3 columns so the tail tile
      doesn't get stretched full-width alone on a trailing row. */
   .stat-bar { grid-template-columns: repeat(3, minmax(0, 1fr)); }

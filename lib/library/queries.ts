@@ -189,7 +189,7 @@ export interface LibraryStats { byType: Record<CapabilityType, number>; total: n
 export const TO_BUILD_PROGRESS: Progress[] = TODO_PROGRESS;
 
 export async function libraryStats(pool: Q): Promise<LibraryStats> {
-  const byType: Record<CapabilityType, number> = { skill: 0, experience: 0, plugin: 0, prompt: 0, tool: 0, other: 0 };
+  const byType: Record<CapabilityType, number> = { skill: 0, experience: 0, plugin: 0, prompt: 0, tool: 0, model: 0, other: 0 };
   const rows = (await pool.query<{ type: CapabilityType; n: string }>(
     "SELECT type, count(*)::text AS n FROM caphub_v2.capabilities WHERE verdict = 'keep' AND deleted_at IS NULL GROUP BY type")).rows;
   for (const r of rows) byType[r.type] = Number(r.n);

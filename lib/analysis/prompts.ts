@@ -1,4 +1,4 @@
-import { RESERVED_TAGS, type CapabilityType, type Extraction, type SearchResult } from "./card";
+import { INTERFACE_TAGS, RESERVED_TAGS, type CapabilityType, type Extraction, type SearchResult } from "./card";
 import type { Material } from "./material";
 import type { Scenario } from "./scenarios";
 import { scenariosPromptList } from "./scenarios";
@@ -19,7 +19,7 @@ export const SCORE_RUBRIC = "评分标准：成熟度（是否稳定可用）、
  * misclassified as `other` because `plugin`/`prompt`/`other` carried no definition at all.
  */
 export const CAPABILITY_TYPE_DEFINITIONS =
-  "能力类型定义：skill（可安装/可执行的技能，如脚本、CLI、agent skill、可复用的工作流）；experience（一次具体实践得到的做法/教训/复盘，需要保留核心内容本身而不只是链接）；plugin（面向某个宿主平台——IDE、浏览器、聊天客户端等——的可安装插件/扩展）；prompt（可直接复用的提示词本身，单条提示词或提示词合集/库都算）；tool（可独立运行的应用/工具/框架：自带运行入口，不依附某个宿主，如 CLI 应用、桌面或 Web 应用、本地服务、agent 运行框架）；other（以上五类都不合适时才用，不是默认兜底）。skill 与 tool 的边界：skill 是被你或 agent 调用的可复用技能/工作流/脚本，tool 是自己就能跑起来的成品应用或框架。tool 与 plugin 的边界：plugin 必须插进某个宿主平台，tool 不需要宿主、自己就是入口。合集/库按它收录的内容定型，不要因为「是个合集」就归为 other：提示词合集/库记为 prompt，skill 合集/库记为 skill，以此类推。";
+  "能力类型定义：skill（可安装/可执行的技能，如脚本、CLI、agent skill、可复用的工作流）；experience（一次具体实践得到的做法/教训/复盘，需要保留核心内容本身而不只是链接）；plugin（面向某个宿主平台——IDE、浏览器、聊天客户端等——的可安装插件/扩展）；prompt（可直接复用的提示词本身，单条提示词或提示词合集/库都算）；tool（可独立运行的应用/工具/框架：自带运行入口，不依附某个宿主，如 CLI 应用、桌面或 Web 应用、本地服务、agent 运行框架）；model（模型本身：权重、基础模型、微调产物及其推理代码；不是围绕模型的应用）；other（以上六类都不合适时才用，不是默认兜底）。skill 与 tool 的边界：skill 是被你或 agent 调用的可复用技能/工作流/脚本，tool 是自己就能跑起来的成品应用或框架。tool 与 plugin 的边界：plugin 必须插进某个宿主平台，tool 不需要宿主、自己就是入口。tool 与 model 的边界：tool 是能直接跑起来的成品应用/框架；model 是模型资产，通常要被代码或应用调用。合集/库按它收录的内容定型，不要因为「是个合集」就归为 other：提示词合集/库记为 prompt，skill 合集/库记为 skill，以此类推。";
 
 export function visionPrompt(ocrText: string): string {
   return [
@@ -63,7 +63,7 @@ export function reasonPrompt(input: {
     `已有标签（优先复用，找到贴切的就不要新造）：${input.existingTags.join(", ") || "（空）"}`,
     `候选应用场景（slug（中文名：关键词…））：${scenariosPromptList(input.scenarios)}`,
     "请输出 CapabilityCard：title ≤ 30 字的一句话；type；summary 是对整个分析的完整摘要（结论 + 依据，≤ 300 字）；signals 给 2–3 条价值信号（如解决什么场景、与库内谁重叠、来源可信度）；suggested_verdict 与 suggested_reason；confidence 是你对该建议的把握（0–1）；usage 在 integrate（可直接拿来用）与 reference（值得借鉴后自研）之间选；playbook 按 usage/type 给可执行内容：integrate 给 install 命令、repo、prompt 全文；reference 给借鉴要点；experience 类型必须把核心内容本身写进 content；" +
-      `tags 给 1–6 个标签，每个必须是英文小写单词或用连字符连接的短语（如 web-scraping、time-series），不能是中文，不能是空格分隔的多词（"Web Scraping" 不合法，要写成 web-scraping），也不能是 ${RESERVED_TAGS.join("、")} 这类类型/用途词；已有贴切的标签要复用，不要为同一含义新造近义词；` +
+      `tags 给 1–6 个标签，每个必须是英文小写单词或用连字符连接的短语（如 web-scraping、time-series），不能是中文，不能是空格分隔的多词（"Web Scraping" 不合法，要写成 web-scraping），也不能是 ${RESERVED_TAGS.join("、")} 这类类型/用途词；已有贴切的标签要复用，不要为同一含义新造近义词；当能力的接入方式明确时，必须使用这四个固定标签中的一个或多个（${INTERFACE_TAGS.join("、")}），不要自造近义词（例如 mcp-server、python-library、cli-tool、skill 都不允许）；这些标签与主题标签并列，不占用 1–6 个标签的额外名额之外的规则；` +
       "scenarios 从候选应用场景的 slug 中选出 1–3 个这个能力最可能被用在的应用场景，按贴切程度排列，只能用给出的 slug，不要自造；" +
       "source_url 给最可信的来源链接或 null。",
     `score 给这个能力对 Joey 的 AI 价值打 1–5 分整数，${SCORE_RUBRIC}score_reason 用一句不超过 80 字的中文说明打分依据。`,

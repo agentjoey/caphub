@@ -19,7 +19,7 @@ import { LibraryFilters } from "./library-filters";
 export const dynamic = "force-dynamic";
 
 const TOP_TAGS = 30;
-const TYPES: CapabilityType[] = ["skill", "experience", "plugin", "prompt", "tool", "other"];
+const TYPES: CapabilityType[] = ["skill", "experience", "plugin", "prompt", "tool", "model", "other"];
 
 export default async function Page({
   searchParams

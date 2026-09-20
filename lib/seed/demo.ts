@@ -259,6 +259,31 @@ const SPECS: DemoSpec[] = [
       source_url: "https://github.com/example/local-dev-tool",
       scenarios: ["coding"]
     }
+  },
+  {
+    n: 8,
+    kind: "url",
+    url: "https://huggingface.co/example/timeseries-foundation-model",
+    verdict: "keep",
+    verdictBy: "human",
+    searchSources: [],
+    card: {
+      title: "示例金融时间序列基础模型",
+      type: "model",
+      summary: "一个开源的金融时间序列基础模型：权重 + 推理代码，本身不是应用，需要被自己的代码或框架调用才能用起来。",
+      signals: ["发布的是模型权重和推理脚本，不是一个可独立运行的成品应用", "需要额外写调用代码才能接入实际预测流程"],
+      suggested_verdict: "keep",
+      suggested_reason: "权重开源、推理代码齐全，值得直接整合进预测流程。",
+      confidence: 0.75,
+      score: 4,
+      score_reason: "对时间序列预测场景直接适用，可复现性高。",
+      source_facts: {},
+      usage: "integrate",
+      playbook: { kind: "integrate", install: ["pip install example-tsfm"], repo: "https://huggingface.co/example/timeseries-foundation-model", prompt_text: null },
+      tags: ["library", "time-series"],
+      source_url: "https://huggingface.co/example/timeseries-foundation-model",
+      scenarios: ["coding"]
+    }
   }
 ];
 

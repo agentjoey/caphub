@@ -18,7 +18,7 @@ export const dictZh = {
     langSwitchAria: "切换界面语言"
   },
   labels: {
-    type: { skill: "技能", experience: "经验", plugin: "插件", prompt: "提示词", tool: "工具", other: "其他" },
+    type: { skill: "技能", experience: "经验", plugin: "插件", prompt: "提示词", tool: "工具", model: "模型", other: "其他" },
     usage: { integrate: "直接整合", reference: "参考自研" },
     verdict: { keep: "保留", discard: "丢弃", pending: "待决" },
     verdictBy: { auto: "自动", human: "人工" },

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const capabilityTypeSchema = z.enum(["skill", "experience", "plugin", "prompt", "tool", "other"]);
+export const capabilityTypeSchema = z.enum(["skill", "experience", "plugin", "prompt", "tool", "model", "other"]);
 export type CapabilityType = z.infer<typeof capabilityTypeSchema>;
 
 export const extractionSchema = z.object({
@@ -36,7 +36,15 @@ export type Playbook = z.infer<typeof playbookSchema>;
  * descriptive tag. Kept in sync with capabilityTypeSchema's members plus the two
  * "usage" values and "integrate"/"reference" as playbook kinds.
  */
-export const RESERVED_TAGS = ["skill", "experience", "plugin", "prompt", "tool", "other", "integrate", "reference"] as const;
+export const RESERVED_TAGS = ["skill", "experience", "plugin", "prompt", "tool", "model", "other", "integrate", "reference"] as const;
+
+/**
+ * The four fixed "接入方式" tags the owner standardized on for how a capability plugs in.
+ * These are ordinary tags (no dedicated column), used alongside topic tags within the same
+ * 1–6 count — see prompts.ts's reasonPrompt tag rule and scripts/normalize-tags.ts, which both
+ * import this so the vocabulary can't drift between the prompt, the normalizer and tests.
+ */
+export const INTERFACE_TAGS = ["mcp", "cli", "library", "agent-skill"] as const;
 
 const TAG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 

@@ -13,7 +13,7 @@ export const dictEn: Dict = {
     langSwitchAria: "Switch interface language"
   },
   labels: {
-    type: { skill: "Skill", experience: "Experience", plugin: "Plugin", prompt: "Prompt", tool: "Tool", other: "Other" },
+    type: { skill: "Skill", experience: "Experience", plugin: "Plugin", prompt: "Prompt", tool: "Tool", model: "Model", other: "Other" },
     usage: { integrate: "Integrate directly", reference: "Reference only" },
     verdict: { keep: "Keep", discard: "Discard", pending: "Pending" },
     verdictBy: { auto: "Auto", human: "Human" },

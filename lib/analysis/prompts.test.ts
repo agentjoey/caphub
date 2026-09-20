@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { RESERVED_TAGS } from "./card";
+import { INTERFACE_TAGS, RESERVED_TAGS } from "./card";
 import { CAPABILITY_TYPE_DEFINITIONS, backfillScorePrompt, reasonPrompt } from "./prompts";
 
 const material = { kind: "text" as const, text: "hello" };
@@ -9,24 +9,26 @@ const scenarios = [
 ];
 
 describe("CAPABILITY_TYPE_DEFINITIONS", () => {
-  it("gives all six capability types a crisp definition, not a bare label", () => {
+  it("gives all seven capability types a crisp definition, not a bare label", () => {
     expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/skill（[^）]+）/);
     expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/experience（[^）]+）/);
     expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/plugin（[^）]+）/);
     expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/prompt（[^）]+）/);
     expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/tool（[^）]+）/);
+    expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/model（[^）]+）/);
     expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/other（[^）]+）/);
   });
 
-  it("tells the model other is only for what none of the five fit, not a default fallback", () => {
-    expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/other（以上五类都不合适时才用/);
+  it("tells the model other is only for what none of the six fit, not a default fallback", () => {
+    expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/other（以上六类都不合适时才用/);
     expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/不是默认兜底/);
   });
 
-  it("draws the tool/skill and tool/plugin boundaries explicitly", () => {
+  it("draws the tool/skill, tool/plugin and tool/model boundaries explicitly", () => {
     expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/skill 是被你或 agent 调用的可复用技能\/工作流\/脚本/);
     expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/tool 是自己就能跑起来的成品应用或框架/);
     expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/plugin 必须插进某个宿主平台/);
+    expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/tool 是能直接跑起来的成品应用\/框架；model 是模型资产/);
   });
 
   it("gives the collection tie-breaker rule: a 合集/库 is typed by what it contains", () => {
@@ -60,6 +62,14 @@ describe("reasonPrompt", () => {
     expect(prompt).toContain("web-scraping");
     expect(prompt).toContain("不能是中文");
     for (const word of RESERVED_TAGS) expect(prompt).toContain(word);
+  });
+
+  it("requires one of the four fixed interface tags when the interface is clear, and bans synonyms", () => {
+    const prompt = reasonPrompt({ material, extraction: null, sources: [], similar: [], existingTags: [], scenarios });
+    for (const tag of INTERFACE_TAGS) expect(prompt).toContain(tag);
+    expect(prompt).toContain("mcp-server");
+    expect(prompt).toContain("python-library");
+    expect(prompt).toContain("cli-tool");
   });
 
   it("tells the model to reuse an existing tag when one fits", () => {

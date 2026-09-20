@@ -6,6 +6,7 @@ const PREFIX: Record<CapabilityType, string> = {
   plugin: "PLG",
   prompt: "PRM",
   tool: "TOL",
+  model: "MDL",
   other: "OTH"
 };
 
@@ -28,7 +29,7 @@ export function displaySerial(verdict: "keep" | "discard" | "pending", type: Cap
 // Either PREFIX + optional "-"/" " + digits (case-insensitive, prefix need not match the
 // card's current type), or a bare "#" + digits. A plain number with no prefix or "#" is not
 // a serial lookup — it falls through to ordinary text search.
-const QUERY_RE = /^(?:(?:SKL|EXP|PLG|PRM|TOL|OTH)[\s-]?(\d+)|#(\d+))$/i;
+const QUERY_RE = /^(?:(?:SKL|EXP|PLG|PRM|TOL|MDL|OTH)[\s-]?(\d+)|#(\d+))$/i;
 
 export function parseSerialQuery(q: string): number | null {
   const m = QUERY_RE.exec(q.trim());
