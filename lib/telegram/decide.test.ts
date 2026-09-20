@@ -61,6 +61,7 @@ function routedPool(opts: {
     }
     if (text.includes("INSERT INTO caphub_v2.tags")) return { rows: [] };
     if (text.startsWith("UPDATE caphub_v2.capabilities SET notified_at = NULL")) return { rows: [], rowCount: 1 };
+    if (text.startsWith("UPDATE caphub_v2.captures SET telegram_chat_id")) return { rows: [], rowCount: 1 };
     if (text.startsWith("SELECT c.kind,")) return { rows: opts.rerunCapture ? [opts.rerunCapture] : [] };
     if (text.startsWith("INSERT INTO caphub_v2.analysis_runs")) return { rows: [] };
     return undefined;
@@ -139,6 +140,30 @@ describe("handleCallback", () => {
     expect((edited[0] as { replyMarkup?: unknown }).replyMarkup).toEqual({ inline_keyboard: [] });
     const notifiedUpdate = calls.find((c) => c.text.startsWith("UPDATE caphub_v2.capabilities SET notified_at = NULL"));
     expect(notifiedUpdate?.values).toEqual(["cab_1"]);
+    // The callback message's ids are recorded onto the capture being rerun, so the eventual
+    // result (from notify.ts's runNotifyTick) edits this exact message — regardless of whether
+    // the capture is web- or telegram-sourced, or already had a (possibly different) receipt.
+    const receipt = calls.find((c) => c.text.startsWith("UPDATE caphub_v2.captures SET telegram_chat_id"));
+    expect(receipt?.values).toEqual(["cap_1", "1000", "500"]);
+  });
+
+  it("reruns: a failure recording the callback receipt does not fail the rerun", async () => {
+    const { pool } = fakePool((text) => {
+      if (text === "BEGIN" || text === "COMMIT" || text === "ROLLBACK") return { rows: [] };
+      if (text.includes(`cb.capture_id AS "captureId"`)) return { rows: [candidateRow()] };
+      if (text.includes("FROM caphub_v2.scenarios")) return { rows: SCENARIO_ROWS };
+      if (text.startsWith("UPDATE caphub_v2.capabilities SET notified_at = NULL")) return { rows: [], rowCount: 1 };
+      if (text.startsWith("UPDATE caphub_v2.captures SET telegram_chat_id")) throw new Error("connection terminated");
+      if (text.startsWith("SELECT c.kind,")) return { rows: [{ kind: "image", purged: false, active: false }] };
+      if (text.startsWith("INSERT INTO caphub_v2.analysis_runs")) return { rows: [] };
+      return undefined;
+    });
+    const { api, answered, edited } = fakeApi();
+    const result = await handleCallback(deps(pool, api), cb({ action: "rerun" }));
+
+    expect(result).toEqual({ outcome: "decided", action: "rerun", capabilityId: "cab_1" });
+    expect(answered[0]).toMatchObject({ text: "已重新排队" });
+    expect(edited[0]).toMatchObject({ text: "已重新排队，分析中…" });
   });
 
   it("reruns: clear-notified-at succeeds on the first retry after an initial failure", async () => {
@@ -152,6 +177,7 @@ describe("handleCallback", () => {
         if (clearAttempts === 1) throw Object.assign(new Error("connection terminated"), { code: "57P01" });
         return { rows: [], rowCount: 1 };
       }
+      if (text.startsWith("UPDATE caphub_v2.captures SET telegram_chat_id")) return { rows: [], rowCount: 1 };
       if (text.startsWith("SELECT c.kind,")) return { rows: [{ kind: "image", purged: false, active: false }] };
       if (text.startsWith("INSERT INTO caphub_v2.analysis_runs")) return { rows: [] };
       return undefined;
@@ -174,6 +200,7 @@ describe("handleCallback", () => {
       if (text.startsWith("UPDATE caphub_v2.capabilities SET notified_at = NULL")) {
         throw Object.assign(new Error("connection terminated"), { code: "57P01" });
       }
+      if (text.startsWith("UPDATE caphub_v2.captures SET telegram_chat_id")) return { rows: [], rowCount: 1 };
       if (text.startsWith("SELECT c.kind,")) return { rows: [{ kind: "image", purged: false, active: false }] };
       if (text.startsWith("INSERT INTO caphub_v2.analysis_runs")) return { rows: [] };
       return undefined;
@@ -287,6 +314,10 @@ describe("handleCallback — rerun-capture", () => {
     expect(calls.some((c) => c.text.includes(`cb.capture_id AS "captureId"`))).toBe(false);
     expect(calls.some((c) => c.text.startsWith("UPDATE caphub_v2.capabilities SET notified_at = NULL"))).toBe(false);
     expect(calls.some((c) => c.text.startsWith("INSERT INTO caphub_v2.analysis_runs"))).toBe(true);
+    // cb.capabilityId is actually the capture id in this branch — the receipt is recorded
+    // directly against it.
+    const receipt = calls.find((c) => c.text.startsWith("UPDATE caphub_v2.captures SET telegram_chat_id"));
+    expect(receipt?.values).toEqual(["cap_1", "1000", "500"]);
   });
 
   it("object gone: a purged capture is rejected with its own toast", async () => {

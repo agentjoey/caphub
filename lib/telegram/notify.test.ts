@@ -249,6 +249,16 @@ describe("runNotifyTick", () => {
     expect(notifyUpdates.map((c) => c.values)).toEqual([["cab_good"]]);
   });
 
+  it("selects on stored Telegram ids, not capture source — a web-sourced capture with a recorded receipt is eligible", async () => {
+    const { pool, calls } = fakePool([candidateRow()]);
+    const api = fakeApi();
+    const result = await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
+    expect(result).toBe("notified");
+    const select = calls.find((c) => c.text.includes("FROM caphub_v2.capabilities cb"));
+    expect(select?.text).not.toContain("c.source = 'telegram'");
+    expect(select?.text).toContain("c.telegram_chat_id IS NOT NULL AND c.telegram_message_id IS NOT NULL");
+  });
+
   it("keeps processing the rest of the batch after one card's formatting throws", async () => {
     const rows = [
       candidateRow({ id: "cab_bad", type: "not-a-real-type" }),
@@ -310,6 +320,9 @@ describe("runNotifyTick — failed-run-with-no-capability branch", () => {
     expect(edit.replyMarkup?.inline_keyboard[0]?.[0]?.callback_data).toMatch(/^rc\|cap_1\|/);
     const runNotified = calls.find((c) => c.text.includes("UPDATE caphub_v2.analysis_runs SET notified_at"));
     expect(runNotified?.values).toEqual(["run_1"]);
+    const select = calls.find((c) => c.text.includes("caphub_v2.analysis_runs ar"));
+    expect(select?.text).not.toContain("c.source = 'telegram'");
+    expect(select?.text).toContain("c.telegram_chat_id IS NOT NULL AND c.telegram_message_id IS NOT NULL");
   });
 
   it("falls back to sendMessage and records the message id against the capture (not a capability)", async () => {

@@ -1,5 +1,6 @@
 import type { CapabilityType } from "../analysis/card";
 import { loadScenarios } from "../analysis/scenarios";
+import { recordTelegramReceipt } from "../captures/captures";
 import { typeLabel } from "../library/labels";
 import { listPending, libraryStats, type CapabilityRow } from "../library/queries";
 import { escapeHtml, type BotCommand, type TelegramApi } from "./api";
@@ -128,7 +129,19 @@ async function handlePending(deps: CommandDeps, params: CommandParams): Promise<
 
     for (const row of shown) {
       const rendered = formatResult(toDecidedCardInput(row, scenarioLabel));
-      await deps.api.sendMessage({ chatId: params.chatId, text: rendered.text, replyMarkup: rendered.replyMarkup });
+      const sent = await deps.api.sendMessage({ chatId: params.chatId, text: rendered.text, replyMarkup: rendered.replyMarkup });
+      // Regardless of the capture's source (telegram or web), record this message's ids on its
+      // capture — this is how notify.ts's runNotifyTick later knows there is a Telegram message
+      // to edit with the eventual (re)analysis result (see notify.ts's selectCandidates). A
+      // failure here must not break the reply — the card was already sent.
+      try {
+        await recordTelegramReceipt(deps.pool, row.captureId, { chatId: params.chatId, messageId: sent.message_id });
+      } catch (error) {
+        console.error(JSON.stringify({
+          msg: "telegram /pending record receipt failed", chatId: params.chatId, captureId: row.captureId,
+          error: error instanceof Error ? error.message : String(error)
+        }));
+      }
     }
     if (total > shown.length) {
       await deps.api.sendMessage({

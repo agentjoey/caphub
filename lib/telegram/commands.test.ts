@@ -36,9 +36,11 @@ function pendingCard(overrides: Partial<Record<string, unknown>> = {}) {
 
 function fakePool(opts: { pending?: unknown[]; pendingTotal?: number; typeCounts?: Record<string, number>; throwOn?: string } = {}) {
   const queries: string[] = [];
+  const calls: Array<{ text: string; values: unknown[] }> = [];
   const pool = {
-    async query(text: string) {
+    async query(text: string, values: unknown[] = []) {
       queries.push(text);
+      calls.push({ text, values });
       if (opts.throwOn && text.includes(opts.throwOn)) throw new Error("boom");
       if (text.includes("FROM caphub_v2.scenarios")) return { rows: SCENARIO_ROWS };
       if (text.includes("cb.verdict = 'pending'") && text.includes("count(*)")) return { rows: [{ total: String(opts.pendingTotal ?? (opts.pending?.length ?? 0)) }] };
@@ -51,10 +53,11 @@ function fakePool(opts: { pending?: unknown[]; pendingTotal?: number; typeCounts
       if (text.startsWith("SELECT count(*)::text AS n FROM caphub_v2.capabilities WHERE verdict = 'pending'")) {
         return { rows: [{ n: String(opts.pendingTotal ?? (opts.pending?.length ?? 0)) }] };
       }
+      if (text.startsWith("UPDATE caphub_v2.captures SET telegram_chat_id")) return { rows: [], rowCount: 1 };
       return { rows: [] };
     }
   };
-  return { pool: pool as never, queries };
+  return { pool: pool as never, queries, calls };
 }
 
 function fakeApi() {
@@ -140,6 +143,28 @@ describe("handleCommand", () => {
     expect(sent).toHaveLength(PENDING_SHOW_LIMIT + 1);
     expect(sent.at(-1)!.text).toContain("还有更多待处理卡片");
     expect(sent.at(-1)!.text).toContain("https://caphub.agentjoey.ai/review");
+  });
+
+  it("/pending records a Telegram receipt (chat/message id) against each card's capture, regardless of the capture's source", async () => {
+    const items = [pendingCard({ id: "cab_a", captureId: "cap_a" }), pendingCard({ id: "cab_b", captureId: "cap_b" })];
+    const { pool, calls } = fakePool({ pending: items });
+    const { api, sent } = fakeApi();
+    const outcome = await handleCommand({ pool, api, config }, { ...base, name: "pending", arg: "" });
+    expect(outcome).toEqual({ kind: "pending", shown: 2, total: 2 });
+    expect(sent).toHaveLength(2);
+    const receipts = calls.filter((c) => c.text.startsWith("UPDATE caphub_v2.captures SET telegram_chat_id"));
+    expect(receipts).toHaveLength(2);
+    expect(receipts[0]!.values).toEqual(["cap_a", "1000", "1"]);
+    expect(receipts[1]!.values).toEqual(["cap_b", "1000", "2"]);
+  });
+
+  it("/pending still sends every card's message even if recording one card's receipt fails", async () => {
+    const items = [pendingCard({ id: "cab_a", captureId: "cap_a" }), pendingCard({ id: "cab_b", captureId: "cap_b" })];
+    const { pool } = fakePool({ pending: items, throwOn: "UPDATE caphub_v2.captures SET telegram_chat_id" });
+    const { api, sent } = fakeApi();
+    const outcome = await handleCommand({ pool, api, config }, { ...base, name: "pending", arg: "" });
+    expect(outcome).toEqual({ kind: "pending", shown: 2, total: 2 });
+    expect(sent).toHaveLength(2);
   });
 
   it("/stats reports per-type counts, tag count and pending count", async () => {

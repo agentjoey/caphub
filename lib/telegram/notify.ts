@@ -141,9 +141,13 @@ const CANDIDATE_FROM = `FROM caphub_v2.capabilities cb
      ) lr ON true`;
 
 /**
- * Selects up to {@link BATCH_SIZE} Telegram-sourced capabilities that need a push (an already
- * -decided verdict, or a failed latest run) and haven't been pushed yet. The "latest run" is
- * looked up by `capture_id` (not `capabilities.run_id`, which points at the run that produced
+ * Selects up to {@link BATCH_SIZE} capabilities that need a push (an already-decided verdict, or
+ * a failed latest run) and haven't been pushed yet. Not restricted to `c.source = 'telegram'` —
+ * a web-sourced capture whose card the owner is following in Telegram (its capture carries a
+ * stored `telegram_chat_id`/`telegram_message_id`, recorded by `/pending` or a rerun button —
+ * see commands.ts and decide.ts) is just as eligible: the condition that matters is whether there
+ * is a Telegram message to push the result to, not where the capture originated. The "latest run"
+ * is looked up by `capture_id` (not `capabilities.run_id`, which points at the run that produced
  * the stored card) so a failed *rerun* of an already-decided card is detected even though the
  * card's own columns still hold the previous, successful run's data; only a finished run
  * ('done' or 'failed') qualifies, so a rerun still in flight (queued/running — its
@@ -153,7 +157,8 @@ async function selectCandidates(pool: Pool): Promise<Candidate[]> {
   const { rows } = await pool.query<Candidate>(
     `SELECT ${CANDIDATE_COLUMNS}
      ${CANDIDATE_FROM}
-     WHERE cb.notified_at IS NULL AND cb.deleted_at IS NULL AND c.source = 'telegram'
+     WHERE cb.notified_at IS NULL AND cb.deleted_at IS NULL
+       AND c.telegram_chat_id IS NOT NULL AND c.telegram_message_id IS NOT NULL
        AND lr.state IN ('done', 'failed')
      ORDER BY cb.updated_at
      LIMIT ${BATCH_SIZE}`
@@ -206,12 +211,13 @@ export interface CaptureFailure {
 }
 
 /**
- * Selects up to {@link BATCH_SIZE} telegram-sourced captures whose latest analysis run failed
- * and was never pushed, and which have no capability row at all (a first-run failure — see
- * Ruling 1 in the Task 7 brief: a card only gets a capabilities row once *some* run succeeds, so
- * a capture stuck on repeated failures would otherwise never be notified). One row per capture
- * (its most recent still-unnotified failed run), so an older failed run for the same capture is
- * left as-is rather than double-pushed.
+ * Selects up to {@link BATCH_SIZE} captures with a Telegram message to push to whose latest
+ * analysis run failed and was never pushed, and which have no capability row at all (a first-run
+ * failure — see Ruling 1 in the Task 7 brief: a card only gets a capabilities row once *some* run
+ * succeeds, so a capture stuck on repeated failures would otherwise never be notified). Like
+ * {@link selectCandidates}, gated on the capture having stored Telegram ids rather than on
+ * `c.source = 'telegram'`. One row per capture (its most recent still-unnotified failed run), so
+ * an older failed run for the same capture is left as-is rather than double-pushed.
  *
  * TODO: an older superseded failed run for the same capture (one that was itself never
  * notified, now shadowed by this capture's latest failed run) is permanently skipped by
@@ -227,7 +233,8 @@ async function selectFailedCaptureRuns(pool: Pool): Promise<CaptureFailure[]> {
        c.telegram_chat_id AS "telegramChatId", c.telegram_message_id AS "telegramMessageId"
      FROM caphub_v2.captures c
      JOIN caphub_v2.analysis_runs ar ON ar.capture_id = c.id
-     WHERE c.source = 'telegram' AND ar.state = 'failed' AND ar.notified_at IS NULL
+     WHERE c.telegram_chat_id IS NOT NULL AND c.telegram_message_id IS NOT NULL
+       AND ar.state = 'failed' AND ar.notified_at IS NULL
        AND NOT EXISTS (SELECT 1 FROM caphub_v2.capabilities k WHERE k.capture_id = c.id)
      ORDER BY c.id, ar.created_at DESC
      LIMIT ${BATCH_SIZE}`
@@ -351,7 +358,8 @@ async function deliver(
 }
 
 /**
- * Pushes decided/failed Telegram-sourced cards to the owner chat, one tick at a time (see
+ * Pushes decided/failed cards with a Telegram message to update to the owner chat, one tick at
+ * a time (see
  * {@link selectCandidates}). A card whose formatting throws, or whose `markNotified`/
  * `recordMessageId` write throws, is logged and skipped — never allowed to abort the rest of
  * the tick. Returns "error" if any candidate hit a transient Telegram failure (429/network) or

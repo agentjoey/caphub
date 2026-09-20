@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
 import { loadScenarios } from "../analysis/scenarios";
+import { recordTelegramReceipt } from "../captures/captures";
 import type { Pipeline } from "../config";
 import { getDict } from "../i18n";
 import { decide, requestRerun } from "../library/actions";
@@ -59,6 +60,21 @@ async function editToCurrentState(deps: HandleCallbackDeps, cb: CallbackDecoded,
   const scenarioLabel = await loadScenarioLabels(deps.pool);
   const rendered = formatResult(buildFormatInput(candidate, scenarioLabel));
   await deps.api.editMessageText({ chatId: cb.chatId, messageId: cb.messageId, text: rendered.text, replyMarkup: NO_BUTTONS, signal });
+}
+
+/**
+ * Records the callback message's chat/message ids onto the capture being rerun, so the eventual
+ * result (pushed by notify.ts's runNotifyTick) edits the message the owner is currently looking
+ * at — the card's *original* stored receipt (if any) may point at an older, different message, or
+ * (for a web-sourced capture, or one first surfaced by a `/pending` push) may not exist at all.
+ * Best-effort: a failure here must not fail the rerun, which has already been queued.
+ */
+async function recordCallbackReceipt(deps: HandleCallbackDeps, cb: CallbackDecoded, captureId: string): Promise<void> {
+  try {
+    await recordTelegramReceipt(deps.pool, captureId, { chatId: cb.chatId, messageId: cb.messageId });
+  } catch (error) {
+    deps.log?.({ decide: "record-callback-receipt-failed", capabilityId: cb.capabilityId, captureId, error: error instanceof Error ? error.message : String(error) });
+  }
 }
 
 async function clearNotifiedAt(pool: Pool, capabilityId: string): Promise<void> {
@@ -195,6 +211,11 @@ async function handleRerun(deps: HandleCallbackDeps, cb: CallbackDecoded, candid
   const result = await requestRerun(deps.pool, { captureId: candidate.captureId, pipeline: deps.pipeline }, "zh");
 
   if (result.ok) {
+    // Record this callback message's ids onto the capture *before* clearing notified_at, so
+    // that by the time runNotifyTick's selection query can pick this rerun up (once it
+    // finishes), it already points at the message the owner is looking at right now — see
+    // recordCallbackReceipt.
+    await recordCallbackReceipt(deps, cb, candidate.captureId);
     // Clear notified_at (with one retry) *before* answering, so the toast can honestly say
     // whether the eventual result will be auto-pushed — see clearNotifiedAtWithRetry.
     const cleared = await clearNotifiedAtWithRetry(deps, cb.capabilityId);
@@ -226,6 +247,9 @@ async function handleRerunCapture(deps: HandleCallbackDeps, cb: CallbackDecoded,
   const result = await requestRerun(deps.pool, { captureId: cb.capabilityId, pipeline: deps.pipeline }, "zh");
 
   if (result.ok) {
+    // See recordCallbackReceipt — cb.capabilityId is the capture id in this branch (a
+    // "rerun-capture" button, not a "rerun" one; see the doc comment above).
+    await recordCallbackReceipt(deps, cb, cb.capabilityId);
     await safeAnswer(deps, cb, TOAST.rerun, signal);
     await runSideEffect(deps, cb, "requeue-capture-edit-failed", () =>
       deps.api.editMessageText({ chatId: cb.chatId, messageId: cb.messageId, text: REQUEUE_TEXT, replyMarkup: NO_BUTTONS, signal }).then(() => undefined)
