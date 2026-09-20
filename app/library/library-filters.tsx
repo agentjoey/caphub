@@ -32,6 +32,9 @@ export function LibraryFilters({ filter, locale = "zh" }: { filter: LibraryFilte
           {dict.discarded}
         </Link>
       </div>
+      {/* Shown regardless of the usage filter above: listLibrary's SQL pins usage='reference'
+          whenever a progress filter is set, so these chips can never surface integrate cards —
+          don't "fix" this by gating the chips on usage=reference instead. */}
       <div className="filter-row">
         {PROGRESS_VALUES.map((progress) => {
           const active = filter.progress?.includes(progress) ?? false;

@@ -83,7 +83,10 @@ export function listLibrary(pool: Q, f: LibraryFilter, search: LibrarySearchCont
   if (f.tags?.length) add((i) => `cb.tags @> $${i}`, f.tags);
   if (f.usage) add((i) => `cb.usage = $${i}`, f.usage);
   if (f.scenarios?.length) add((i) => `cb.scenarios && $${i}::text[]`, f.scenarios);
-  if (f.progress?.length) add((i) => `cb.progress = ANY($${i})`, f.progress);
+  // progress is only meaningful for usage='reference' cards (usage='integrate' cards default
+  // to 'todo' with no self-build meaning), so pin usage here rather than relying on the caller
+  // (UI stat tile, future Telegram, etc.) to also pass usage='reference'.
+  if (f.progress?.length) add((i) => `cb.usage = 'reference' AND cb.progress = ANY($${i})`, f.progress);
 
   const q = f.q?.trim();
   const serial = q ? parseSerialQuery(q) : null;

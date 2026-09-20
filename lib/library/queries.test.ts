@@ -38,10 +38,13 @@ describe("library queries", () => {
     expect(calls[0].text).toMatch(/cb\.scenarios && \$\d+::text\[\]/);
     expect(calls[0].values).toEqual(expect.arrayContaining([["coding", "writing"]]));
   });
-  it("listLibrary filters by progress via ANY", async () => {
+  it("listLibrary filters by progress via ANY, pinned to usage='reference' in SQL so an integrate card (which defaults to progress='todo' with no self-build meaning) can never match a progress filter", async () => {
     const { pool, calls } = recorder([[], [{ total: "0" }]]);
     await listLibrary(pool, { progress: ["todo", "planned"], page: 1 });
-    expect(calls[0].text).toMatch(/cb\.progress = ANY\(\$\d+\)/);
+    // The usage restriction must be ANDed into the same clause as the progress check (not left to
+    // the caller to also pass usage='reference') so every caller — UI, future Telegram — gets the
+    // same semantics regardless of whether it separately filters on usage.
+    expect(calls[0].text).toMatch(/cb\.usage = 'reference' AND cb\.progress = ANY\(\$\d+\)/);
     expect(calls[0].values).toEqual(expect.arrayContaining([["todo", "planned"]]));
   });
   it("listLibrary with a serial-shaped q returns only that serial, no scoring", async () => {
