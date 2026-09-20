@@ -18,6 +18,7 @@ interface Candidate {
   id: string;
   title: string;
   summary: string;
+  summary_points: Array<{ label: string; text: string }>;
   tags: string[];
   updated_at: Date;
   label_zh: string[];
@@ -35,7 +36,7 @@ interface Candidate {
  */
 export async function runEmbedTick(deps: EmbedTickDeps, signal: AbortSignal): Promise<"idle" | "embedded" | "error"> {
   const { rows } = await deps.pool.query<Candidate>(
-    `SELECT c.id, c.title, c.summary, c.tags, c.updated_at,
+    `SELECT c.id, c.title, c.summary, c.summary_points, c.tags, c.updated_at,
        COALESCE(array_agg(s.label_zh) FILTER (WHERE s.slug IS NOT NULL), '{}') AS label_zh,
        COALESCE(array_agg(s.label_en) FILTER (WHERE s.slug IS NOT NULL), '{}') AS label_en
      FROM caphub_v2.capabilities c
@@ -47,7 +48,7 @@ export async function runEmbedTick(deps: EmbedTickDeps, signal: AbortSignal): Pr
   );
   if (rows.length === 0) return "idle";
 
-  const texts = rows.map((r) => embeddingText({ title: r.title, summary: r.summary, tags: r.tags, scenarioLabels: [...r.label_zh, ...r.label_en] }));
+  const texts = rows.map((r) => embeddingText({ title: r.title, summary: r.summary, summaryPoints: r.summary_points, tags: r.tags, scenarioLabels: [...r.label_zh, ...r.label_en] }));
   let vectors: Array<number[] | undefined>;
   try {
     vectors = await deps.embed.embed(texts, "document", signal);

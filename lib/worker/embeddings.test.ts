@@ -28,8 +28,8 @@ describe("runEmbedTick", () => {
 
   it("embeds candidates in one batch call and writes vectors guarded by a ms-truncated updated_at", async () => {
     const rows = [
-      { id: "cab_1", title: "T1", summary: "S1", tags: ["a"], updated_at: updatedAt, label_zh: ["视频"], label_en: ["Video"] },
-      { id: "cab_2", title: "T2", summary: "S2", tags: [], updated_at: updatedAt, label_zh: [], label_en: [] }
+      { id: "cab_1", title: "T1", summary: "S1", summary_points: [], tags: ["a"], updated_at: updatedAt, label_zh: ["视频"], label_en: ["Video"] },
+      { id: "cab_2", title: "T2", summary: "S2", summary_points: [], tags: [], updated_at: updatedAt, label_zh: [], label_en: [] }
     ];
     const { pool, calls } = fakePool(rows, [1, 1]);
     const seenTexts: string[][] = [];
@@ -55,8 +55,8 @@ describe("runEmbedTick", () => {
 
   it("logs written/skipped counts from rowCount and returns 'idle' when every write is a stale no-op", async () => {
     const rows = [
-      { id: "cab_1", title: "T1", summary: "S1", tags: [], updated_at: updatedAt, label_zh: [], label_en: [] },
-      { id: "cab_2", title: "T2", summary: "S2", tags: [], updated_at: updatedAt, label_zh: [], label_en: [] }
+      { id: "cab_1", title: "T1", summary: "S1", summary_points: [], tags: [], updated_at: updatedAt, label_zh: [], label_en: [] },
+      { id: "cab_2", title: "T2", summary: "S2", summary_points: [], tags: [], updated_at: updatedAt, label_zh: [], label_en: [] }
     ];
     const { pool } = fakePool(rows, [0, 0]);
     const embed = { embed: async (texts: string[]) => texts.map(() => Array(768).fill(0.1)) };
@@ -68,8 +68,8 @@ describe("runEmbedTick", () => {
 
   it("counts only rows actually written when one update is a stale no-op", async () => {
     const rows = [
-      { id: "cab_1", title: "T1", summary: "S1", tags: [], updated_at: updatedAt, label_zh: [], label_en: [] },
-      { id: "cab_2", title: "T2", summary: "S2", tags: [], updated_at: updatedAt, label_zh: [], label_en: [] }
+      { id: "cab_1", title: "T1", summary: "S1", summary_points: [], tags: [], updated_at: updatedAt, label_zh: [], label_en: [] },
+      { id: "cab_2", title: "T2", summary: "S2", summary_points: [], tags: [], updated_at: updatedAt, label_zh: [], label_en: [] }
     ];
     const { pool } = fakePool(rows, [1, 0]);
     const embed = { embed: async (texts: string[]) => texts.map(() => Array(768).fill(0.1)) };
@@ -81,8 +81,8 @@ describe("runEmbedTick", () => {
 
   it("logs a per-row failure and keeps counting other rows' writes instead of losing the count", async () => {
     const rows = [
-      { id: "cab_1", title: "T1", summary: "S1", tags: [], updated_at: updatedAt, label_zh: [], label_en: [] },
-      { id: "cab_2", title: "T2", summary: "S2", tags: [], updated_at: updatedAt, label_zh: [], label_en: [] }
+      { id: "cab_1", title: "T1", summary: "S1", summary_points: [], tags: [], updated_at: updatedAt, label_zh: [], label_en: [] },
+      { id: "cab_2", title: "T2", summary: "S2", summary_points: [], tags: [], updated_at: updatedAt, label_zh: [], label_en: [] }
     ];
     const calls: Array<{ text: string; values: unknown[] }> = [];
     let updateCount = 0;
@@ -106,7 +106,7 @@ describe("runEmbedTick", () => {
   });
 
   it("returns 'error' and logs a short message without throwing when the embed call fails", async () => {
-    const rows = [{ id: "cab_1", title: "T1", summary: "S1", tags: [], updated_at: updatedAt, label_zh: [], label_en: [] }];
+    const rows = [{ id: "cab_1", title: "T1", summary: "S1", summary_points: [], tags: [], updated_at: updatedAt, label_zh: [], label_en: [] }];
     const { pool, calls } = fakePool(rows);
     const embed = { embed: async () => { throw Object.assign(new Error("nope"), { code: "TIMEOUT" }); } };
     const logs: Record<string, unknown>[] = [];
@@ -118,8 +118,8 @@ describe("runEmbedTick", () => {
 
   it("falls back to embedding one row at a time when the batch call fails with INVALID_OUTPUT, so one bad text can't block the rest", async () => {
     const rows = [
-      { id: "cab_1", title: "BAD", summary: "S1", tags: [], updated_at: updatedAt, label_zh: [], label_en: [] },
-      { id: "cab_2", title: "GOOD", summary: "S2", tags: [], updated_at: updatedAt, label_zh: [], label_en: [] }
+      { id: "cab_1", title: "BAD", summary: "S1", summary_points: [], tags: [], updated_at: updatedAt, label_zh: [], label_en: [] },
+      { id: "cab_2", title: "GOOD", summary: "S2", summary_points: [], tags: [], updated_at: updatedAt, label_zh: [], label_en: [] }
     ];
     const { pool, calls } = fakePool(rows, [1]);
     const seenBatches: string[][] = [];
@@ -149,7 +149,7 @@ describe("runEmbedTick", () => {
   });
 
   it("returns 'error' (not 'idle') when every row in an INVALID_OUTPUT fallback batch fails to embed, so the caller's backoff isn't reset for a poison row", async () => {
-    const rows = [{ id: "cab_poison", title: "BAD", summary: "S1", tags: [], updated_at: updatedAt, label_zh: [], label_en: [] }];
+    const rows = [{ id: "cab_poison", title: "BAD", summary: "S1", summary_points: [], tags: [], updated_at: updatedAt, label_zh: [], label_en: [] }];
     const { pool, calls } = fakePool(rows);
     const embed = {
       embed: async () => {
@@ -166,8 +166,8 @@ describe("runEmbedTick", () => {
 
   it("returns 'embedded' when a mixed INVALID_OUTPUT fallback batch writes at least one row", async () => {
     const rows = [
-      { id: "cab_1", title: "BAD", summary: "S1", tags: [], updated_at: updatedAt, label_zh: [], label_en: [] },
-      { id: "cab_2", title: "GOOD", summary: "S2", tags: [], updated_at: updatedAt, label_zh: [], label_en: [] }
+      { id: "cab_1", title: "BAD", summary: "S1", summary_points: [], tags: [], updated_at: updatedAt, label_zh: [], label_en: [] },
+      { id: "cab_2", title: "GOOD", summary: "S2", summary_points: [], tags: [], updated_at: updatedAt, label_zh: [], label_en: [] }
     ];
     const { pool } = fakePool(rows, [1]);
     const embed = {
@@ -185,7 +185,7 @@ describe("runEmbedTick", () => {
   });
 
   it("still returns 'error' without a per-row fallback for a transient batch failure (e.g. TIMEOUT)", async () => {
-    const rows = [{ id: "cab_1", title: "T1", summary: "S1", tags: [], updated_at: updatedAt, label_zh: [], label_en: [] }];
+    const rows = [{ id: "cab_1", title: "T1", summary: "S1", summary_points: [], tags: [], updated_at: updatedAt, label_zh: [], label_en: [] }];
     const { pool } = fakePool(rows);
     let calls = 0;
     const embed = { embed: async () => { calls += 1; throw Object.assign(new Error("timeout"), { code: "TIMEOUT" }); } };
@@ -195,7 +195,7 @@ describe("runEmbedTick", () => {
   });
 
   it("never includes texts or an api key in the failure log", async () => {
-    const rows = [{ id: "cab_1", title: "SECRET TITLE", summary: "S1", tags: [], updated_at: updatedAt, label_zh: [], label_en: [] }];
+    const rows = [{ id: "cab_1", title: "SECRET TITLE", summary: "S1", summary_points: [], tags: [], updated_at: updatedAt, label_zh: [], label_en: [] }];
     const { pool } = fakePool(rows);
     const embed = { embed: async () => { throw Object.assign(new Error("nope"), { code: "UNAVAILABLE" }); } };
     const logs: Record<string, unknown>[] = [];

@@ -79,7 +79,12 @@ const SPECS: DemoSpec[] = [
     card: {
       title: "Scrapling 自适应反爬抓取库",
       type: "skill",
-      summary: "一个 Python 网页抓取库，通过学习页面结构自动适配 selector 变化，支持无头浏览器抓取和反爬绕过，可直接集成到数据采集流水线。",
+      summary: "一个 Python 网页抓取库，自动适配 selector 变化并绕过反爬检测。",
+      summary_points: [
+        { label: "定位", text: "自适应反爬的 Python 网页抓取库" },
+        { label: "用法", text: "pip 安装后直接替代传统 selector 抓取代码" },
+        { label: "限制", text: "仍需自行处理登录态和验证码等高阶反爬" }
+      ],
       signals: ["GitHub 星标增长快", "文档给出可复制的 pip 安装命令"],
       suggested_verdict: "keep",
       suggested_reason: "有明确安装步骤且直接解决抓取稳定性问题，值得集成。",
@@ -106,7 +111,12 @@ const SPECS: DemoSpec[] = [
     card: {
       title: "Next.js 16 乐观锁并发冲突排障记录",
       type: "experience",
-      summary: "记录一次 Server Action 并发写入引发的乐观锁冲突排查过程，以及最终采用 updated_at 比对解决的方案。",
+      summary: "一次 Server Action 并发写入引发乐观锁冲突的排障记录。",
+      summary_points: [
+        { label: "现象", text: "两个标签页先后保存，第二次返回成功但数据未变" },
+        { label: "根因", text: "updated_at 比对失败导致 UPDATE 影响行数为 0" },
+        { label: "方案", text: "提交前用最新 updated_at，并区分零行与真正的 SQL 错误" }
+      ],
       signals: ["两个标签页同时提交触发了看似随机的失败", "错误信息未直接指向 updated_at 冲突"],
       suggested_verdict: "keep",
       suggested_reason: "排障路径可复用，下次遇到类似冲突能直接定位。",
@@ -137,7 +147,12 @@ const SPECS: DemoSpec[] = [
     card: {
       title: "Tavily MCP 插件接入搜索能力",
       type: "plugin",
-      summary: "官方 Tavily MCP Server，为 Agent 提供网页搜索工具调用，安装后可在对话中直接触发实时搜索并返回来源列表。",
+      summary: "官方 Tavily MCP Server，为 Agent 提供实时网页搜索工具调用。",
+      summary_points: [
+        { label: "定位", text: "给 Agent 接入实时网页搜索的官方 MCP 插件" },
+        { label: "用法", text: "按标准 MCP 配置装好即可在对话中触发搜索" },
+        { label: "输出", text: "返回结果自带来源 URL，可直接核对" }
+      ],
       signals: ["提供标准 MCP 配置示例", "返回结果自带来源 URL"],
       suggested_verdict: "keep",
       suggested_reason: "补齐当前流水线缺少的实时检索能力。",
@@ -164,7 +179,12 @@ const SPECS: DemoSpec[] = [
     card: {
       title: "多来源摘要 Prompt 模板",
       type: "prompt",
-      summary: "一段用于把多篇搜索结果压缩成结构化摘要的 prompt 模板，要求输出标题、要点和来源编号。",
+      summary: "把多篇搜索结果压缩成结构化摘要的 prompt 模板。",
+      summary_points: [
+        { label: "定位", text: "多来源检索结果的结构化摘要提示词" },
+        { label: "输出", text: "标题、3-5 条要点、逐条标注来源编号" },
+        { label: "限制", text: "多语言场景尚未验证" }
+      ],
       signals: ["明确要求输出来源编号，方便核对", "对输出长度有上限约束"],
       suggested_verdict: "keep",
       suggested_reason: "结构清晰可直接复用，但还未验证多语言场景。",
@@ -196,7 +216,12 @@ const SPECS: DemoSpec[] = [
     card: {
       title: "Postgres 全文检索中文分词方案对比",
       type: "other",
-      summary: "一篇比较 zhparser、pg_jieba 与 simple 词典在 Postgres 全文检索中文效果的文章，附带索引大小和查询延迟数据。",
+      summary: "对比 zhparser、pg_jieba 与 simple 词典的中文全文检索效果。",
+      summary_points: [
+        { label: "对比对象", text: "zhparser、pg_jieba、simple 三种分词方案" },
+        { label: "结论", text: "simple 更快但分词粗，zhparser 索引更大" },
+        { label: "限制", text: "未说明测试用的 Postgres 版本" }
+      ],
       signals: ["给出了具体基准测试数据", "作者未说明测试的 Postgres 版本"],
       suggested_verdict: "keep",
       suggested_reason: "内容对当前中文检索选型有参考价值，建议人工确认后再定。",
@@ -230,7 +255,12 @@ const SPECS: DemoSpec[] = [
     card: {
       title: "过时的 Chrome 手动截图书签脚本",
       type: "skill",
-      summary: "一段通过浏览器书签栏 JS 手动触发截图并下载的脚本，功能已被 scripts/shot.mjs 的 Playwright 方案完全取代。",
+      summary: "通过浏览器书签栏手动触发截图的过时脚本。",
+      summary_points: [
+        { label: "原理", text: "书签栏 JS 调用 html2canvas 手动截图下载" },
+        { label: "现状", text: "已被 scripts/shot.mjs 的 Playwright 方案取代" },
+        { label: "结论", text: "无自动化能力，无需继续保留" }
+      ],
       signals: ["依赖手动点击书签，无法自动化", "项目里已有等价能力覆盖"],
       suggested_verdict: "discard",
       suggested_reason: "功能被现有 Playwright 截图脚本完全覆盖，无需重复维护。",
@@ -257,7 +287,12 @@ const SPECS: DemoSpec[] = [
     card: {
       title: "本地开发用的示例 CLI 工具",
       type: "tool",
-      summary: "一个自带运行入口、不依附任何宿主平台的本地 CLI 工具，装完直接跑起来处理本地开发常见的重复操作。",
+      summary: "一个自带运行入口、处理本地开发重复操作的 CLI 工具。",
+      summary_points: [
+        { label: "定位", text: "独立运行的本地开发 CLI，不挂载任何宿主" },
+        { label: "用法", text: "brew 安装后直接有独立命令行入口" },
+        { label: "场景", text: "自动化本地开发中的重复性操作" }
+      ],
       signals: ["安装后直接有独立的命令行入口，不需要挂载到别的应用里", "文档明确写了这是一个独立运行的应用而不是某个平台的插件"],
       suggested_verdict: "keep",
       suggested_reason: "自成一体，安装步骤清楚，值得直接整合。",
@@ -284,7 +319,12 @@ const SPECS: DemoSpec[] = [
     card: {
       title: "示例金融时间序列基础模型",
       type: "model",
-      summary: "一个开源的金融时间序列基础模型：权重 + 推理代码，本身不是应用，需要被自己的代码或框架调用才能用起来。",
+      summary: "一个开源的金融时间序列基础模型，权重加推理代码。",
+      summary_points: [
+        { label: "定位", text: "金融时间序列预测的开源基础模型" },
+        { label: "用法", text: "pip 安装后需自行写调用代码接入预测流程" },
+        { label: "边界", text: "本身不是应用，不能独立运行" }
+      ],
       signals: ["发布的是模型权重和推理脚本，不是一个可独立运行的成品应用", "需要额外写调用代码才能接入实际预测流程"],
       suggested_verdict: "keep",
       suggested_reason: "权重开源、推理代码齐全，值得直接整合进预测流程。",

@@ -10,7 +10,7 @@ import { jsonStringifyStripNul, stripNul } from "../text/sanitize";
 import { RunBudget } from "./budget";
 import { fetchCanonical, type CanonicalResult } from "./canonical";
 import {
-  cardObjectSchema, finalizeSourceFacts, type CapabilityType, type Playbook, type SearchResult, type SourceFacts
+  cardObjectSchema, finalizeSourceFacts, type CapabilityType, type Playbook, type SearchResult, type SourceFacts, type SummaryPoint
 } from "./card";
 import { enrichPrompt, type EnrichSubject } from "./prompts";
 import { recordStep } from "./steps";
@@ -69,6 +69,7 @@ export function createEnrichDeps(config: Config, pool: Pool): EnrichDeps | undef
 
 interface CapabilityRow {
   id: string; title: string; type: CapabilityType; usage: "integrate" | "reference"; summary: string;
+  summary_points: SummaryPoint[];
   signals: string[]; playbook: Playbook; tags: string[]; source_url: string | null;
   open_questions: string[]; suggestion_by: "auto" | "human";
 }
@@ -80,7 +81,7 @@ interface CapabilityRow {
  */
 async function loadCapability(pool: Pick<Pool, "query">, captureId: string): Promise<CapabilityRow | null> {
   const row = (await pool.query<CapabilityRow>(
-    `SELECT id, title, type, usage, summary, signals, playbook, tags, source_url, open_questions, suggestion_by
+    `SELECT id, title, type, usage, summary, summary_points, signals, playbook, tags, source_url, open_questions, suggestion_by
      FROM caphub_v2.capabilities WHERE capture_id = $1 AND verdict = 'keep' AND deleted_at IS NULL`,
     [captureId]
   )).rows[0];
@@ -154,7 +155,7 @@ async function runEnrichSearch(deps: EnrichDeps, runId: string, query: string, b
  */
 function enrichCardSchemaFor(pinned?: { type: CapabilityType; usage: "integrate" | "reference" }) {
   const base = cardObjectSchema.pick({
-    type: true, usage: true, summary: true, signals: true, playbook: true, tags: true,
+    type: true, usage: true, summary: true, summary_points: true, signals: true, playbook: true, tags: true,
     score: true, score_reason: true, source_facts: true, open_questions: true
   });
   const withPin = pinned ? base.extend({ type: z.literal(pinned.type), usage: z.literal(pinned.usage) }) : base;
@@ -262,6 +263,7 @@ export async function runEnrichment(deps: EnrichDeps, lease: Lease, signal: Abor
     const pinned = capability.suggestion_by === "human";
     const subject: EnrichSubject = {
       title: capability.title, type: capability.type, usage: capability.usage, summary: capability.summary,
+      summary_points: capability.summary_points,
       signals: capability.signals, playbook: capability.playbook, tags: capability.tags,
       source_url: capability.source_url, open_questions: capability.open_questions, pinned
     };
@@ -289,14 +291,14 @@ export async function runEnrichment(deps: EnrichDeps, lease: Lease, signal: Abor
          type = CASE WHEN suggestion_by = 'human' THEN type ELSE $2 END,
          usage = CASE WHEN suggestion_by = 'human' THEN usage ELSE $3 END,
          tags = CASE WHEN suggestion_by = 'human' THEN tags ELSE $4 END,
-         summary = $5, signals = $6, playbook = $7,
+         summary = $5, summary_points = $12, signals = $6, playbook = $7,
          source_facts = $8, score = $9, score_reason = $10, open_questions = $11,
          enriched_at = now(), updated_at = now()
        WHERE id = $1 AND deleted_at IS NULL`,
       [
         capability.id, rewritten.type, rewritten.usage, rewritten.tags.map(stripNul), stripNul(rewritten.summary), jsonStringifyStripNul(rewritten.signals),
         jsonStringifyStripNul(rewritten.playbook), jsonStringifyStripNul(sourceFacts), rewritten.score,
-        stripNul(rewritten.score_reason), jsonStringifyStripNul(rewritten.open_questions)
+        stripNul(rewritten.score_reason), jsonStringifyStripNul(rewritten.open_questions), jsonStringifyStripNul(rewritten.summary_points)
       ]
     );
     if (result.rowCount === 0) {

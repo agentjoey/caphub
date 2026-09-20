@@ -10,7 +10,7 @@ export const SEMANTIC_MIN = 0.65;
 type Q = Pick<Pool, "query">;
 
 const CARD_COLUMNS = `
-  cb.id, cb.capture_id AS "captureId", cb.title, cb.type, cb.summary, cb.signals,
+  cb.id, cb.capture_id AS "captureId", cb.title, cb.type, cb.summary, cb.summary_points AS "summaryPoints", cb.signals,
   cb.suggested_verdict AS "suggestedVerdict", cb.suggested_reason AS "suggestedReason", cb.confidence,
   cb.verdict, cb.verdict_by AS "verdictBy", cb.usage, cb.playbook, cb.tags, cb.source_url AS "sourceUrl",
   cb.serial, cb.scenarios,
@@ -25,7 +25,10 @@ const CARD_COLUMNS = `
 export type CapabilityStatus = "active" | "deprecated" | "superseded";
 
 export interface CapabilityRow {
-  id: string; captureId: string; title: string; type: CapabilityType; summary: string; signals: string[];
+  id: string; captureId: string; title: string; type: CapabilityType; summary: string;
+  /** `**标签。** 说明句` structured detail lines (M3.8) that follow the lead `summary`; `[]` for a card never re-run since migration 012. */
+  summaryPoints: Array<{ label: string; text: string }>;
+  signals: string[];
   suggestedVerdict: "keep" | "discard"; suggestedReason: string; confidence: number;
   verdict: "keep" | "discard" | "pending"; verdictBy: "auto" | "human" | null;
   usage: "integrate" | "reference"; playbook: Playbook; tags: string[]; sourceUrl: string | null;

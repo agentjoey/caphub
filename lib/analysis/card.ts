@@ -128,6 +128,19 @@ export type Overlap = z.infer<typeof overlapSchema>;
 export const NO_OVERLAP: Overlap = { relation: "none", target: null, reason: "" };
 
 /**
+ * One `**标签。** 说明句` line of a card's structured summary (M3.8 design decision: prose in
+ * one block is the thing being replaced) -- `label` is the short bolded lead-in (e.g. "定位"、
+ * "适用场景"), `text` is the one-sentence explanation that follows it. Rendering (Task 2) joins
+ * these as Markdown; this schema only constrains their lengths so a model can't dump a whole
+ * paragraph into a single point.
+ */
+export const summaryPointSchema = z.object({
+  label: z.string().min(1).max(8),
+  text: z.string().min(1).max(60)
+});
+export type SummaryPoint = z.infer<typeof summaryPointSchema>;
+
+/**
  * The bare object shape, without the cross-field superRefine below. Exported so
  * `cardSchemaFor` can `.extend()` a field (ZodObject supports this; the ZodEffects
  * produced by `.superRefine()` does not) and then re-apply the same cross-field rules.
@@ -135,7 +148,19 @@ export const NO_OVERLAP: Overlap = { relation: "none", target: null, reason: "" 
 export const cardObjectSchema = z.object({
   title: z.string().min(1).max(60),
   type: capabilityTypeSchema,
-  summary: z.string().min(1).max(800),
+  /**
+   * The lead: one short sentence framing what this capability is, read by every list row,
+   * search hit and un-enriched card (controller ruling: KEPT, not replaced by
+   * `summary_points`) -- the structured detail now lives in `summary_points` instead of being
+   * crammed into this field, hence the tightened cap (was 800).
+   */
+  summary: z.string().min(1).max(120),
+  /**
+   * 3–5 `**标签。** 说明句` lines that follow the lead (munderdiffl.in's pattern, per the M3.8
+   * brief) -- each point is one short, scannable fact, never a paragraph. Defaults are not
+   * provided: every card (first pass and enrich rewrite) must produce these explicitly.
+   */
+  summary_points: z.array(summaryPointSchema).min(3).max(5),
   signals: z.array(z.string().max(200)).min(2).max(3),
   suggested_verdict: z.enum(["keep", "discard"]),
   suggested_reason: z.string().min(1).max(300),

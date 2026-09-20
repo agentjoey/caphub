@@ -66,7 +66,9 @@ export function reasonPrompt(input: {
       : "库里没有相似能力。",
     `已有标签（优先复用，找到贴切的就不要新造）：${input.existingTags.join(", ") || "（空）"}`,
     `候选应用场景（slug（中文名：关键词…））：${scenariosPromptList(input.scenarios)}`,
-    "请输出 CapabilityCard：title ≤ 30 字的一句话；type；summary 写这个能力本身——它是什么、解决什么问题、怎么用、边界/局限在哪（≤ 300 字）；summary 只写关于能力的事实性描述，绝不能复述你是怎么分析/核实的，禁止出现「经联网核实」「未直接证实」「待实测」这类过程叙述占据正文；来源是否可信、有没有核实到，只放进 signals 里恰好一条，不得写进 summary；signals 给 2–3 条价值信号，其中恰好一条专门讲来源可信度/是否已核实，其余讲解决什么场景、与库内谁重叠等；suggested_verdict 与 suggested_reason；confidence 是你对该建议的把握（0–1）；usage 在 integrate（可直接拿来用）与 reference（值得借鉴后自研）之间选；playbook 按 usage/type 给可执行内容：integrate 给 install 命令、repo、prompt 全文；reference 给借鉴要点；experience 类型必须把核心内容本身写进 content；" +
+    "请输出 CapabilityCard：title ≤ 30 字的一句话；type；summary 是引子——一句话（≤ 120 字）说明这个能力是什么，不展开细节，细节交给 summary_points；summary 只写关于能力的事实性描述，绝不能复述你是怎么分析/核实的，禁止出现「经联网核实」「未直接证实」「待实测」这类过程叙述占据正文；来源是否可信、有没有核实到，只放进 signals 里恰好一条，不得写进 summary；" +
+      "summary_points 给 3–5 条 `{ label, text }`：label 是不超过 8 字的短标签（如「定位」「适用场景」「限制」「用法」），text 是不超过 60 字的一句说明句，呈现为 `**label。** text` 的效果；每条只讲一件事——它解决什么问题、怎么用、适合谁、边界/局限在哪等，绝不能把一整段话塞进一条 point，也不能让多条 point 重复同一件事；这部分承接 summary 留白的细节，合起来才是完整的能力说明；" +
+      "signals 给 2–3 条价值信号，其中恰好一条专门讲来源可信度/是否已核实，其余讲解决什么场景、与库内谁重叠等；suggested_verdict 与 suggested_reason；confidence 是你对该建议的把握（0–1）；usage 在 integrate（可直接拿来用）与 reference（值得借鉴后自研）之间选；playbook 按 usage/type 给可执行内容：integrate 给 install 命令、repo、prompt 全文；reference 给借鉴要点；experience 类型必须把核心内容本身写进 content；" +
       `tags 给 1–6 个标签，每个必须是英文小写单词或用连字符连接的短语（如 web-scraping、time-series），不能是中文，不能是空格分隔的多词（"Web Scraping" 不合法，要写成 web-scraping），也不能是 ${RESERVED_TAGS.join("、")} 这类类型/用途词；已有贴切的标签要复用，不要为同一含义新造近义词；当能力的接入方式明确时，必须使用这四个固定标签中的一个或多个（${INTERFACE_TAGS.join("、")}），不要自造近义词（例如 mcp-server、python-library、cli-tool、skill 都不允许）；接入方式标签与主题标签共用 1–6 个标签的名额，不额外增加数量；` +
       "scenarios 从候选应用场景的 slug 中选出 1–3 个这个能力最可能被用在的应用场景，按贴切程度排列，只能用给出的 slug，不要自造；" +
       "source_url 给最可信的来源链接或 null。",
@@ -175,6 +177,7 @@ export function deepSynthesizePrompt(subject: DeepSubject, sources: DeepSource[]
 /** The subset of an existing CapabilityCard an enrichment run rewrites from. */
 export interface EnrichSubject {
   title: string; type: CapabilityType; usage: "integrate" | "reference"; summary: string;
+  summary_points: Card["summary_points"];
   signals: string[]; playbook: Card["playbook"]; tags: string[]; source_url: string | null;
   open_questions: string[];
   /**
@@ -215,7 +218,7 @@ export function enrichPrompt(subject: EnrichSubject, canonical: CanonicalResult,
     subject.pinned
       ? `硬性约束：这张卡片的 type/usage/tags 已由人工确定（type=${subject.type}、usage=${subject.usage}、tags=${subject.tags.join(", ")}），本次改写必须原样使用这三项，不得改判；playbook 必须按这个 type/usage 的形状组织内容。`
       : "",
-    `原有卡片：\n标题：${subject.title}\n类型：${subject.type}\n用途：${subject.usage}\n摘要：${subject.summary}\n价值信号：${subject.signals.join("；")}\n标签：${subject.tags.join(", ")}\nPlaybook：${JSON.stringify(subject.playbook)}\n来源链接：${subject.source_url ?? "（无）"}`,
+    `原有卡片：\n标题：${subject.title}\n类型：${subject.type}\n用途：${subject.usage}\n摘要：${subject.summary}\n摘要要点：${subject.summary_points.map((p) => `**${p.label}。** ${p.text}`).join(" ")}\n价值信号：${subject.signals.join("；")}\n标签：${subject.tags.join(", ")}\nPlaybook：${JSON.stringify(subject.playbook)}\n来源链接：${subject.source_url ?? "（无）"}`,
     subject.open_questions.length ? `第一轮遗留的待核实问题：${subject.open_questions.join("；")}` : "第一轮没有遗留待核实问题。",
     canonicalPromptText(canonical),
     searchResults.length
@@ -224,7 +227,8 @@ export function enrichPrompt(subject: EnrichSubject, canonical: CanonicalResult,
     [
       "请重新输出改写后的卡片字段：",
       subject.pinned ? "" : "type 与 usage 按上面的类型定义与 integrate（可直接拿来用）/reference（值得借鉴后自研）之间重新判断；",
-      "summary 写这个能力本身——它是什么、解决什么问题、怎么用、边界/局限在哪（≤ 300 字）；summary 只写关于能力的事实性描述，绝不能复述你是怎么核实/抓取/搜索的，禁止出现「经核实」「未直接证实」「抓取失败」这类过程叙述占据正文；来源是否可信、有没有核实到，只放进 signals 里恰好一条，不得写进 summary；",
+      "summary 是引子：一句话（≤ 120 字）说明这个能力是什么，不展开细节，细节交给 summary_points；只写关于能力的事实性描述，绝不能复述你是怎么核实/抓取/搜索的，禁止出现「经核实」「未直接证实」「抓取失败」这类过程叙述占据正文；来源是否可信、有没有核实到，只放进 signals 里恰好一条，不得写进 summary；",
+      "summary_points 给 3–5 条 `{ label, text }`：label 是不超过 8 字的短标签（如「定位」「适用场景」「限制」「用法」），text 是不超过 60 字的一句说明句，呈现为 `**label。** text` 的效果；每条只讲一件事——它解决什么问题、怎么用、适合谁、边界/局限在哪等，绝不能把一整段话塞进一条 point，也不能让多条 point 重复同一件事；这部分承接 summary 留白的细节，合起来才是完整的能力说明；",
       "signals 给 2–3 条价值信号，其中恰好一条专门讲来源可信度/是否已核实，其余讲解决什么场景、适用边界等；",
       "playbook 按 usage/type 给可执行内容：integrate 给 install 命令、repo、prompt 全文；reference 给借鉴要点；experience 类型必须把核心内容本身写进 content；",
       subject.pinned ? "" : `tags 给 1–6 个标签，规则同第一轮：必须是英文小写单词或用连字符连接的短语，不能是中文，不能是 ${RESERVED_TAGS.join("、")} 这类类型/用途词；接入方式明确时使用 ${INTERFACE_TAGS.join("、")} 中的固定标签；已有贴切的标签要复用；`

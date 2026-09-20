@@ -4,6 +4,11 @@ import { cardSchema, deepAnalysisSchema, finalizeSourceFacts, isValidTag, scoreR
 
 const valid = {
   title: "用 Playwright 生成 axe 可访问性报告", type: "skill", summary: "一段摘要",
+  summary_points: [
+    { label: "定位", text: "CI 里自动生成 axe 可访问性报告的 Playwright 用法" },
+    { label: "适用", text: "已有 e2e 套件、想顺带跑无障碍检查的项目" },
+    { label: "限制", text: "只能查出规则能覆盖的问题，不能替代人工走查" }
+  ],
   signals: ["解决 CI 里可访问性回归", "与库里已有 e2e-a11y 重叠"],
   suggested_verdict: "keep", suggested_reason: "有可执行命令", confidence: 0.9,
   usage: "integrate", playbook: { kind: "integrate", install: ["npm i -D @axe-core/playwright"], repo: null, prompt_text: null },
@@ -185,6 +190,65 @@ describe("cardSchema open_questions", () => {
   it("stays representable as JSON Schema for providers", () => {
     const jsonSchema = z.toJSONSchema(cardSchema) as { properties?: Record<string, unknown> };
     expect(jsonSchema.properties?.open_questions).toMatchObject({ type: "array", maxItems: 3 });
+  });
+});
+
+describe("cardSchema summary", () => {
+  it("accepts a summary up to 120 chars", () => {
+    expect(cardSchema.parse({ ...valid, summary: "a".repeat(120) }).summary).toBe("a".repeat(120));
+  });
+  it("rejects a summary over 120 chars", () => {
+    expect(() => cardSchema.parse({ ...valid, summary: "a".repeat(121) })).toThrow();
+  });
+});
+
+describe("cardSchema summary_points", () => {
+  it("accepts 3 points (the minimum)", () => {
+    const summary_points = [{ label: "定位", text: "a" }, { label: "适用", text: "b" }, { label: "限制", text: "c" }];
+    expect(cardSchema.parse({ ...valid, summary_points }).summary_points).toEqual(summary_points);
+  });
+  it("accepts 5 points (the maximum)", () => {
+    const summary_points = Array.from({ length: 5 }, (_, i) => ({ label: `点${i}`, text: `说明 ${i}` }));
+    expect(cardSchema.parse({ ...valid, summary_points }).summary_points).toEqual(summary_points);
+  });
+  it("rejects 2 points (below the minimum)", () => {
+    const summary_points = [{ label: "定位", text: "a" }, { label: "适用", text: "b" }];
+    expect(() => cardSchema.parse({ ...valid, summary_points })).toThrow();
+  });
+  it("rejects 6 points (above the maximum)", () => {
+    const summary_points = Array.from({ length: 6 }, (_, i) => ({ label: `点${i}`, text: `说明 ${i}` }));
+    expect(() => cardSchema.parse({ ...valid, summary_points })).toThrow();
+  });
+  it("rejects a label over 8 chars", () => {
+    const summary_points = [
+      { label: "一二三四五六七八九", text: "a" },
+      ...valid.summary_points.slice(1)
+    ];
+    expect(() => cardSchema.parse({ ...valid, summary_points })).toThrow();
+  });
+  it("accepts a label of exactly 8 chars", () => {
+    const summary_points = [
+      { label: "一二三四五六七八", text: "a" },
+      ...valid.summary_points.slice(1)
+    ];
+    expect(cardSchema.parse({ ...valid, summary_points }).summary_points[0].label).toBe("一二三四五六七八");
+  });
+  it("rejects a text over 60 chars", () => {
+    const summary_points = [{ label: "定位", text: "a".repeat(61) }, ...valid.summary_points.slice(1)];
+    expect(() => cardSchema.parse({ ...valid, summary_points })).toThrow();
+  });
+  it("accepts a text of exactly 60 chars", () => {
+    const summary_points = [{ label: "定位", text: "a".repeat(60) }, ...valid.summary_points.slice(1)];
+    expect(cardSchema.parse({ ...valid, summary_points }).summary_points[0].text).toBe("a".repeat(60));
+  });
+  it("requires summary_points (missing field fails)", () => {
+    const { summary_points: _sp, ...withoutPoints } = valid as typeof valid & { summary_points: unknown };
+    expect(() => cardSchema.parse(withoutPoints)).toThrow();
+  });
+  it("stays representable as JSON Schema for providers", () => {
+    const jsonSchema = z.toJSONSchema(cardSchema) as { properties?: Record<string, unknown> };
+    expect(jsonSchema.properties?.summary_points).toMatchObject({ type: "array", minItems: 3, maxItems: 5 });
+    expect(jsonSchema.properties?.summary).toMatchObject({ type: "string", maxLength: 120 });
   });
 });
 

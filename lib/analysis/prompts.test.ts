@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { INTERFACE_TAGS, RESERVED_TAGS } from "./card";
-import { CAPABILITY_TYPE_DEFINITIONS, backfillScorePrompt, deepSynthesizePrompt, reasonPrompt } from "./prompts";
+import { CAPABILITY_TYPE_DEFINITIONS, backfillScorePrompt, deepSynthesizePrompt, enrichPrompt, reasonPrompt, type EnrichSubject } from "./prompts";
 
 const material = { kind: "text" as const, text: "hello" };
 const scenarios = [
@@ -116,13 +116,21 @@ describe("reasonPrompt", () => {
     expect(prompt).toMatch(/overlap\.target 必须为 null/);
   });
 
-  it("tells summary to describe the capability itself, not the analysis process", () => {
+  it("tells summary it's the lead only, not the analysis process", () => {
     const prompt = reasonPrompt({ material, extraction: null, sources: [], similar: [], existingTags: [], scenarios });
-    expect(prompt).toMatch(/summary 写这个能力本身/);
-    expect(prompt).toMatch(/它是什么、解决什么问题、怎么用、边界\/局限在哪/);
+    expect(prompt).toMatch(/summary 是引子/);
+    expect(prompt).toMatch(/不展开细节，细节交给 summary_points/);
     expect(prompt).toContain("经联网核实");
     expect(prompt).toContain("未直接证实");
     expect(prompt).toContain("待实测");
+  });
+
+  it("tells summary_points to give 3–5 short label+sentence points, one fact each, never a whole paragraph in one point", () => {
+    const prompt = reasonPrompt({ material, extraction: null, sources: [], similar: [], existingTags: [], scenarios });
+    expect(prompt).toMatch(/summary_points 给 3–5 条/);
+    expect(prompt).toMatch(/label 是不超过 8 字的短标签/);
+    expect(prompt).toMatch(/text 是不超过 60 字的一句说明句/);
+    expect(prompt).toMatch(/绝不能把一整段话塞进一条 point/);
   });
 
   it("confines provenance/confidence to exactly one signals entry, never the summary", () => {
@@ -216,5 +224,33 @@ describe("deepSynthesizePrompt", () => {
     const prompt = deepSynthesizePrompt(subject, [], []);
     expect(prompt).toContain("原始检索结果：无。");
     expect(prompt).toMatch(/cases 必须是空数组/);
+  });
+});
+
+describe("enrichPrompt", () => {
+  const subject: EnrichSubject = {
+    title: "Scrapling", type: "tool", usage: "integrate", summary: "一个抓取库",
+    summary_points: [{ label: "定位", text: "自适应反爬抓取库" }],
+    signals: ["s1"], playbook: { kind: "integrate", install: ["pip install scrapling"], repo: null, prompt_text: null },
+    tags: ["web-scraping"], source_url: "https://github.com/a/b", open_questions: [], pinned: false
+  };
+
+  it("includes the subject's existing summary_points, rendered as **label。** text", () => {
+    const prompt = enrichPrompt(subject, null, []);
+    expect(prompt).toContain("**定位。** 自适应反爬抓取库");
+  });
+
+  it("tells summary it's the lead only (≤120 chars), not a process narration", () => {
+    const prompt = enrichPrompt(subject, null, []);
+    expect(prompt).toMatch(/summary 是引子：一句话（≤ 120 字）说明这个能力是什么，不展开细节，细节交给 summary_points/);
+    expect(prompt).toMatch(/禁止出现「经核实」「未直接证实」「抓取失败」这类过程叙述占据正文/);
+  });
+
+  it("tells summary_points to give 3–5 short label+sentence points, one fact each, forbidding a whole paragraph in one point", () => {
+    const prompt = enrichPrompt(subject, null, []);
+    expect(prompt).toMatch(/summary_points 给 3–5 条 `\{ label, text \}`/);
+    expect(prompt).toMatch(/label 是不超过 8 字的短标签/);
+    expect(prompt).toMatch(/text 是不超过 60 字的一句说明句/);
+    expect(prompt).toMatch(/绝不能把一整段话塞进一条 point，也不能让多条 point 重复同一件事/);
   });
 });

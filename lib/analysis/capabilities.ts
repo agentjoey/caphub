@@ -29,12 +29,13 @@ export async function upsertCapability(
        SELECT verdict, deleted_at FROM caphub_v2.capabilities WHERE capture_id = $2
      ), upsert AS (
        INSERT INTO caphub_v2.capabilities
-         (id, capture_id, run_id, title, type, summary, signals, suggested_verdict, suggested_reason, confidence,
+         (id, capture_id, run_id, title, type, summary, summary_points, signals, suggested_verdict, suggested_reason, confidence,
           verdict, verdict_by, verdict_at, usage, playbook, tags, source_url, scenarios, serial, score, score_reason, source_facts, overlap, open_questions)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CASE WHEN $12::text IS NULL THEN NULL ELSE now() END, $13, $14, $15, $16, $17,
+       VALUES ($1, $2, $3, $4, $5, $6, $23, $7, $8, $9, $10, $11, $12, CASE WHEN $12::text IS NULL THEN NULL ELSE now() END, $13, $14, $15, $16, $17,
          NULL, $18, $19, $20, $21, $22)
        ON CONFLICT (capture_id) DO UPDATE SET
          run_id = excluded.run_id, title = excluded.title, summary = excluded.summary,
+         summary_points = excluded.summary_points,
          signals = excluded.signals, suggested_verdict = excluded.suggested_verdict, suggested_reason = excluded.suggested_reason,
          confidence = excluded.confidence, usage = excluded.usage, playbook = excluded.playbook, tags = excluded.tags,
          source_url = excluded.source_url, scenarios = excluded.scenarios, source_facts = excluded.source_facts,
@@ -67,7 +68,7 @@ export async function upsertCapability(
       c.suggested_verdict, stripNul(c.suggested_reason), c.confidence, row.verdict, row.verdictBy, c.usage, jsonStringifyStripNul(c.playbook),
       c.tags.map(stripNul), c.source_url === null ? null : stripNul(c.source_url), c.scenarios.map(stripNul),
       c.score, stripNul(c.score_reason), jsonStringifyStripNul(c.source_facts), jsonStringifyStripNul(c.overlap),
-      jsonStringifyStripNul(c.open_questions)]);
+      jsonStringifyStripNul(c.open_questions), jsonStringifyStripNul(c.summary_points)]);
   const out = r.rows[0];
   // Brand-new (or previously-non-keep, now-keep, still-serial-less) rows get their serial
   // assigned here, after the upsert, instead of via nextval() in VALUES — the WHERE clause

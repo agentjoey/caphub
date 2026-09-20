@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { createPipelineDeps, runPipeline, type PipelineDeps } from "./pipeline";
 
 const card = {
-  title: "t", type: "prompt", summary: "s", signals: ["a", "b"], suggested_verdict: "keep", suggested_reason: "r",
+  title: "t", type: "prompt", summary: "s",
+  summary_points: [{ label: "l1", text: "t1" }, { label: "l2", text: "t2" }, { label: "l3", text: "t3" }],
+  signals: ["a", "b"], suggested_verdict: "keep", suggested_reason: "r",
   confidence: 0.9, usage: "integrate", playbook: { kind: "integrate", install: [], repo: null, prompt_text: "p" }, tags: ["x"], source_url: null,
   scenarios: ["coding"], score: 4, score_reason: "r", source_facts: {}, overlap: { relation: "none", target: null, reason: "" }
 };

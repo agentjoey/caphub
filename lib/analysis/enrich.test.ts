@@ -8,10 +8,12 @@ const lease = { runId: "run_1", captureId: "cap_1", pipeline: "mixed" as const, 
 
 const capabilityRow: {
   id: string; title: string; type: string; usage: "integrate" | "reference"; summary: string;
+  summary_points: Array<{ label: string; text: string }>;
   signals: string[]; playbook: Playbook; tags: string[]; source_url: string | null;
   open_questions: string[]; suggestion_by: "auto" | "human";
 } = {
   id: "cab_1", title: "Some Tool", type: "tool", usage: "integrate", summary: "A tool.",
+  summary_points: [{ label: "l1", text: "t1" }, { label: "l2", text: "t2" }, { label: "l3", text: "t3" }],
   signals: ["s1", "s2"], playbook: { kind: "integrate", install: ["npm i x"], repo: "https://github.com/a/b", prompt_text: null },
   tags: ["cli"], source_url: "https://github.com/a/b", open_questions: ["免费额度上限是多少", "是否需要登录"],
   suggestion_by: "auto"
@@ -25,6 +27,7 @@ const canonicalRepo: CanonicalResult = {
 const rewrittenValue = {
   type: "tool", usage: "integrate",
   summary: "Rewritten summary describing the capability.",
+  summary_points: [{ label: "l1", text: "t1" }, { label: "l2", text: "t2" }, { label: "l3", text: "t3" }],
   signals: ["provenance verified against the canonical source", "solves X for Joey's workflow"],
   playbook: { kind: "integrate", install: ["npm i x"], repo: "https://github.com/a/b", prompt_text: null },
   tags: ["cli", "automation"],
@@ -213,7 +216,7 @@ describe("runEnrichment", () => {
     for (const forbidden of ["verdict", "verdict_by", "status", "progress", "deep_analysis", "notified_at"]) {
       expect(updates[0].text).not.toMatch(new RegExp(`\\b${forbidden}\\b`));
     }
-    expect(updates[0].values).toHaveLength(11);
+    expect(updates[0].values).toHaveLength(12);
   });
 
   it("throws CAPABILITY_NOT_FOUND when the capture has no keep, non-deleted capability row", async () => {

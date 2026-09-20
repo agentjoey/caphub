@@ -3,7 +3,9 @@ import type { Card } from "./card";
 import { upsertCapability } from "./capabilities";
 
 const card: Card = {
-  title: "t", type: "prompt", summary: "s", signals: ["a", "b"], suggested_verdict: "keep", suggested_reason: "r",
+  title: "t", type: "prompt", summary: "s",
+  summary_points: [{ label: "l1", text: "t1" }, { label: "l2", text: "t2" }, { label: "l3", text: "t3" }],
+  signals: ["a", "b"], suggested_verdict: "keep", suggested_reason: "r",
   confidence: 0.9, usage: "integrate", playbook: { kind: "integrate", install: [], repo: null, prompt_text: "p" }, tags: ["x"], source_url: null,
   scenarios: ["coding"], score: 4, score_reason: "r", source_facts: {}, overlap: { relation: "none", target: null, reason: "" },
   open_questions: []
@@ -119,6 +121,24 @@ describe("upsertCapability", () => {
     expect(params).toContain(JSON.stringify(open_questions));
   });
 
+  it("inserts summary_points and overwrites it on rerun", async () => {
+    let sql = "";
+    let params: unknown[] = [];
+    const pool = {
+      query: async (text: string, values: unknown[] = []) => {
+        if (sql === "") { sql = text; params = values; }
+        return { rows: [{ id: "cab_1", verdict: "keep", previous_verdict: null, deleted: false }] };
+      }
+    };
+    const summary_points: Card["summary_points"] = [
+      { label: "定位", text: "一句话定位" }, { label: "适用", text: "适用场景" }, { label: "限制", text: "已知限制" }
+    ];
+    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card: { ...card, summary_points }, verdict: "keep", verdictBy: "auto" });
+    expect(sql).toContain("summary_points");
+    expect(sql).toContain("summary_points = excluded.summary_points");
+    expect(params).toContain(JSON.stringify(summary_points));
+  });
+
   it("never evaluates nextval() in the INSERT's VALUES, so a conflicting re-run can't burn a serial", async () => {
     const calls: string[] = [];
     const pool = {
@@ -130,7 +150,7 @@ describe("upsertCapability", () => {
     await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card, verdict: "keep", verdictBy: "auto" });
     const [upsertSql, followUpSql] = calls;
     // VALUES always passes a literal NULL for serial; nextval() never appears in the INSERT list.
-    expect(upsertSql).toMatch(/VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11, \$12,[\s\S]*?\n\s*NULL, \$18, \$19, \$20, \$21, \$22\)/);
+    expect(upsertSql).toMatch(/VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$23, \$7, \$8, \$9, \$10, \$11, \$12,[\s\S]*?\n\s*NULL, \$18, \$19, \$20, \$21, \$22\)/);
     expect(upsertSql.split("VALUES")[1]).not.toContain("nextval");
     // ON CONFLICT keeps whatever serial the row already has.
     expect(upsertSql).toContain("serial = coalesce(caphub_v2.capabilities.serial, excluded.serial)");
@@ -176,7 +196,8 @@ describe("upsertCapability", () => {
       title: "t\u0000itle", summary: "s\u0000ummary", signals: ["a\u0000", "b"], suggested_reason: "r\u0000eason",
       playbook: { kind: "integrate", install: [], repo: null, prompt_text: "p\u0000" }, tags: ["x\u0000"], source_url: "https://a.b/\u0000",
       scenarios: ["coding\u0000"], score_reason: "s\u0000core reason", source_facts: { license: "M\u0000IT" },
-      overlap: { relation: "duplicate", target: "TOL-0009", reason: "重\u0000复" }
+      overlap: { relation: "duplicate", target: "TOL-0009", reason: "重\u0000复" },
+      summary_points: [{ label: "l\u00001", text: "t\u00001" }, { label: "l2", text: "t2" }, { label: "l3", text: "t3" }]
     };
     await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card: dirty, verdict: "keep", verdictBy: "auto" });
     for (const p of params) {
@@ -194,5 +215,8 @@ describe("upsertCapability", () => {
     expect(params[18]).toBe("score reason");
     expect(JSON.parse(params[19] as string)).toEqual({ license: "MIT" });
     expect(JSON.parse(params[20] as string)).toEqual({ relation: "duplicate", target: "TOL-0009", reason: "重复" });
+    expect(JSON.parse(params[22] as string)).toEqual([
+      { label: "l1", text: "t1" }, { label: "l2", text: "t2" }, { label: "l3", text: "t3" }
+    ]);
   });
 });
