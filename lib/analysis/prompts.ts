@@ -63,7 +63,7 @@ export function reasonPrompt(input: {
     `已有标签（优先复用，找到贴切的就不要新造）：${input.existingTags.join(", ") || "（空）"}`,
     `候选应用场景（slug（中文名：关键词…））：${scenariosPromptList(input.scenarios)}`,
     "请输出 CapabilityCard：title ≤ 30 字的一句话；type；summary 是对整个分析的完整摘要（结论 + 依据，≤ 300 字）；signals 给 2–3 条价值信号（如解决什么场景、与库内谁重叠、来源可信度）；suggested_verdict 与 suggested_reason；confidence 是你对该建议的把握（0–1）；usage 在 integrate（可直接拿来用）与 reference（值得借鉴后自研）之间选；playbook 按 usage/type 给可执行内容：integrate 给 install 命令、repo、prompt 全文；reference 给借鉴要点；experience 类型必须把核心内容本身写进 content；" +
-      `tags 给 1–6 个标签，每个必须是英文小写单词或用连字符连接的短语（如 web-scraping、time-series），不能是中文，不能是空格分隔的多词（"Web Scraping" 不合法，要写成 web-scraping），也不能是 ${RESERVED_TAGS.join("、")} 这类类型/用途词；已有贴切的标签要复用，不要为同一含义新造近义词；当能力的接入方式明确时，必须使用这四个固定标签中的一个或多个（${INTERFACE_TAGS.join("、")}），不要自造近义词（例如 mcp-server、python-library、cli-tool、skill 都不允许）；这些标签与主题标签并列，不占用 1–6 个标签的额外名额之外的规则；` +
+      `tags 给 1–6 个标签，每个必须是英文小写单词或用连字符连接的短语（如 web-scraping、time-series），不能是中文，不能是空格分隔的多词（"Web Scraping" 不合法，要写成 web-scraping），也不能是 ${RESERVED_TAGS.join("、")} 这类类型/用途词；已有贴切的标签要复用，不要为同一含义新造近义词；当能力的接入方式明确时，必须使用这四个固定标签中的一个或多个（${INTERFACE_TAGS.join("、")}），不要自造近义词（例如 mcp-server、python-library、cli-tool、skill 都不允许）；接入方式标签与主题标签共用 1–6 个标签的名额，不额外增加数量；` +
       "scenarios 从候选应用场景的 slug 中选出 1–3 个这个能力最可能被用在的应用场景，按贴切程度排列，只能用给出的 slug，不要自造；" +
       "source_url 给最可信的来源链接或 null。",
     `score 给这个能力对 Joey 的 AI 价值打 1–5 分整数，${SCORE_RUBRIC}score_reason 用一句不超过 80 字的中文说明打分依据。`,
