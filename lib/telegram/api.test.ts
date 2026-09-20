@@ -65,6 +65,28 @@ describe("createTelegramApi", () => {
     expect(body).toMatchObject({ chat_id: 555, message_id: 7, text: "edited", parse_mode: "HTML" });
   });
 
+  it("editMessageText omits reply_markup entirely when not given (Telegram then keeps the existing keyboard)", async () => {
+    let body: Record<string, unknown> = {};
+    const fetchFn = (async (_u: string, i: RequestInit) => {
+      body = JSON.parse(i.body as string);
+      return new Response(JSON.stringify({ ok: true, result: true }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const api = createTelegramApi({ token: TOKEN, fetch: fetchFn });
+    await api.editMessageText({ chatId: 555, messageId: 7, text: "edited" });
+    expect(body).not.toHaveProperty("reply_markup");
+  });
+
+  it("editMessageText sends an explicit empty inline_keyboard when asked to remove buttons", async () => {
+    let body: Record<string, unknown> = {};
+    const fetchFn = (async (_u: string, i: RequestInit) => {
+      body = JSON.parse(i.body as string);
+      return new Response(JSON.stringify({ ok: true, result: true }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const api = createTelegramApi({ token: TOKEN, fetch: fetchFn });
+    await api.editMessageText({ chatId: 555, messageId: 7, text: "edited", replyMarkup: { inline_keyboard: [] } });
+    expect(body).toMatchObject({ reply_markup: { inline_keyboard: [] } });
+  });
+
   it("answerCallbackQuery sends callback_query_id", async () => {
     let body: Record<string, unknown> = {};
     const fetchFn = (async (_u: string, i: RequestInit) => {

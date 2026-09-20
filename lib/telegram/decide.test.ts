@@ -105,7 +105,7 @@ describe("handleCallback", () => {
     expect(result).toEqual({ outcome: "decided", action: "keep", capabilityId: "cab_1" });
     expect(answered[0]).toMatchObject({ callbackQueryId: "cbq_1", text: "已保留" });
     expect(edited[0]).toMatchObject({ chatId: 1000, messageId: 500 });
-    expect((edited[0] as { replyMarkup?: unknown }).replyMarkup).toBeUndefined();
+    expect((edited[0] as { replyMarkup?: unknown }).replyMarkup).toEqual({ inline_keyboard: [] });
     expect((edited[0] as { text: string }).text).toContain("已保留");
     expect(calls.some((c) => c.text.startsWith("UPDATE caphub_v2.capabilities cb SET verdict"))).toBe(true);
   });
@@ -122,6 +122,7 @@ describe("handleCallback", () => {
     expect(result).toEqual({ outcome: "decided", action: "discard", capabilityId: "cab_1" });
     expect(answered[0]).toMatchObject({ text: "已丢弃" });
     expect((edited[0] as { text: string }).text).toContain("已丢弃");
+    expect((edited[0] as { replyMarkup?: unknown }).replyMarkup).toEqual({ inline_keyboard: [] });
   });
 
   it("reruns: answers with a requeue toast, edits to the requeue text, and clears notified_at", async () => {
@@ -135,6 +136,7 @@ describe("handleCallback", () => {
     expect(result).toEqual({ outcome: "decided", action: "rerun", capabilityId: "cab_1" });
     expect(answered[0]).toMatchObject({ text: "已重新排队" });
     expect(edited[0]).toMatchObject({ chatId: 1000, messageId: 500, text: "已重新排队，分析中…" });
+    expect((edited[0] as { replyMarkup?: unknown }).replyMarkup).toEqual({ inline_keyboard: [] });
     const notifiedUpdate = calls.find((c) => c.text.startsWith("UPDATE caphub_v2.capabilities SET notified_at = NULL"));
     expect(notifiedUpdate?.values).toEqual(["cab_1"]);
   });
@@ -146,7 +148,7 @@ describe("handleCallback", () => {
 
     expect(result).toEqual({ outcome: "conflict", capabilityId: "cab_1" });
     expect(answered[0]).toMatchObject({ text: "已在别处处理" });
-    expect((edited[0] as { replyMarkup?: unknown }).replyMarkup).toBeUndefined();
+    expect((edited[0] as { replyMarkup?: unknown }).replyMarkup).toEqual({ inline_keyboard: [] });
     expect((edited[0] as { text: string }).text).toContain("已保留");
   });
 

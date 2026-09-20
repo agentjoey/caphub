@@ -62,11 +62,14 @@ describe("runNotifyTick", () => {
     expect(result).toBe("notified");
     expect(api.edited).toHaveLength(1);
     expect(api.sent).toHaveLength(0);
-    const [edit] = api.edited as Array<{ chatId: unknown; messageId: unknown; text: string }>;
+    const [edit] = api.edited as Array<{ chatId: unknown; messageId: unknown; text: string; replyMarkup?: unknown }>;
     expect(edit.chatId).toBe("1000");
     expect(edit.messageId).toBe(500);
     expect(edit.text).toContain("✅ 已保留 · SKL-0007");
     expect(edit.text).toContain("场景：编程");
+    // A keep card has no buttons — Telegram keeps whatever keyboard the message already had
+    // (e.g. the pending card's 保留/丢弃/重跑分析 row) unless reply_markup is explicitly emptied.
+    expect(edit.replyMarkup).toEqual({ inline_keyboard: [] });
     const notifyUpdate = calls.find((c) => c.text.includes("UPDATE caphub_v2.capabilities SET notified_at"));
     expect(notifyUpdate?.values).toEqual(["cab_1"]);
   });
@@ -80,10 +83,20 @@ describe("runNotifyTick", () => {
     const { pool } = fakePool(rows);
     const api = fakeApi();
     await runNotifyTick({ pool, api, ownerChatId: 1000 }, new AbortController().signal);
-    const texts = (api.edited as Array<{ text: string }>).map((e) => e.text);
+    const edits = api.edited as Array<{ text: string; replyMarkup?: { inline_keyboard: unknown[] } }>;
+    const texts = edits.map((e) => e.text);
     expect(texts.some((t) => t.startsWith("🗑 已丢弃"))).toBe(true);
     expect(texts.some((t) => t.includes("建议：保留"))).toBe(true);
     expect(texts.some((t) => t === "❌ 分析失败 · 模型响应超时")).toBe(true);
+
+    const discard = edits.find((e) => e.text.startsWith("🗑 已丢弃"))!;
+    expect(discard.replyMarkup).toEqual({ inline_keyboard: [] });
+    // Pending and failed cards keep their real (non-empty) keyboards — only the no-buttons
+    // (decided) case should get the buttons-removed override.
+    const pending = edits.find((e) => e.text.includes("建议：保留"))!;
+    expect(pending.replyMarkup?.inline_keyboard.length).toBeGreaterThan(0);
+    const failed = edits.find((e) => e.text === "❌ 分析失败 · 模型响应超时")!;
+    expect(failed.replyMarkup?.inline_keyboard.length).toBeGreaterThan(0);
   });
 
   it("falls back to sendMessage when there is no stored receipt message id, and records the new id", async () => {

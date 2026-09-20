@@ -3,7 +3,7 @@ import { loadScenarios } from "../analysis/scenarios";
 import type { Pipeline } from "../config";
 import { getDict } from "../i18n";
 import { decide, requestRerun } from "../library/actions";
-import type { TelegramApi } from "./api";
+import type { InlineKeyboardMarkup, TelegramApi } from "./api";
 import { buildFormatInput, loadCandidateById, type Candidate } from "./notify";
 import { formatResult } from "./format";
 import type { ClassifiedUpdate, DecisionAction } from "./router";
@@ -37,6 +37,13 @@ const TOAST = {
 
 const REQUEUE_TEXT = "已重新排队，分析中…";
 
+/**
+ * Telegram keeps an existing inline keyboard when `reply_markup` is omitted from an
+ * `editMessageText` call (see api.ts) — an *explicit* empty keyboard is required to actually
+ * remove the 保留/丢弃/重跑分析 buttons.
+ */
+const NO_BUTTONS: InlineKeyboardMarkup = { inline_keyboard: [] };
+
 async function loadScenarioLabels(pool: Pool): Promise<Map<string, string>> {
   const scenarios = await loadScenarios(pool);
   return new Map(scenarios.map((s) => [s.slug, s.labelZh]));
@@ -46,7 +53,7 @@ async function loadScenarioLabels(pool: Pool): Promise<Map<string, string>> {
 async function editToCurrentState(deps: HandleCallbackDeps, cb: CallbackDecoded, candidate: Candidate, signal?: AbortSignal): Promise<void> {
   const scenarioLabel = await loadScenarioLabels(deps.pool);
   const rendered = formatResult(buildFormatInput(candidate, scenarioLabel));
-  await deps.api.editMessageText({ chatId: cb.chatId, messageId: cb.messageId, text: rendered.text, signal });
+  await deps.api.editMessageText({ chatId: cb.chatId, messageId: cb.messageId, text: rendered.text, replyMarkup: NO_BUTTONS, signal });
 }
 
 async function clearNotifiedAt(pool: Pool, capabilityId: string): Promise<void> {
@@ -154,7 +161,7 @@ async function handleRerun(deps: HandleCallbackDeps, cb: CallbackDecoded, candid
   if (result.ok) {
     await safeAnswer(deps, cb, TOAST.rerun, signal);
     await runSideEffect(deps, cb, "requeue-edit-failed", () =>
-      deps.api.editMessageText({ chatId: cb.chatId, messageId: cb.messageId, text: REQUEUE_TEXT, signal }).then(() => undefined)
+      deps.api.editMessageText({ chatId: cb.chatId, messageId: cb.messageId, text: REQUEUE_TEXT, replyMarkup: NO_BUTTONS, signal }).then(() => undefined)
     );
     await runSideEffect(deps, cb, "clear-notified-at-failed", () => clearNotifiedAt(deps.pool, cb.capabilityId));
     return { outcome: "decided", action: "rerun", capabilityId: cb.capabilityId };

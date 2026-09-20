@@ -160,7 +160,11 @@ async function deliver(
 
   if (messageId !== null) {
     try {
-      await deps.api.editMessageText({ chatId, messageId, text: rendered.text, replyMarkup: rendered.replyMarkup });
+      // An edit that no longer wants buttons (keep/discard) must pass an *explicit* empty
+      // keyboard — Telegram keeps whatever keyboard the message already had (e.g. the pending
+      // card's 保留/丢弃/重跑分析 row) when `reply_markup` is omitted from editMessageText.
+      const replyMarkup: InlineKeyboardMarkup = rendered.replyMarkup ?? { inline_keyboard: [] };
+      await deps.api.editMessageText({ chatId, messageId, text: rendered.text, replyMarkup });
       return "notified";
     } catch (error) {
       if (isTransient(error)) {
