@@ -11,6 +11,16 @@ import { scenariosPromptList } from "./scenarios";
  */
 export const SCORE_RUBRIC = "评分标准：成熟度（是否稳定可用）、可复现性（是否有仓库 / 安装路径 / 提示词原文，能不能照着做出来）、对 Joey 的适用度（是否匹配他的实际场景）、与库内已有能力的互补性（是否重复造轮子）。4–5 分表示建议直接整合，1–2 分表示通常该丢弃，3 分是中间地带。";
 
+/**
+ * Shared capability-type definitions, used both in the pipeline's `reasonPrompt` (assigns
+ * `type` alongside the rest of the card) and in the one-off `scripts/reclassify-types.ts`
+ * (re-asks `type` alone for existing cards). Kept as one string, and compact, since it's sent
+ * on every analysis call — a prompt library ("GPT Image 2 提示词库与图像生成参考资源") was once
+ * misclassified as `other` because `plugin`/`prompt`/`other` carried no definition at all.
+ */
+export const CAPABILITY_TYPE_DEFINITIONS =
+  "能力类型定义：skill（可安装/可执行的技能，如脚本、CLI、agent skill、可复用的工作流）；experience（一次具体实践得到的做法/教训/复盘，需要保留核心内容本身而不只是链接）；plugin（面向某个宿主平台——IDE、浏览器、聊天客户端等——的可安装插件/扩展）；prompt（可直接复用的提示词本身，单条提示词或提示词合集/库都算）；other（以上四类都不合适时才用，不是默认兜底）。合集/库按它收录的内容定型，不要因为「是个合集」就归为 other：提示词合集/库记为 prompt，skill 合集/库记为 skill，以此类推。";
+
 export function visionPrompt(ocrText: string): string {
   return [
     "你在整理一个个人 agent 能力库。请仔细看这张图片，提取其中关于「能力」（skill、经验、plugin、prompt 等）的信息。",
@@ -33,7 +43,7 @@ export function reasonPrompt(input: {
     : input.material.kind === "url" ? `URL: ${input.material.url}\n页面正文：${input.material.text ?? "（抓取失败）"}`
     : `（图片，见视觉提取结果）`;
   return [
-    "你在为一个个人 agent 能力库做评估与建档。能力类型：skill（可安装/可执行的技能）、experience（做法/教训，需保留核心内容本身）、plugin、prompt、other。",
+    `你在为一个个人 agent 能力库做评估与建档。${CAPABILITY_TYPE_DEFINITIONS}`,
     `原始输入：\n${materialText}`,
     input.extraction ? `视觉提取结果：\n${JSON.stringify(input.extraction)}` : "",
     input.sources.length ? `联网来源（已截断）：\n${input.sources.map((s, i) => `[${i + 1}] ${s.title} ${s.url}\n${s.content}`).join("\n\n")}` : "联网来源：无",

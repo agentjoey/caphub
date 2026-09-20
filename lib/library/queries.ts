@@ -70,8 +70,24 @@ export function listPending(pool: Q, opts: { page: number }) {
   return paged(pool, "cb.verdict = 'pending' AND cb.deleted_at IS NULL", [], opts.page);
 }
 
-/** Self-build progress states shown by the Telegram `/todo` command — kept, reference-only cards not yet finished or abandoned. */
-export const TODO_PROGRESS: Progress[] = ["todo", "planned", "building"];
+/**
+ * Self-build progress states shown by the Telegram `/todo` command — kept, reference-only cards
+ * not yet started. `building` is deliberately excluded (owner ruling, 2026-09-20, reversing an
+ * earlier controller ruling): once self-build has begun, the card is "自研中", not "待自研", so it
+ * no longer belongs in `/todo` or the library's 待自研 tile. Those cards remain reachable through
+ * the library's own progress filter.
+ */
+export const TODO_PROGRESS: Progress[] = ["todo", "planned"];
+
+/**
+ * Reference-card progress states that are still "in the self-build pipeline" at all — wider than
+ * {@link TODO_PROGRESS}, since this includes `building`. Used by notify.ts's `isSelfBuildCard` to
+ * decide whether a failed analysis rerun should still render as a self-build card (progress line
+ * + progress buttons) rather than the bare 分析失败 card — a card already `building` deserves that
+ * treatment just as much as one still `todo`/`planned`, even though it no longer belongs in
+ * `/todo` or the library's 待自研 tile (see {@link TODO_PROGRESS}).
+ */
+export const SELF_BUILD_PROGRESS: Progress[] = ["todo", "planned", "building"];
 
 /**
  * A `/todo` row: a card plus the state of its capture's latest analysis run. That run may have
@@ -165,10 +181,10 @@ export interface LibraryStats { byType: Record<CapabilityType, number>; total: n
 
 /**
  * The `progress` values counted by the library stats bar's "待自研" tile — kept, reference-only
- * cards not yet finished or abandoned. Deliberately the *same* set as {@link TODO_PROGRESS} (a
- * card being built is still "to build" until it's `done`): the tile's count, its filter link,
- * `/todo`'s list and its "更多" link must all describe exactly the same cards, not two subtly
- * different ones.
+ * cards not yet started. Deliberately the *same* set as {@link TODO_PROGRESS} (a card that has
+ * entered self-build is "自研中", not "待自研," even though it isn't `done` yet): the tile's count,
+ * its filter link, `/todo`'s list and its "更多" link must all describe exactly the same cards,
+ * not two subtly different ones.
  */
 export const TO_BUILD_PROGRESS: Progress[] = TODO_PROGRESS;
 

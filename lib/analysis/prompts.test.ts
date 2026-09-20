@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { RESERVED_TAGS } from "./card";
-import { backfillScorePrompt, reasonPrompt } from "./prompts";
+import { CAPABILITY_TYPE_DEFINITIONS, backfillScorePrompt, reasonPrompt } from "./prompts";
 
 const material = { kind: "text" as const, text: "hello" };
 const scenarios = [
@@ -8,7 +8,33 @@ const scenarios = [
   { slug: "writing", labelZh: "写作", labelEn: "Writing", keywords: ["文案"] }
 ];
 
+describe("CAPABILITY_TYPE_DEFINITIONS", () => {
+  it("gives all five capability types a crisp definition, not a bare label", () => {
+    expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/skill（[^）]+）/);
+    expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/experience（[^）]+）/);
+    expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/plugin（[^）]+）/);
+    expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/prompt（[^）]+）/);
+    expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/other（[^）]+）/);
+  });
+
+  it("tells the model other is only for what none of the four fit, not a default fallback", () => {
+    expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/other（以上四类都不合适时才用/);
+    expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/不是默认兜底/);
+  });
+
+  it("gives the collection tie-breaker rule: a 合集/库 is typed by what it contains", () => {
+    expect(CAPABILITY_TYPE_DEFINITIONS).toMatch(/合集\/库按它收录的内容定型/);
+    expect(CAPABILITY_TYPE_DEFINITIONS).toContain("提示词合集/库记为 prompt");
+    expect(CAPABILITY_TYPE_DEFINITIONS).toContain("skill 合集/库记为 skill");
+  });
+});
+
 describe("reasonPrompt", () => {
+  it("includes the shared capability-type definitions", () => {
+    const prompt = reasonPrompt({ material, extraction: null, sources: [], similar: [], existingTags: [], scenarios });
+    expect(prompt).toContain(CAPABILITY_TYPE_DEFINITIONS);
+  });
+
   it("instructs tags to be lowercase English words or hyphenated phrases, never Chinese or reserved words", () => {
     const prompt = reasonPrompt({ material, extraction: null, sources: [], similar: [], existingTags: [], scenarios });
     expect(prompt).toContain("web-scraping");

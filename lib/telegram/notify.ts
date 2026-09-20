@@ -2,7 +2,7 @@ import type { Pool } from "pg";
 import type { CapabilityType } from "../analysis/card";
 import { loadScenarios } from "../analysis/scenarios";
 import type { Progress } from "../library/labels";
-import { TODO_PROGRESS } from "../library/queries";
+import { SELF_BUILD_PROGRESS } from "../library/queries";
 import type { InlineKeyboardMarkup, TelegramApi } from "./api";
 import { TelegramError } from "./errors";
 import { formatResult, type DecidedCardInput, type FailedCardInput, type FormatCardInput, type TodoCardInput } from "./format";
@@ -161,9 +161,14 @@ export function buildTodoFormatInput(candidate: Candidate, scenarioLabel: Map<st
   };
 }
 
-/** True for a card `/todo` would list: kept, `usage='reference'`, and still awaiting/undergoing self-build. */
+/**
+ * True for a kept, `usage='reference'` card still in the self-build pipeline (todo/planned/
+ * building) — wider than `/todo`'s own list (see {@link SELF_BUILD_PROGRESS}), so a card whose
+ * self-build is already underway still gets its progress line/buttons on a failed rerun instead
+ * of the bare 分析失败 card.
+ */
 function isSelfBuildCard(candidate: Candidate): boolean {
-  return candidate.verdict === "keep" && candidate.usage === "reference" && TODO_PROGRESS.includes(candidate.progress);
+  return candidate.verdict === "keep" && candidate.usage === "reference" && SELF_BUILD_PROGRESS.includes(candidate.progress);
 }
 
 /**

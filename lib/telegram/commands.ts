@@ -2,7 +2,7 @@ import type { CapabilityType } from "../analysis/card";
 import { loadScenarios } from "../analysis/scenarios";
 import { recordTelegramReceipt } from "../captures/captures";
 import { typeLabel } from "../library/labels";
-import { listPending, listTodoCapabilities, libraryStats, type CapabilityRow, type TodoCapabilityRow } from "../library/queries";
+import { listPending, listTodoCapabilities, libraryStats, TODO_PROGRESS, type CapabilityRow, type TodoCapabilityRow } from "../library/queries";
 import { escapeHtml, type BotCommand, type TelegramApi } from "./api";
 import { publicBaseUrl } from "./capture";
 import { formatResult, type DecidedCardInput, type TodoCardInput } from "./format";
@@ -65,9 +65,10 @@ function libraryReviewLink(): string {
   return `${publicBaseUrl()}/review`;
 }
 
-/** The `/library` filter matching `listTodoCapabilities` (usage=reference, progress in todo/planned/building), for `/todo`'s "more remain" line. */
+/** The `/library` filter matching `listTodoCapabilities` (usage=reference, progress in {@link TODO_PROGRESS}), for `/todo`'s "more remain" line. */
 function libraryTodoLink(): string {
-  return `${publicBaseUrl()}/library?usage=reference&progress=todo&progress=planned&progress=building`;
+  const progress = TODO_PROGRESS.map((p) => `progress=${p}`).join("&");
+  return `${publicBaseUrl()}/library?usage=reference&${progress}`;
 }
 
 function toDecidedCardInput(row: CapabilityRow, scenarioLabel: Map<string, string>): DecidedCardInput {

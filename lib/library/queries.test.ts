@@ -16,7 +16,7 @@ describe("library queries", () => {
     expect(calls[0].text).toMatch(/ORDER BY cb\.created_at DESC/);
     expect(calls[0].values).toEqual([PAGE_SIZE, PAGE_SIZE]);
   });
-  it("listTodoCapabilities filters kept, reference-only cards in todo/planned/building, paged", async () => {
+  it("listTodoCapabilities filters kept, reference-only cards not yet started (todo/planned — building excluded), paged", async () => {
     const { pool, calls } = recorder([[], [{ total: "0" }]]);
     await listTodoCapabilities(pool, { page: 1 });
     expect(calls[0].text).toMatch(/cb\.verdict = 'keep'/);
@@ -24,7 +24,7 @@ describe("library queries", () => {
     expect(calls[0].text).toMatch(/cb\.usage = 'reference'/);
     expect(calls[0].text).toMatch(/cb\.progress = ANY\(\$1\)/);
     expect(calls[0].values).toEqual([TODO_PROGRESS, PAGE_SIZE, 0]);
-    expect(TODO_PROGRESS).toEqual(["todo", "planned", "building"]);
+    expect(TODO_PROGRESS).toEqual(["todo", "planned"]);
   });
   it("listLibrary defaults to keep and applies search/type/tag/usage filters as parameters", async () => {
     const { pool, calls } = recorder([[], [{ total: "0" }]]);
@@ -109,7 +109,7 @@ describe("library queries", () => {
     await scenarioStats(pool, { discarded: true });
     expect(calls[0].values).toEqual(["discard"]);
   });
-  it("libraryStats counts kept by type, distinct tags of kept, pending, and to-build (reference, todo/planned/building)", async () => {
+  it("libraryStats counts kept by type, distinct tags of kept, pending, and to-build (reference, todo/planned — building excluded)", async () => {
     const { pool, calls } = recorder([[{ type: "skill", n: "3" }, { type: "prompt", n: "1" }], [{ n: "7" }], [{ n: "2" }], [{ n: "5" }]]);
     const s = await libraryStats(pool);
     expect(s.byType.skill).toBe(3);
