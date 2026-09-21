@@ -28,13 +28,20 @@ export CAPHUB_CF_ACCESS_CLIENT_ID='...'
 export CAPHUB_CF_ACCESS_CLIENT_SECRET='...'
 ```
 
-**放 `~/.zshenv`，不要放 `~/.zshrc`。** zsh 只在**交互式** shell 才读 `.zshrc`；非交互的 shell
-（脚本、编辑器里跑的命令、agent 的工具调用）和从 Dock 启动的 GUI 进程都读不到它，只读 `.zshenv`。
-安装时实际踩过这一步：变量写在 `.zshrc` 里，终端里 `printenv` 有值，agent 的工具 shell 却看不到，
-表现为配置一切正常但连不上。bash 用户对应的是 `~/.bashrc` 只管交互式，环境变量应放 `~/.bash_profile`
-或 `~/.profile` 并确保非交互路径也能读到。
+**放 `~/.zshenv`，不要放 `~/.zshrc`。** zsh 只在**交互式** shell 才读 `.zshrc`；非交互的 zsh
+（脚本、编辑器里跑的命令、agent 的工具调用）只读 `.zshenv`。安装时实际踩过这一步：变量写在
+`.zshrc` 里，终端里 `printenv` 有值，agent 的工具 shell 却看不到。bash 用户对应的是 `~/.bashrc`
+只管交互式，环境变量应放 `~/.bash_profile` 或 `~/.profile`。
 
-改完新开一个终端；**已经在运行的 agent 进程读的是它启动时的环境**，必须重启那个进程才会生效。
+**从 Dock / Finder 启动的桌面应用根本不经过 zsh**，拿的是 launchd 的环境，`.zshenv` 对它们无效。
+如果你用的是从 Dock 打开的桌面客户端而不是终端里的 CLI，需要用 `launchctl setenv` 或该应用自己的
+环境变量设置，本文不覆盖。
+
+**改完之后必须开一个新的终端标签页（⌘T），在新标签页里启动 agent。** 这一步也实际踩过：agent 进程
+继承的是**启动它的那个 shell** 的环境，而 `.zshenv` 只在 shell 启动时读一次。在一个旧标签页里
+`/exit` 再重新 `claude`，回到的仍是那个旧 shell，新进程照样拿不到变量——症状是
+`Unexpected content type: text/html`：header 展开成空值，Cloudflare Access 把请求挡回了登录页。
+不想开新标签页的话，在旧标签页先 `exec zsh`（用新 shell 替换旧的）再启动 agent 也行。
 
 变量名**不要**用 `ANTHROPIC_API_KEY` 这类通用凭据名：Claude Code 会把已知的凭据变量名读成空字符串，
 以免把密钥泄进子进程；用上面这种带项目前缀的自定义名就不会被拦。
@@ -89,9 +96,10 @@ shell 带着这两个环境变量，并按 opencode 自己的文档确认它的�
 配置文件一行都不用动。如果新 token 的 `common_name` 变了，还要同步更新 Railway `web` 服务的
 `CF_ACCESS_SERVICE_TOKEN_CN`，否则所有机器一起 401（见文末排障第 3 条）。
 
-### 装好后仍然 401？
+### 装好后仍然 401，或报 `Unexpected content type: text/html`？
 
-先确认不是"变量没进到进程里"这一类：
+`text/html` 几乎一定是 Cloudflare Access 的登录页——说明请求到达时两个 header 是空的。先确认不是
+"变量没进到进程里"这一类（最常见：agent 是从一个在设置变量之前就开着的旧标签页里启动的，见上）：
 
 ```bash
 printenv CAPHUB_CF_ACCESS_CLIENT_ID | head -c 8   # 有输出说明当前 shell 里有值
