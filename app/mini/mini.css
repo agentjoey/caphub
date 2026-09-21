@@ -19,3 +19,25 @@
   padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
   padding-top: calc(var(--space-4) + env(safe-area-inset-top, 0px));
 }
+
+/*
+ * Task 3 (library list): mobile-first, single column throughout — no breakpoints, since /mini
+ * is only ever viewed inside Telegram's mobile webview.
+ */
+
+/* Each filter facet (type/scenario/tag) is its own horizontally scrolling strip instead of the
+ * desktop's wrapping `.filter-row` — wrapped chips would push the list rows below the fold. */
+.mini-filter-row {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  -webkit-overflow-scrolling: touch;
+}
+.mini-filter-row .chip { flex: none; }
+
+/* `.list-row` is normally a 3-column grid (thumbnail | content | trailing) — the mini list row
+ * has no capture thumbnail, so it collapses to a single content column. */
+.list-row--mini {
+  grid-template-columns: minmax(0, 1fr);
+  padding: var(--space-4) var(--space-2);
+}
