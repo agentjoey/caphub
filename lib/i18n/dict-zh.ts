@@ -208,6 +208,7 @@ export const dictZh = {
     linkHint: "自研仓库、issue 或笔记地址，可留空",
     save: "保存进度",
     saving: "保存中…",
+    startBuilding: "开始自研",
     genericError: "操作失败，请重试"
   },
   buildNotes: {

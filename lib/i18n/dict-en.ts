@@ -203,6 +203,7 @@ export const dictEn: Dict = {
     linkHint: "Repo, issue or note for your build — optional",
     save: "Save progress",
     saving: "Saving…",
+    startBuilding: "Start building",
     genericError: "Something went wrong, please retry"
   },
   buildNotes: {
