@@ -174,10 +174,28 @@ describe("guardRequest", () => {
   describe("/mini", () => {
     const verify = () => vi.fn().mockResolvedValue({ email: "theagentjoey@gmail.com", commonName: "" });
 
-    it("401s a /mini page request with no mini session cookie", async () => {
+    it("lets a GET /mini page request through with no mini session cookie (entry document exemption)", async () => {
       const res = await guardRequest(
         request({ headers: { "cf-access-jwt-assertion": "t" }, path: "/mini" }),
         MINI_ENV,
+        { verify: verify() }
+      );
+      expect(res.status).not.toBe(401);
+    });
+
+    it("401s a POST to /mini with no mini session cookie (simulated server action on the entry route)", async () => {
+      const res = await guardRequest(
+        request({ headers: { "cf-access-jwt-assertion": "t" }, path: "/mini", method: "POST" }),
+        MINI_ENV,
+        { verify: verify() }
+      );
+      expect(res.status).toBe(401);
+    });
+
+    it("401s a GET /mini with no mini session cookie when the mini secrets are not configured", async () => {
+      const res = await guardRequest(
+        request({ headers: { "cf-access-jwt-assertion": "t" }, path: "/mini" }),
+        ENV,
         { verify: verify() }
       );
       expect(res.status).toBe(401);
@@ -262,7 +280,9 @@ describe("guardRequest", () => {
         { verify: vi.fn().mockResolvedValue({ email: "theagentjoey@gmail.com", commonName: "" }) }
       );
       await guardRequest(
-        request({ headers: { "cf-access-jwt-assertion": "t" }, path: "/mini" }),
+        // A subpath, not the exempt top-level "/mini" GET, so this still exercises the
+        // mini_session_invalid branch (no cookie was attached here).
+        request({ headers: { "cf-access-jwt-assertion": "t" }, path: "/mini/library/x" }),
         MINI_ENV,
         { verify: vi.fn().mockResolvedValue({ email: "theagentjoey@gmail.com", commonName: "" }) }
       );

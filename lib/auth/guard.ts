@@ -86,10 +86,21 @@ export async function guardRequest(
       const botToken = env.TELEGRAM_BOT_TOKEN?.trim();
       const ownerId = env.TELEGRAM_OWNER_CHAT_ID?.trim();
       // Fail closed, exactly like /api/mcp: without the secrets we cannot verify anything, and
-      // the bot token is not yet configured for the web service in production.
+      // the bot token is not yet configured for the web service in production. This still
+      // applies to the top-level GET exemption below — the feature being unconfigured is not a
+      // reason to let the shell load either.
       if (!botToken || !ownerId) {
         logAuthRefusal("mini_secrets_unset", path);
         return unauthorized();
+      }
+      if (path === "/mini" && request.method === "GET") {
+        // Chicken-and-egg: the very first load inside Telegram has no mini cookie yet (Task 2
+        // controller ruling). Only the top-level entry DOCUMENT is exempt — a GET on exactly
+        // "/mini", still behind Access (checked above) and the secrets check above. The page it
+        // serves calls POST /api/mini/session client-side, then router.refresh()es to pick the
+        // cookie up. Every other /mini/* path, and any server-action POST back to "/mini"
+        // itself, falls through to the cookie check below like normal.
+        return NextResponse.next();
       }
       if (!verifyMiniSession(request.cookies.get(MINI_COOKIE)?.value, { botToken, ownerId })) {
         logAuthRefusal("mini_session_invalid", path);

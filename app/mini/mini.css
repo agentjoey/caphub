@@ -1,0 +1,21 @@
+/*
+ * Mini App shell styles. Two jobs only, per task-2-brief.md Step 4:
+ *  1. Map Telegram's theme onto the *existing* background/foreground tokens (--paper, --ink) —
+ *     never a second palette. The live values come from TelegramProvider (it writes --paper /
+ *     --ink inline from themeParams). The block below is just the static fallback for
+ *     `data-theme="dark"` before that JS has run, or if Telegram never supplies themeParams.
+ *  2. Mobile spacing and safe-area insets. Cards, pills and fonts keep their own tokens
+ *     (app/globals.css) — this file does not redefine them.
+ */
+
+:root[data-theme="dark"] {
+  --paper: #16140e;
+  --ink: #f1eee6;
+}
+
+#mini-shell {
+  min-height: 100vh;
+  padding: var(--space-4);
+  padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
+  padding-top: calc(var(--space-4) + env(safe-area-inset-top, 0px));
+}
