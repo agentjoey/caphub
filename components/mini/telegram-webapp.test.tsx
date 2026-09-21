@@ -111,7 +111,25 @@ describe("TelegramProvider", () => {
     });
 
     expect(document.documentElement.dataset.theme).toBe("dark");
-    expect(document.documentElement.style.getPropertyValue("--paper")).toBe("#000000");
+  });
+
+  it("never paints Telegram's own colours over Caphub's palette", () => {
+    // Telegram hands us a white background; the Mini App is meant to look like the mobile web,
+    // whose paper cream lives in globals.css. Writing themeParams onto --paper is what made the
+    // Mini App near-white, so the inline override must stay absent in both schemes.
+    const wa = fakeWebApp();
+    wa.themeParams = { bg_color: "#ffffff", text_color: "#000000" };
+    render(<p>hi</p>, { wrapper: withFakeTelegram(wa) });
+    expect(document.documentElement.style.getPropertyValue("--paper")).toBe("");
+    expect(document.documentElement.style.getPropertyValue("--ink")).toBe("");
+
+    wa.colorScheme = "dark";
+    wa.themeParams = { bg_color: "#000000", text_color: "#ffffff" };
+    act(() => {
+      wa._fire("themeChanged");
+    });
+    expect(document.documentElement.style.getPropertyValue("--paper")).toBe("");
+    expect(document.documentElement.style.getPropertyValue("--ink")).toBe("");
   });
 
   it("unsubscribes themeChanged on unmount", () => {

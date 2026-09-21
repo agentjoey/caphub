@@ -139,12 +139,6 @@ export function useTelegram(): TelegramContextValue {
 
 // Only background/foreground follow Telegram's live theme — cards, pills and fonts keep their
 // own tokens (globals.css). This is deliberately narrow: two properties, no new palette.
-function applyThemeTokens(theme: TelegramThemeParams): void {
-  const root = document.documentElement;
-  if (theme.bg_color) root.style.setProperty("--paper", theme.bg_color);
-  if (theme.text_color) root.style.setProperty("--ink", theme.text_color);
-}
-
 export function TelegramProvider({ children, locale = "zh" }: { children: ReactNode; locale?: Locale }) {
   const router = useRouter();
   const dict = getDict(locale);
@@ -162,13 +156,15 @@ export function TelegramProvider({ children, locale = "zh" }: { children: ReactN
   // POST carries initData and should fire at most once per mount.
   const sessionRequested = useRef(false);
 
-  // Reacts to colorScheme (mount + every themeChanged): mirror it onto <html data-theme> and
-  // the existing --paper/--ink tokens. Pure synchronization, no setState here.
+  // Mirrors Telegram's colorScheme onto <html data-theme>, and nothing else. Caphub has exactly
+  // one palette today (app/globals.css defines --paper/--ink once, with no dark block), so the
+  // Mini App must look like the mobile web it mirrors — writing Telegram's themeParams onto
+  // --paper/--ink turned the paper background white, which is what this deliberately no longer
+  // does. The attribute stays as the hook for the day Caphub gets a real dark palette.
   useEffect(() => {
     const webApp = getTelegramWebApp();
     if (!webApp) return;
     document.documentElement.dataset.theme = webApp.colorScheme;
-    applyThemeTokens(webApp.themeParams);
   }, [colorScheme]);
 
   // One-time setup once Telegram is confirmed present: acknowledge readiness, expand to full

@@ -1,17 +1,10 @@
 /*
- * Mini App shell styles. Two jobs only, per task-2-brief.md Step 4:
- *  1. Map Telegram's theme onto the *existing* background/foreground tokens (--paper, --ink) —
- *     never a second palette. The live values come from TelegramProvider (it writes --paper /
- *     --ink inline from themeParams). The block below is just the static fallback for
- *     `data-theme="dark"` before that JS has run, or if Telegram never supplies themeParams.
- *  2. Mobile spacing and safe-area insets. Cards, pills and fonts keep their own tokens
- *     (app/globals.css) — this file does not redefine them.
+ * Mini App shell styles: mobile spacing and safe-area insets only. Colours come entirely from
+ * app/globals.css — the Mini App is meant to look like the mobile web, and Caphub has one
+ * palette. An earlier version mapped Telegram's themeParams onto --paper/--ink and invented a
+ * dark palette here; that made the Mini App's background near-white instead of the paper cream
+ * everywhere else, and a second palette is exactly what the design said not to introduce.
  */
-
-:root[data-theme="dark"] {
-  --paper: #16140e;
-  --ink: #f1eee6;
-}
 
 #mini-shell {
   min-height: 100vh;
