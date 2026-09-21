@@ -99,11 +99,24 @@ describe("mini library list page", () => {
     expect(footer.getAttribute("href")).toBe("/mini?q=scrape&type=skill&page=2");
   });
 
-  it("renders no footer when total equals the rendered rows", async () => {
+  it("pins the boundary between remaining=0 (no footer) and remaining=1 (footer)", async () => {
     listLibrary.mockResolvedValueOnce({ items: [baseRow], total: 1 });
     const { default: Page } = await import("./page");
     render(await Page({ searchParams: Promise.resolve({}) }));
-
     expect(screen.queryByText(/还有 .* 张/)).toBeNull();
+    cleanup();
+
+    listLibrary.mockResolvedValueOnce({ items: [baseRow], total: 2 });
+    render(await Page({ searchParams: Promise.resolve({}) }));
+    expect(screen.getByText(/还有 1 张/)).toBeTruthy();
+  });
+
+  it("never puts a page param on a row href, even when the list itself is on page 2", async () => {
+    listLibrary.mockResolvedValueOnce({ items: [baseRow], total: 25 });
+    const { default: Page } = await import("./page");
+    render(await Page({ searchParams: Promise.resolve({ page: "2" }) }));
+
+    const row = screen.getByRole("link", { name: /网页抓取技能/ });
+    expect(row.getAttribute("href")).toBe("/mini/library/cab_1");
   });
 });

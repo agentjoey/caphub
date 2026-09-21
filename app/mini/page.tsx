@@ -88,10 +88,13 @@ export default async function MiniLibraryPage({
             <li key={row.id}>
               {/* Carries the current q/type/scenario/tag filter into the detail route (Task 4) so
                   Telegram's native BackButton there returns to this same filtered view instead
-                  of an unfiltered list. */}
+                  of an unfiltered list. `page` is pinned to 1 explicitly (not just omitted from
+                  the patch) — libraryHref's page-reset guard only fires when the patch touches a
+                  non-page field, so an empty patch on a page-2+ list would otherwise leak
+                  `&page=2` onto the detail URL, which means nothing there. */}
               <Link
                 className={`list-row list-row--mini${row.status !== "active" ? " list-row--muted" : ""}`}
-                href={libraryHref(filter, {}, `/mini/library/${row.id}`)}
+                href={libraryHref(filter, { page: 1 }, `/mini/library/${row.id}`)}
               >
                 <div>
                   <div className="list-row__title">
