@@ -24,6 +24,48 @@ read as a completed result until every row says PASS/FAIL and every screenshot e
 Old messages already sitting in the owner's Telegram chat history keep their old plain-`url`
 buttons; they are not retroactively edited.
 
+## Whole-branch review fixes (2026-09-21)
+
+The final whole-branch review found the branch could not work and leaked data. Fixed in this
+branch:
+
+- The Telegram SDK (`https://telegram.org/js/telegram-web-app.js`) was never loaded anywhere, so
+  `window.Telegram.WebApp` was always undefined. It is now loaded by `app/mini/layout.tsx` with
+  `strategy="beforeInteractive"`, scoped to `/mini*` only.
+- `TelegramProvider` snapshotted "is Telegram present" through a no-op subscribe, so a script that
+  executed after hydration could never flip `ready`. It now subscribes to the script tag's `load`
+  event (and `window.load` as a backstop).
+- `GET /mini` is cookie-exempt in `lib/auth/guard.ts` (the shell must load before it can exchange
+  `initData`), but the page served the whole library to anyone holding a Cloudflare Access session
+  and no Telegram — including `?page=N` paging and `?q=…` semantic search, which also spent the
+  Gemini embedding key. `app/mini/page.tsx` now verifies the mini cookie itself with the guard's
+  own `verifyMiniSession` and renders only the shell without one.
+- `/mini` used to render inside the desktop `AppShell`, whose nav would navigate Telegram's WebView
+  out of the Mini App. `/mini` now has its own root layout; the desktop routes moved under
+  `app/(chrome)/`.
+- The mini session cookie is now `SameSite=None; Secure` (see below), the session response carries
+  `Cache-Control: no-store`, a failed `initData` exchange shows a visible error instead of failing
+  silently, `saveEdit` got the `if (locked) return` guard its siblings have, and the native
+  Back/Main button handlers were stabilised so they stop blinking on every `router.refresh()`.
+
+### Cookie SameSite ruling (supersedes the task-1 round-1 ruling)
+
+`caphub_mini` is issued with `SameSite=None; Secure`, and the chat card buttons stay `web_app`
+buttons. Telegram Desktop and Telegram Web render a Mini App in a cross-site iframe, where a Lax
+cookie is never sent — those clients would 401 on every request.
+
+Evidence that this is safe for writes: Next 16.3.3 enforces an Origin/Host check on every server
+action. `node_modules/next/dist/server/app-render/action-handler.js` compares the request's
+`origin` header against `Host`/`X-Forwarded-Host` and, on a mismatch that `serverActions.
+allowedOrigins` does not cover, logs "does not match `origin` header from a forwarded Server
+Actions request. Aborting the action." and throws `Invalid Server Actions request.`
+(`__NEXT_ERROR_CODE: "E80"`). The shipped docs state the same:
+`node_modules/next/dist/docs/01-app/02-guides/data-security.md` — "Server Actions in Next.js also
+compare the Origin header to the Host header (or `X-Forwarded-Host`). If these don't match, the
+request will be aborted." `next.config.ts` sets no `allowedOrigins`, so only this host's own
+Origin passes. Cloudflare Access and the guard's human-email requirement remain in front of every
+`/mini` request on top of that.
+
 ## Step 4: deploy (Human Owner — not yet done)
 
 - [ ] Add `TELEGRAM_BOT_TOKEN` to the Railway `web` service (same value as the `worker` service's).
@@ -47,6 +89,9 @@ buttons; they are not retroactively edited.
 | 8 | Telegram's back gesture/button returns from detail to the list | ☐ | |
 | 9 | ...and the list is back in its previous filter/search state, not reset | ☐ | |
 | 10 | Toggling the phone's light/dark mode is reflected live in the Mini App | ☐ | |
+| 11 | No Caphub desktop header/nav is visible anywhere in the Mini App | ☐ | |
+| 12 | Opening `/mini` in a plain browser (Access session, no Telegram) shows only the shell — no cards, no search | ☐ | |
+| 13 | A card's "🔗 去 web" button works on Telegram Desktop too (cross-site iframe, `SameSite=None`) | ☐ | |
 
 ## Screenshots (real device only — `scripts/shot.mjs` cannot reach a Telegram WebView)
 

@@ -50,17 +50,29 @@ export async function POST(request: Request): Promise<Response> {
 
   const cookieValue = issueMiniSession(result.userId, { botToken });
   const response = Response.json({ ok: true });
-  // SameSite=Lax is deliberate, not an oversight: the Mini App is scoped to the iOS/Android
-  // Telegram clients, which render it same-site (a Lax cookie is sent there). Telegram Web and
-  // Desktop render it in a cross-site iframe, where Lax is never sent, so those clients 401 —
-  // accepted, because /library is one click away on desktop and this feature exists to remove
-  // "leave Telegram and log in again" friction on the phone. SameSite=None would make this
-  // cookie ride along on cross-site requests to a surface that can decide, retire and delete
-  // capability cards — do not "fix" this without weighing that CSRF exposure. (Controller
-  // ruling, task-1 review round 1.)
+  // This response mints a credential — it must never sit in a shared or browser cache.
+  response.headers.set("Cache-Control", "no-store");
+  // SameSite=None is required, not a relaxation for convenience: Telegram Desktop and Telegram
+  // Web render a Mini App inside a cross-site iframe on web.telegram.org, and a Lax cookie is
+  // never sent from there — every request from those clients, including the card buttons in
+  // chat (`web_app` buttons in lib/telegram/format.ts), would 401 without it.
+  //
+  // What stops CSRF once the cookie does ride along cross-site:
+  //  1. Every write on /mini is a Next server action, and Next 16 aborts any server action whose
+  //     `Origin` header does not match `Host`/`X-Forwarded-Host` (node_modules/next/dist/server/
+  //     app-render/action-handler.js — "Invalid Server Actions request."; documented in
+  //     next/dist/docs/01-app/02-guides/data-security.md). A cross-site form or fetch from an
+  //     attacker page carries that site's Origin, so it is rejected before any action runs.
+  //     `serverActions.allowedOrigins` is not configured, so only this host's own Origin passes.
+  //  2. Cloudflare Access still fronts every /mini request, so an attacker's browser would also
+  //     have to carry a valid CF_Authorization session.
+  //  3. This cookie alone proves nothing else: lib/auth/guard.ts additionally requires a human
+  //     email Access identity on /mini.
+  // `Secure` is mandatory for SameSite=None and is set below; the app is HTTPS-only behind the
+  // tunnel, so there is no plaintext path on which it could be dropped.
   response.headers.set(
     "Set-Cookie",
-    `${MINI_COOKIE}=${cookieValue}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=43200`
+    `${MINI_COOKIE}=${cookieValue}; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=43200`
   );
   return response;
 }
