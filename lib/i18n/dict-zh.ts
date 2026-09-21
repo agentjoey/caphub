@@ -273,6 +273,10 @@ export const dictZh = {
     copied: "已复制",
     failed: "复制失败"
   },
+  mini: {
+    connecting: "正在通过 Telegram 登录…",
+    sessionFailed: "Telegram 登录失败，请关闭后重新打开小程序。"
+  },
   notFound: {
     title: "能力不存在",
     subtitle: "这个能力可能已被删除，或链接有误。",

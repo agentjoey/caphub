@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { getLocale } from "../../../lib/i18n/locale";
-import { getDict } from "../../../lib/i18n";
+import { getLocale } from "../../../../lib/i18n/locale";
+import { getDict } from "../../../../lib/i18n";
 
 export default async function NotFound() {
   const locale = await getLocale();

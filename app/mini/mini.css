@@ -66,3 +66,11 @@
   flex-wrap: wrap;
   gap: var(--space-2);
 }
+
+/* The Mini App's only self-diagnosis: TelegramProvider shows this when the `initData` exchange
+ * fails. Without it a failed exchange is silent and /mini just sits on an empty shell forever
+ * (the entry page renders no data without a session — see app/mini/page.tsx). It reuses
+ * globals.css's `.inline-error` skin; this rule only adds the shell spacing. */
+.mini-session-error {
+  margin-bottom: var(--space-4);
+}

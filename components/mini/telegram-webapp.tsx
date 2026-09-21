@@ -6,10 +6,17 @@ import {
   useContext,
   useEffect,
   useRef,
+  useState,
   useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
+import { getDict, type Locale } from "../../lib/i18n";
+
+/** The one URL that turns `window.Telegram.WebApp` into something other than `undefined`.
+ * `app/mini/layout.tsx` loads it (`beforeInteractive`) and `subscribeToBridge` below waits on
+ * that very tag — both must name the same src, hence this shared constant. */
+export const TELEGRAM_SDK_SRC = "https://telegram.org/js/telegram-web-app.js";
 
 export interface TelegramThemeParams {
   bg_color?: string;
@@ -74,10 +81,26 @@ function subscribeToThemeChange(callback: () => void): () => void {
   return () => webApp.offEvent("themeChanged", callback);
 }
 
-function noopSubscribe(): () => void {
-  // Whether Telegram is present does not change again after mount in practice (the bridge is
-  // injected before the app boots or not at all) — nothing to subscribe to.
-  return () => {};
+/**
+ * Subscribes to "the Telegram bridge appeared". `beforeInteractive` guarantees the SDK's script
+ * tag is in the server HTML ahead of every Next.js module, but explicitly *not* that it has
+ * executed before hydration — so a snapshot taken at hydration time can legitimately still be
+ * `null`, and without this subscription `ready` would stay `false` forever and the initData
+ * exchange would never fire. Both listeners are one-shot in effect: the snapshot is a boolean
+ * that only ever goes false -> true, so React re-reads it and settles.
+ */
+function subscribeToBridge(callback: () => void): () => void {
+  if (typeof window === "undefined" || getTelegramWebApp() !== null) return () => {};
+  const script = document.querySelector<HTMLScriptElement>(`script[src="${TELEGRAM_SDK_SRC}"]`);
+  // The script tag's own `load` is the precise signal; `window.load` is the backstop for the
+  // cases where the tag is not found by that selector (a differently-injected copy, or a
+  // client-side navigation into /mini after the document already loaded).
+  script?.addEventListener("load", callback);
+  window.addEventListener("load", callback);
+  return () => {
+    script?.removeEventListener("load", callback);
+    window.removeEventListener("load", callback);
+  };
 }
 
 function getReadySnapshot(): boolean {
@@ -122,9 +145,14 @@ function applyThemeTokens(theme: TelegramThemeParams): void {
   if (theme.text_color) root.style.setProperty("--ink", theme.text_color);
 }
 
-export function TelegramProvider({ children }: { children: ReactNode }) {
+export function TelegramProvider({ children, locale = "zh" }: { children: ReactNode; locale?: Locale }) {
   const router = useRouter();
-  const ready = useSyncExternalStore(noopSubscribe, getReadySnapshot, getReadyServerSnapshot);
+  const dict = getDict(locale);
+  const ready = useSyncExternalStore(subscribeToBridge, getReadySnapshot, getReadyServerSnapshot);
+  // The session exchange is the only thing standing between the owner and an empty shell, so a
+  // failure must be visible: with the Criticals fixed, /mini renders no data until the cookie
+  // lands, and a silent `catch` would leave a blank page with nothing to act on.
+  const [sessionFailed, setSessionFailed] = useState(false);
   const colorScheme = useSyncExternalStore(
     subscribeToThemeChange,
     getColorSchemeSnapshot,
@@ -162,11 +190,17 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ initData: webApp.initData }),
       })
         .then((res) => {
-          if (res.ok) router.refresh();
+          if (res.ok) {
+            setSessionFailed(false);
+            router.refresh();
+            return;
+          }
+          setSessionFailed(true);
         })
         .catch(() => {
-          // Best-effort: on failure the guard still gates every other /mini/* page, so the
-          // owner just sees a 401 on the next navigation and can reopen the Mini App to retry.
+          // Never surfaces *why* (the endpoint deliberately does not say either) — just that the
+          // Mini App has no session, which is the one thing the owner can act on by reopening it.
+          setSessionFailed(true);
         });
     }
   }, [ready, router]);
@@ -180,6 +214,7 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
 
   return (
     <TelegramContext.Provider value={{ ready, colorScheme, haptic }}>
+      {sessionFailed && <p className="inline-error mini-session-error" role="alert">{dict.mini.sessionFailed}</p>}
       {children}
     </TelegramContext.Provider>
   );

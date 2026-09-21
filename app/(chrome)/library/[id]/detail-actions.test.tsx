@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { ActionResult } from "../../../lib/library/actions";
+import type { ActionResult } from "../../../../lib/library/actions";
 
 const softDeleteAction = vi.fn<(...args: unknown[]) => Promise<ActionResult>>(
   async () => ({ ok: true, updatedAt: "2026-09-19T00:00:01.000Z" })
@@ -13,7 +13,7 @@ const rerunAction = vi.fn<(...args: unknown[]) => Promise<ActionResult>>();
 const decideAction = vi.fn<(...args: unknown[]) => Promise<ActionResult>>();
 const editSuggestionAction = vi.fn<(...args: unknown[]) => Promise<ActionResult>>();
 
-vi.mock("../../actions", () => ({
+vi.mock("../../../actions", () => ({
   softDeleteAction: (...args: unknown[]) => softDeleteAction(...(args as [])),
   reviewAction: (...args: unknown[]) => reviewAction(...(args as [])),
   rerunAction: (...args: unknown[]) => rerunAction(...(args as [])),

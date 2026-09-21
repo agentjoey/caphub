@@ -121,6 +121,51 @@ describe("TelegramProvider", () => {
     expect(wa.offEvent).toHaveBeenCalledWith("themeChanged", expect.any(Function));
   });
 
+  // `beforeInteractive` puts the SDK's <script> in the server HTML ahead of every Next module
+  // but explicitly does not block hydration on its execution, so "no bridge at hydration, bridge
+  // a moment later" is a real ordering, not a hypothetical. Before the fix `ready` was snapshot
+  // through a no-op subscribe and stayed false forever, which meant no ready(), no expand() and
+  // no session exchange — the Mini App simply never worked.
+  it("flips ready when the SDK script arrives after hydration", async () => {
+    function Probe() {
+      const { ready } = useTelegram();
+      return <p>ready:{String(ready)}</p>;
+    }
+    render(
+      <TelegramProvider>
+        <Probe />
+      </TelegramProvider>
+    );
+    expect(screen.getByText("ready:false")).not.toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+
+    const wa = fakeWebApp();
+    await act(async () => {
+      window.Telegram = { WebApp: wa };
+      window.dispatchEvent(new Event("load"));
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("ready:true")).not.toBeNull();
+    expect(wa.ready).toHaveBeenCalledTimes(1);
+    expect(wa.expand).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it("shows a visible error when the session exchange fails instead of failing silently", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401 }));
+    const wa = fakeWebApp();
+    render(<p>hi</p>, { wrapper: withFakeTelegram(wa) });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole("alert").textContent).toContain("Telegram");
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
   it("exposes ready/colorScheme/haptic via useTelegram", () => {
     const wa = fakeWebApp();
     function Probe() {

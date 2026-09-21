@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { PROGRESS_VALUES, progressLabel, usageLabel } from "../../lib/library/labels";
-import type { LibraryFilter } from "../../lib/library/queries";
-import { libraryHref } from "../../lib/library/search-params";
-import { getDict, type Locale } from "../../lib/i18n";
+import { PROGRESS_VALUES, progressLabel, usageLabel } from "../../../lib/library/labels";
+import type { LibraryFilter } from "../../../lib/library/queries";
+import { libraryHref } from "../../../lib/library/search-params";
+import { getDict, type Locale } from "../../../lib/i18n";
 
 const USAGES: Array<"integrate" | "reference"> = ["integrate", "reference"];
 

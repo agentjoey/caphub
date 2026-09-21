@@ -268,6 +268,10 @@ export const dictEn: Dict = {
     copied: "Copied",
     failed: "Copy failed"
   },
+  mini: {
+    connecting: "Signing in through Telegram…",
+    sessionFailed: "Telegram sign-in failed — close and reopen the Mini App to retry."
+  },
   notFound: {
     title: "Capability not found",
     subtitle: "This capability may have been deleted, or the link is wrong.",

@@ -4,12 +4,12 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 
 const rerunAction = vi.fn();
 
-vi.mock("./actions", () => ({
+vi.mock("../actions", () => ({
   rerunAction: (...args: unknown[]) => rerunAction(...(args as []))
 }));
 
 import { RecentRow } from "./recent-row";
-import type { RecentCapture } from "../lib/captures/captures";
+import type { RecentCapture } from "../../lib/captures/captures";
 
 const base: RecentCapture = {
   id: "cap_1", kind: "image", createdAt: "2026-09-19T00:00:00.000Z", runState: "failed",

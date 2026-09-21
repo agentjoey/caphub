@@ -1,9 +1,9 @@
 import Link from "next/link";
-import { ReviewCard } from "../../components/review/review-card";
-import { getCapabilityDetail, listPending, PAGE_SIZE } from "../../lib/library/queries";
-import { getRuntime } from "../../lib/runtime";
-import { getLocale } from "../../lib/i18n/locale";
-import { format, getDict } from "../../lib/i18n";
+import { ReviewCard } from "../../../components/review/review-card";
+import { getCapabilityDetail, listPending, PAGE_SIZE } from "../../../lib/library/queries";
+import { getRuntime } from "../../../lib/runtime";
+import { getLocale } from "../../../lib/i18n/locale";
+import { format, getDict } from "../../../lib/i18n";
 
 export const dynamic = "force-dynamic";
 

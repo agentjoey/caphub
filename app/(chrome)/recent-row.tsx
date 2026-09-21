@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import type { RecentCapture } from "../lib/captures/captures";
-import { runStateLabel, verdictLabel, errorLabel } from "../lib/library/labels";
-import { getDict, type Locale } from "../lib/i18n";
-import { CapturePreview } from "../components/capability/capture-preview";
-import { rerunAction } from "./actions";
+import type { RecentCapture } from "../../lib/captures/captures";
+import { runStateLabel, verdictLabel, errorLabel } from "../../lib/library/labels";
+import { getDict, type Locale } from "../../lib/i18n";
+import { CapturePreview } from "../../components/capability/capture-preview";
+import { rerunAction } from "../actions";
 
 function fallbackTitle(item: RecentCapture, fallback: string): string {
   if (item.title) return item.title;

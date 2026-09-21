@@ -6,11 +6,11 @@ const redirect = vi.fn((url: string) => { throw new Error(`REDIRECT:${url}`); })
 vi.mock("next/navigation", () => ({ notFound, redirect }));
 
 const getCapabilityDetail = vi.fn();
-vi.mock("../../../lib/library/queries", () => ({ getCapabilityDetail: (...args: unknown[]) => getCapabilityDetail(...args) }));
+vi.mock("../../../../lib/library/queries", () => ({ getCapabilityDetail: (...args: unknown[]) => getCapabilityDetail(...args) }));
 
-vi.mock("../../../lib/analysis/scenarios", () => ({ loadScenarios: async () => [] }));
-vi.mock("../../../lib/runtime", () => ({ getRuntime: () => ({ pool: {} }) }));
-vi.mock("../../../lib/i18n/locale", () => ({ getLocale: async () => "zh" }));
+vi.mock("../../../../lib/analysis/scenarios", () => ({ loadScenarios: async () => [] }));
+vi.mock("../../../../lib/runtime", () => ({ getRuntime: () => ({ pool: {} }) }));
+vi.mock("../../../../lib/i18n/locale", () => ({ getLocale: async () => "zh" }));
 
 const baseDetail = {
   id: "cab_1", captureId: "cap_1", title: "标题", type: "skill", summary: "摘要", signals: [],
