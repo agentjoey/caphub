@@ -15,7 +15,89 @@ service token，业务逻辑与 web / Telegram 入口共用同一套查询与乐
 下面所有代码块里的 `<CF_ACCESS_CLIENT_ID>` / `<CF_ACCESS_CLIENT_SECRET>` 都是占位符，
 换成 Human 给你的真实值，**不要把真实值提交进任何仓库**。
 
-## 客户端配置
+## 在一台新机器上安装
+
+密钥只存在每台机器的环境变量里，配置文件只写变量引用——这样配置可以安心放进私有仓库或同步盘，
+轮换 token 时每台机器只改一处。
+
+### 第 0 步（每台机器一次）：把两个值放进环境
+
+```bash
+# ~/.zshrc（或 ~/.bashrc）
+export CAPHUB_CF_ACCESS_CLIENT_ID='...'
+export CAPHUB_CF_ACCESS_CLIENT_SECRET='...'
+```
+
+变量名**不要**用 `ANTHROPIC_API_KEY` 这类通用凭据名：Claude Code 会把已知的凭据变量名读成空字符串，
+以免把密钥泄进子进程；用上面这种带项目前缀的自定义名就不会被拦。
+
+改完 `source ~/.zshrc`，或者开一个新终端——已经在跑的 agent 进程读的是它启动时的环境，不会自动更新。
+
+### Claude Code
+
+```bash
+claude mcp add --scope user --transport http caphub https://caphub.agentjoey.ai/api/mcp \
+  --header 'CF-Access-Client-Id: ${CAPHUB_CF_ACCESS_CLIENT_ID}' \
+  --header 'CF-Access-Client-Secret: ${CAPHUB_CF_ACCESS_CLIENT_SECRET}'
+```
+
+**必须用单引号。** zsh/bash 的双引号会把 `${...}` 在命令执行前就展开掉，于是真实密钥被写进
+`~/.claude.json`（正是我们要避免的），或者——如果那台机器还没设变量——写进去一个空字符串，
+得到一个看着配好、实际永远 401 的服务器。单引号让字面量原样存下，由 Claude Code 在加载时展开。
+
+`--scope user` 写进 `~/.claude.json` 顶层，该机器上所有项目都能用。`${VAR}` 与 `${VAR:-默认值}`
+两种写法在 local / project / user 三个 scope 下都支持，作用于 HTTP server 的 `url` 与 `headers`。
+
+装完验证：
+
+```bash
+claude mcp list          # 应显示 caphub ✔ Connected
+```
+
+或在会话里输入 `/mcp`，能看到 caphub 及其七个工具。
+
+### Codex CLI
+
+在 `~/.codex/config.toml` 加：
+
+```toml
+[mcp_servers.caphub]
+url = "https://caphub.agentjoey.ai/api/mcp"
+
+[mcp_servers.caphub.env_http_headers]
+CF-Access-Client-Id = "CAPHUB_CF_ACCESS_CLIENT_ID"
+CF-Access-Client-Secret = "CAPHUB_CF_ACCESS_CLIENT_SECRET"
+```
+
+注意 `env_http_headers` 的值是**环境变量的名字**，不是值本身——这正是我们要的：配置文件里没有密钥。
+（对照下面「客户端配置」一节里的 `http_headers` 写法，那种是直接写值，只适合临时试验。）
+
+### opencode
+
+`opencode.json` 的 headers 是否支持环境变量插值，本仓库未验证。在确认之前，稳妥做法是让启动 opencode 的
+shell 带着这两个环境变量，并按 opencode 自己的文档确认它的插值语法；**不要**把真实值写进会被同步的配置文件。
+
+### 轮换 token 时
+
+在 Cloudflare Access 里换发 service token 后：每台机器改 `~/.zshrc` 里那两行，重开终端，重启 agent。
+配置文件一行都不用动。如果新 token 的 `common_name` 变了，还要同步更新 Railway `web` 服务的
+`CF_ACCESS_SERVICE_TOKEN_CN`，否则所有机器一起 401（见文末排障第 3 条）。
+
+### 装好后仍然 401？
+
+先确认不是"变量没进到进程里"这一类：
+
+```bash
+printenv CAPHUB_CF_ACCESS_CLIENT_ID | head -c 8   # 有输出说明当前 shell 里有值
+```
+
+如果这里有值但 agent 仍 401，检查 `~/.claude.json` 里存的是不是字面量 `${CAPHUB_CF_ACCESS_CLIENT_ID}`
+——如果存成了真实值或空字符串，就是当初用了双引号，删掉重加即可。
+
+## 附：直接写值的配置形式（仅供临时试验）
+
+**日常安装请用上面的「在一台新机器上安装」**，那套把密钥放在环境变量里。下面这几段把真实值直接写进
+配置文件，只适合在一台一次性机器上快速验证端点是否可用；**不要**用于会被同步或提交的配置文件。
 
 以下三段配置里，只有 Claude Code 的一段在本仓库里实际验证过；Codex CLI 和 opencode 的两段
 摘自这两个工具各自的官方文档，未在本仓库验证，使用前请对照它们自己的文档核对。
