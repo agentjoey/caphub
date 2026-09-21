@@ -23,15 +23,21 @@ service token，业务逻辑与 web / Telegram 入口共用同一套查询与乐
 ### 第 0 步（每台机器一次）：把两个值放进环境
 
 ```bash
-# ~/.zshrc（或 ~/.bashrc）
+# ~/.zshenv（不是 ~/.zshrc —— 见下）
 export CAPHUB_CF_ACCESS_CLIENT_ID='...'
 export CAPHUB_CF_ACCESS_CLIENT_SECRET='...'
 ```
 
+**放 `~/.zshenv`，不要放 `~/.zshrc`。** zsh 只在**交互式** shell 才读 `.zshrc`；非交互的 shell
+（脚本、编辑器里跑的命令、agent 的工具调用）和从 Dock 启动的 GUI 进程都读不到它，只读 `.zshenv`。
+安装时实际踩过这一步：变量写在 `.zshrc` 里，终端里 `printenv` 有值，agent 的工具 shell 却看不到，
+表现为配置一切正常但连不上。bash 用户对应的是 `~/.bashrc` 只管交互式，环境变量应放 `~/.bash_profile`
+或 `~/.profile` 并确保非交互路径也能读到。
+
+改完新开一个终端；**已经在运行的 agent 进程读的是它启动时的环境**，必须重启那个进程才会生效。
+
 变量名**不要**用 `ANTHROPIC_API_KEY` 这类通用凭据名：Claude Code 会把已知的凭据变量名读成空字符串，
 以免把密钥泄进子进程；用上面这种带项目前缀的自定义名就不会被拦。
-
-改完 `source ~/.zshrc`，或者开一个新终端——已经在跑的 agent 进程读的是它启动时的环境，不会自动更新。
 
 ### Claude Code
 
