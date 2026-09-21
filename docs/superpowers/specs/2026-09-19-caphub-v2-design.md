@@ -9,13 +9,13 @@ Caphub 是 Joey 的**个人 agent 能力库**。能力类型：skill、经验（
 
 核心闭环：输入（图片 / 文字 / URL）→ 搜索、评估、分析 → 有价值的建档、无价值的丢弃 → 标注"直接整合"或"参考自研"并附落地清单 → 分类打标 → 日后按类型 / 标签 / 全文搜索查找。
 
-入口：web 与 Telegram 私聊 bot。知识库：Obsidian Vault 作为只读投影。
+入口：web、Telegram 私聊 bot 与远程 MCP（其他 agent）。~~知识库：Obsidian Vault 作为只读投影。~~（2026-09-21 取消，见 §8）
 
 ## 2. 已定决策
 
 | 议题 | 决定 |
 |---|---|
-| 唯一事实源 | Neon PostgreSQL；Obsidian 是只读投影 |
+| 唯一事实源 | Neon PostgreSQL（Obsidian 投影已取消，见 §8） |
 | 保留 / 丢弃 | 分级：置信度高的自动执行，中间段进人工 Review |
 | Review 卡内容 | 一句话、类型、AI 建议 + 理由、完整分析摘要、原始输入、拟打标签；其余折叠 |
 | 查找 / 推荐 | 本期只做人用的 web 查找（全文检索 + 筛选）；agent 接口留下一期 |
@@ -58,7 +58,7 @@ Telegram 采用长轮询而非 webhook：web 域名前有 Cloudflare Access，�
 ### 3.5 配置
 
 全部环境变量，无 `config.json`：
-`DATABASE_URL`、`DATABASE_URL_READONLY`（vault-sync 用）、S3 端点 / 桶 / 凭证、`MINIMAX_API_KEY`、`DEEPSEEK_API_KEY`、`TAVILY_API_KEY`、`TELEGRAM_BOT_TOKEN`、`TELEGRAM_OWNER_CHAT_ID`、`CF_ACCESS_AUD`、`CF_ACCESS_TEAM_DOMAIN`、`PIPELINE`（`minimax` | `mixed`）、`VERDICT_AUTO_THRESHOLD`（默认 0.8；对 AI 建议的置信度，keep / discard 共用）。
+`DATABASE_URL`、S3 端点 / 桶 / 凭证、`MINIMAX_API_KEY`、`DEEPSEEK_API_KEY`、`TAVILY_API_KEY`、`TELEGRAM_BOT_TOKEN`、`TELEGRAM_OWNER_CHAT_ID`、`CF_ACCESS_AUD`、`CF_ACCESS_TEAM_DOMAIN`、`PIPELINE`（`minimax` | `mixed`）、`VERDICT_AUTO_THRESHOLD`（默认 0.8；对 AI 建议的置信度，keep / discard 共用）。
 开关：`ANALYSIS_ENABLED`、`RETENTION_ENABLED`、`TELEGRAM_ENABLED`。
 
 ### 3.6 成本控制
@@ -70,7 +70,7 @@ Telegram 采用长轮询而非 webhook：web 域名前有 Cloudflare Access，�
 
 ### 3.7 本机组件
 
-只剩 `caphub-vault-sync`（§8），用 launchd 每小时运行或手动运行。
+无——`caphub-vault-sync` 随 §8 一并取消，本机不再有常驻任务。
 
 ## 4. 数据模型（schema `caphub_v2`）
 
@@ -170,7 +170,11 @@ Telegram 采用长轮询而非 webhook：web 域名前有 Cloudflare Access，�
 - 可靠性：断线重连；`notified_at` 为空的卡每轮补发；日志不含图片内容与 token。
 - 与 Claude Code 的 telegram 插件无关，是另一个 bot 与 token。
 
-## 8. Obsidian 投影
+## 8. Obsidian 投影（已取消）
+
+**2026-09-21 Human 决定取消**：当初定这块时，Caphub 还没有 web 检索、语义搜索与
+MCP 接入；这三样落地后，Vault 镜像的用途不再清晰，做出来大概率是一份没人读的副本。
+本节以下内容仅作历史记录，不再实施。
 
 - 命令 `scripts/vault-sync.ts`，本机 launchd 每小时或手动；单向 Neon → Vault；使用只读角色 + 一个仅允许 `UPDATE capabilities.synced_at` 的角色。
 - 仅同步 `verdict = keep` 且未删除。路径 `<Vault>/Caphub/<type>/<slug>-<短id>.md`；索引页 `<Vault>/Caphub/Index.md` 按类型列 wiki link。
@@ -188,7 +192,7 @@ Telegram 采用长轮询而非 webhook：web 域名前有 Cloudflare Access，�
 | 1 | 地基 + 管线 | 新仓库、Railway 两服务、`caphub_v2` schema、队列、A/B 管线、裁决、复核、最简投递页、旧数据导入命令 | A/B spike 完成并定型；每步耗时 / token 有记录 |
 | 2 | Web 端 | Review、能力库（含统计）、详情、改建议 / 删除 / 重跑 | Human 用旧数据走完一轮 Review |
 | 3 | Telegram | 投递、推送、按钮决定 | 手机发图 → 收卡 → 按钮决定 → web 可见 |
-| 4 | Obsidian + 收尾 | vault-sync；alljobs 外链、旧代码删除、旧 schema drop | 临时 Vault 通过；alljobs 删旧 Caphub 后测试全绿 |
+| 4 | 收尾 | ~~vault-sync（已取消）~~；agent 接入（AJ-296，已完成）；alljobs 外链、旧代码删除、旧 schema drop | alljobs 删旧 Caphub 后测试全绿 |
 
 ### 9.2 旧数据
 
@@ -201,13 +205,13 @@ Telegram 采用长轮询而非 webhook：web 域名前有 Cloudflare Access，�
 ### 9.4 测试
 
 - 单元：每步 schema、裁决阈值、乐观锁、去重、Telegram 消息解析；假 provider，不打真实 API。
-- 集成：Vitest + 临时 Neon branch（测完删）：队列 / 租约 / 导入 / vault-sync。
+- 集成：Vitest + 临时 Neon branch（测完删）：队列 / 租约 / 导入。
 - E2E：一套 Playwright 配置：投递 → Review → 库 + axe。
 - 真实调用仅在 spike 与上线冒烟中发生，逐次授权。
 
 ### 9.5 上线顺序（每步可独立回退，前一步不成功不进下一步）
 
-Railway 自带域名 + Access JWT 校验跑通 → 挂 `caphub.agentjoey.ai` → 开 Telegram → vault-sync 指向真 Vault → alljobs 外链上线、旧 worker 卸载、旧路由删除、v1 schema drop。
+Railway 自带域名 + Access JWT 校验跑通 → 挂 `caphub.agentjoey.ai` → 开 Telegram → alljobs 外链上线、旧 worker 卸载、旧路由删除、v1 schema drop。
 
 ### 9.6 需要 Human 逐项授权的动作
 
@@ -217,7 +221,7 @@ Railway 自带域名 + Access JWT 校验跑通 → 挂 `caphub.agentjoey.ai` →
 
 **直接沿用**：队列 / 租约 / 心跳；去重与内容寻址（去掉已跑完的回填分支）；Neon S3 客户端；保留期清扫；MiniMax / DeepSeek 适配器与"结构化输出 + Zod + 一次纠错"通用层；阶段式可续跑 runner；决定的乐观锁思路；API route factory；投递表单。
 
-**改造后沿用**：分页 / 筛选逻辑（重写展平 SQL）；配置改为环境变量；Obsidian 渲染（托管区标记 + digest）与规划。
+**改造后沿用**：分页 / 筛选逻辑（重写展平 SQL）；配置改为环境变量。（旧版的 Obsidian 渲染与规划模块随 §8 取消，不再沿用。）
 
 **丢弃**：Kimi 全部代码与 debug zip；本地文件系统存储平行实现；发布 / 部署计划 / release candidate / 包仓库 / codex-claude-hermes 适配器；v1 review dossier UI 与确认短语流程；一半 CLI 脚本（publish / release / export / preflight / 一次性回填）；五套 Playwright 配置合并为一套；`app/capabilities/[id]/page.tsx` 重写。
 
