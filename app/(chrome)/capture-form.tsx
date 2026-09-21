@@ -3,7 +3,7 @@
 import { useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { getDict, type Locale } from "../lib/i18n";
+import { getDict, type Locale } from "../../lib/i18n";
 
 const ACCEPTED_MIME = new Set(["image/png", "image/jpeg", "image/webp"]);
 

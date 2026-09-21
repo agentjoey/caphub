@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { decideAction, editSuggestionAction, rerunAction, reviewAction, softDeleteAction } from "../../actions";
-import type { CapabilityType } from "../../../lib/analysis/card";
-import { getDict, type Locale } from "../../../lib/i18n";
-import { SuggestionEditor } from "../../../components/review/suggestion-editor";
-import { useLockToken } from "../../../components/capability/use-lock-token";
+import { decideAction, editSuggestionAction, rerunAction, reviewAction, softDeleteAction } from "../../../actions";
+import type { CapabilityType } from "../../../../lib/analysis/card";
+import { getDict, type Locale } from "../../../../lib/i18n";
+import { SuggestionEditor } from "../../../../components/review/suggestion-editor";
+import { useLockToken } from "../../../../components/capability/use-lock-token";
 
 type State = "idle" | "busy" | "stale";
 

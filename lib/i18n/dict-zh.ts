@@ -115,7 +115,8 @@ export const dictZh = {
     clearFilters: "清除筛选",
     emptyNoFilters: "库里还没有保留的能力。",
     prevPage: "上一页",
-    nextPage: "下一页"
+    nextPage: "下一页",
+    moreFooter: "还有 {count} 张 · 下一页"
   },
   detail: {
     back: "← 能力库",
@@ -207,6 +208,7 @@ export const dictZh = {
     linkHint: "自研仓库、issue 或笔记地址，可留空",
     save: "保存进度",
     saving: "保存中…",
+    startBuilding: "开始自研",
     genericError: "操作失败，请重试"
   },
   buildNotes: {
@@ -270,6 +272,10 @@ export const dictZh = {
     copy: "复制",
     copied: "已复制",
     failed: "复制失败"
+  },
+  mini: {
+    connecting: "正在通过 Telegram 登录…",
+    sessionFailed: "Telegram 登录失败，请关闭后重新打开小程序。"
   },
   notFound: {
     title: "能力不存在",

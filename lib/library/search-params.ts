@@ -43,11 +43,14 @@ export function parseLibraryParams(sp: RawParams): LibraryFilter {
 }
 
 /**
- * Builds an /library href from a base filter with a patch applied. Changing any field
- * other than `page` itself resets pagination back to page 1 (omitted from the URL),
- * since a new filter combination invalidates the previous page offset.
+ * Builds a `base`-rooted href from a base filter with a patch applied (default base: `/library`).
+ * The Telegram mini app reuses this with `base="/mini"` (list chips) and a per-row
+ * `base="/mini/library/<id>"` (so the row link itself carries the current q/type/scenario, not
+ * just the list page) — the query-string logic must stay identical between the two surfaces.
+ * Changing any field other than `page` itself resets pagination back to page 1 (omitted from
+ * the URL), since a new filter combination invalidates the previous page offset.
  */
-export function libraryHref(filter: LibraryFilter, patch: Partial<LibraryFilter>): string {
+export function libraryHref(filter: LibraryFilter, patch: Partial<LibraryFilter>, base = "/library"): string {
   const merged: LibraryFilter = { ...filter, ...patch };
   const changesOtherFields = Object.keys(patch).some((k) => k !== "page");
   if (changesOtherFields && !("page" in patch)) merged.page = 1;
@@ -65,5 +68,5 @@ export function libraryHref(filter: LibraryFilter, patch: Partial<LibraryFilter>
   if (merged.page && merged.page > 1) params.set("page", String(merged.page));
 
   const qs = params.toString();
-  return qs ? `/library?${qs}` : "/library";
+  return qs ? `${base}?${qs}` : base;
 }

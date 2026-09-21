@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createTelegramApi } from "./api";
 import { COMMANDS, handleCommand, PENDING_SHOW_LIMIT, syncCommands, type CommandDeps } from "./commands";
 
 const SCENARIO_ROWS = [{ slug: "coding", label_zh: "写代码", label_en: "Coding", keywords: ["code"] }];
@@ -217,16 +218,48 @@ describe("handleCommand", () => {
 describe("syncCommands", () => {
   it("calls setMyCommands with the five commands", async () => {
     const setMyCommands = vi.fn(async () => true as const);
-    await syncCommands({ setMyCommands });
+    const setChatMenuButton = vi.fn(async () => true as const);
+    await syncCommands({ setMyCommands, setChatMenuButton });
     expect(setMyCommands).toHaveBeenCalledWith({ commands: COMMANDS });
     expect(COMMANDS.map((c) => c.command)).toEqual(["help", "find", "add", "pending", "stats"]);
   });
 
-  it("logs and does not throw when setMyCommands fails", async () => {
+  it("logs and does not throw when setMyCommands fails, and still sets the menu button", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const setMyCommands = vi.fn(async () => { throw new Error("down"); });
-    await expect(syncCommands({ setMyCommands })).resolves.toBeUndefined();
+    const setChatMenuButton = vi.fn(async () => true as const);
+    await expect(syncCommands({ setMyCommands, setChatMenuButton })).resolves.toBeUndefined();
+    expect(error).toHaveBeenCalled();
+    expect(setChatMenuButton).toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  it("logs and does not throw when setChatMenuButton fails, independent of setMyCommands", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const setMyCommands = vi.fn(async () => true as const);
+    const setChatMenuButton = vi.fn(async () => { throw new Error("down"); });
+    await expect(syncCommands({ setMyCommands, setChatMenuButton })).resolves.toBeUndefined();
+    expect(setMyCommands).toHaveBeenCalled();
     expect(error).toHaveBeenCalled();
     error.mockRestore();
+  });
+
+  // AJ-301 Task 5: assert against the HTTP body that actually reaches the Telegram API, not
+  // against a fake's captured params — an M3 lesson (buttons that never actually applied still
+  // passed because the test only checked what the fake recorded).
+  it("sets a menu button that opens the mini app", async () => {
+    let menuButtonBody: Record<string, unknown> | undefined;
+    const fetchFn = (async (u: string, i: RequestInit) => {
+      const body = JSON.parse(i.body as string) as Record<string, unknown>;
+      if (u.toString().endsWith("/setChatMenuButton")) menuButtonBody = body;
+      return new Response(JSON.stringify({ ok: true, result: true }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const api = createTelegramApi({ token: "123:tok", fetch: fetchFn });
+
+    await syncCommands(api);
+
+    expect(menuButtonBody).toEqual({
+      menu_button: { type: "web_app", text: "能力库", web_app: { url: "https://caphub.agentjoey.ai/mini" } }
+    });
   });
 });

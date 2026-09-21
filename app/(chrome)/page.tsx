@@ -1,10 +1,10 @@
 import Link from "next/link";
-import { listRecentCaptures } from "../lib/captures/captures";
-import { relativeTime } from "../lib/library/format";
-import { libraryStats } from "../lib/library/queries";
-import { getRuntime } from "../lib/runtime";
-import { getLocale } from "../lib/i18n/locale";
-import { format, getDict } from "../lib/i18n";
+import { listRecentCaptures } from "../../lib/captures/captures";
+import { relativeTime } from "../../lib/library/format";
+import { libraryStats } from "../../lib/library/queries";
+import { getRuntime } from "../../lib/runtime";
+import { getLocale } from "../../lib/i18n/locale";
+import { format, getDict } from "../../lib/i18n";
 import { CaptureForm } from "./capture-form";
 import { RecentRow } from "./recent-row";
 

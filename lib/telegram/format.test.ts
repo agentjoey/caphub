@@ -40,7 +40,10 @@ describe("formatResult — keep", () => {
     const kb = out.replyMarkup?.inline_keyboard;
     expect(kb?.flat().map((b) => b.text)).toEqual(["🔬 深度分析", "🔗 去 web"]);
     expect(decodeDecision(kb![0]![0]!.callback_data!)).toEqual({ action: "deep", capabilityId: base.id, updatedAt: base.updatedAt });
-    expect(kb?.[0]?.[1]?.url).toContain("/library/cab_deadbeefcafef00d");
+    // AJ-301 Task 5: the "去 web" button now opens the Mini App (a web_app button, not a plain
+    // url button) at this card's path, not the /library page.
+    expect(kb?.[0]?.[1]?.url).toBeUndefined();
+    expect(kb?.[0]?.[1]?.web_app?.url).toBe("https://caphub.agentjoey.ai/mini/library/cab_deadbeefcafef00d");
   });
 
   it("shows 🔬 已深挖 only once the card has a stored deep analysis", () => {
@@ -137,7 +140,8 @@ describe("formatResult — pending", () => {
     expect(decodeDecision(keepData!)).toEqual({ action: "keep", capabilityId: base.id, updatedAt: base.updatedAt });
     expect(decodeDecision(discardData!)).toEqual({ action: "discard", capabilityId: base.id, updatedAt: base.updatedAt });
     expect(decodeDecision(rerunData!)).toEqual({ action: "rerun", capabilityId: base.id, updatedAt: base.updatedAt });
-    expect(kb?.[1]?.[1]?.url).toContain("/library/cab_deadbeefcafef00d");
+    expect(kb?.[1]?.[1]?.url).toBeUndefined();
+    expect(kb?.[1]?.[1]?.web_app?.url).toBe("https://caphub.agentjoey.ai/mini/library/cab_deadbeefcafef00d");
   });
 
   it("renders a discard suggestion label", () => {
@@ -278,7 +282,8 @@ describe("formatResult — todo", () => {
     expect(decodeDecision(kb![0]![0]!.callback_data!)).toEqual({ action: "progress-building", capabilityId: todoBase.id, updatedAt: todoBase.updatedAt });
     expect(decodeDecision(kb![0]![1]!.callback_data!)).toEqual({ action: "progress-done", capabilityId: todoBase.id, updatedAt: todoBase.updatedAt });
     expect(decodeDecision(kb![1]![0]!.callback_data!)).toEqual({ action: "progress-dropped", capabilityId: todoBase.id, updatedAt: todoBase.updatedAt });
-    expect(kb?.[1]?.[1]?.url).toContain("/library/cab_deadbeefcafef00d");
+    expect(kb?.[1]?.[1]?.url).toBeUndefined();
+    expect(kb?.[1]?.[1]?.web_app?.url).toBe("https://caphub.agentjoey.ai/mini/library/cab_deadbeefcafef00d");
   });
 
   it("keeps the four self-build buttons plus 深度分析, and no failure note, for a healthy todo card", () => {

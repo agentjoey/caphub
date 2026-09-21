@@ -1,0 +1,76 @@
+/*
+ * Mini App shell styles. Two jobs only, per task-2-brief.md Step 4:
+ *  1. Map Telegram's theme onto the *existing* background/foreground tokens (--paper, --ink) —
+ *     never a second palette. The live values come from TelegramProvider (it writes --paper /
+ *     --ink inline from themeParams). The block below is just the static fallback for
+ *     `data-theme="dark"` before that JS has run, or if Telegram never supplies themeParams.
+ *  2. Mobile spacing and safe-area insets. Cards, pills and fonts keep their own tokens
+ *     (app/globals.css) — this file does not redefine them.
+ */
+
+:root[data-theme="dark"] {
+  --paper: #16140e;
+  --ink: #f1eee6;
+}
+
+#mini-shell {
+  min-height: 100vh;
+  padding: var(--space-4);
+  padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
+  padding-top: calc(var(--space-4) + env(safe-area-inset-top, 0px));
+}
+
+/*
+ * Task 3 (library list): mobile-first, single column throughout — no breakpoints, since /mini
+ * is only ever viewed inside Telegram's mobile webview.
+ */
+
+/* Each filter facet (type/scenario/tag) is its own horizontally scrolling strip instead of the
+ * desktop's wrapping `.filter-row` — wrapped chips would push the list rows below the fold. */
+.mini-filter-row {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  -webkit-overflow-scrolling: touch;
+}
+.mini-filter-row .chip { flex: none; }
+
+/* `.list-row` is normally a 3-column grid (thumbnail | content | trailing) — the mini list row
+ * has no capture thumbnail, so it collapses to a single content column. */
+.list-row--mini {
+  grid-template-columns: minmax(0, 1fr);
+  padding: var(--space-4) var(--space-2);
+}
+
+/* Footer link to the next `listLibrary` page when the current (filtered) result has more rows
+ * than this one page rendered — see the `remaining` check in app/mini/page.tsx. */
+.mini-more {
+  margin-top: var(--space-4);
+  text-align: center;
+}
+
+/*
+ * Task 4 (write loop): `.mini-actions__buttons` is the mobile counterpart of globals.css's
+ * `.detail-actions__buttons` — same rule (flex, wrap, `--space-2` gap), so up to five buttons
+ * (保留/丢弃/改建议/重跑分析/删除) wrap onto their own lines instead of overflowing a 390px
+ * screen the way bare inline-blocks with no gap would. `.mini-actions` just stacks its own
+ * children (the button row, the edit form, the progress panel) with the same token.
+ */
+.mini-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.mini-actions__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* The Mini App's only self-diagnosis: TelegramProvider shows this when the `initData` exchange
+ * fails. Without it a failed exchange is silent and /mini just sits on an empty shell forever
+ * (the entry page renders no data without a session — see app/mini/page.tsx). It reuses
+ * globals.css's `.inline-error` skin; this rule only adds the shell spacing. */
+.mini-session-error {
+  margin-bottom: var(--space-4);
+}

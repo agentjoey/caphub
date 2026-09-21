@@ -110,7 +110,8 @@ export const dictEn: Dict = {
     clearFilters: "Clear filters",
     emptyNoFilters: "No kept capabilities in the library yet.",
     prevPage: "Previous",
-    nextPage: "Next"
+    nextPage: "Next",
+    moreFooter: "{count} more · Next page"
   },
   detail: {
     back: "← Library",
@@ -202,6 +203,7 @@ export const dictEn: Dict = {
     linkHint: "Repo, issue or note for your build — optional",
     save: "Save progress",
     saving: "Saving…",
+    startBuilding: "Start building",
     genericError: "Something went wrong, please retry"
   },
   buildNotes: {
@@ -265,6 +267,10 @@ export const dictEn: Dict = {
     copy: "Copy",
     copied: "Copied",
     failed: "Copy failed"
+  },
+  mini: {
+    connecting: "Signing in through Telegram…",
+    sessionFailed: "Telegram sign-in failed — close and reopen the Mini App to retry."
   },
   notFound: {
     title: "Capability not found",

@@ -9,14 +9,14 @@ vi.mock("next/navigation", () => ({
 }));
 
 const getCapabilityDetail = vi.fn();
-vi.mock("../../../lib/library/queries", () => ({ getCapabilityDetail: (...args: unknown[]) => getCapabilityDetail(...args) }));
-vi.mock("../../../lib/analysis/scenarios", () => ({
+vi.mock("../../../../lib/library/queries", () => ({ getCapabilityDetail: (...args: unknown[]) => getCapabilityDetail(...args) }));
+vi.mock("../../../../lib/analysis/scenarios", () => ({
   loadScenarios: async () => [{ slug: "scraping", labelZh: "抓取", labelEn: "Scraping", keywords: [] }]
 }));
-vi.mock("../../../lib/runtime", () => ({ getRuntime: () => ({ pool: {} }) }));
-vi.mock("../../../lib/i18n/locale", () => ({ getLocale: async () => "zh" }));
+vi.mock("../../../../lib/runtime", () => ({ getRuntime: () => ({ pool: {} }) }));
+vi.mock("../../../../lib/i18n/locale", () => ({ getLocale: async () => "zh" }));
 const setProgressAction = vi.fn();
-vi.mock("../../actions", () => ({
+vi.mock("../../../actions", () => ({
   decideAction: vi.fn(), editSuggestionAction: vi.fn(), rerunAction: vi.fn(),
   reviewAction: vi.fn(), softDeleteAction: vi.fn(), deepAnalysisAction: vi.fn(),
   setProgressAction: (...args: unknown[]) => setProgressAction(...args)
