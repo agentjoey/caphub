@@ -51,7 +51,8 @@ export default async function MiniLibraryPage({
     allTags(pool),
     queryEmbeddingPromise
   ]);
-  const { items } = await listLibrary(pool, filter, { queryEmbedding, matchedScenarioSlugs });
+  const { items, total } = await listLibrary(pool, filter, { queryEmbedding, matchedScenarioSlugs });
+  const remaining = total - items.length;
   const scenarioCountBySlug = new Map(scenarioCounts.map((s) => [s.slug, s.count]));
   const hasFilters = Boolean(filter.q || filter.types?.length || filter.tags?.length || filter.scenarios?.length);
 
@@ -108,6 +109,19 @@ export default async function MiniLibraryPage({
             </li>
           ))}
         </ul>
+      )}
+      {remaining > 0 && (
+        // The subtitle above states the library's full total (`stats.total`), but this page only
+        // ever renders one `listLibrary` page (PAGE_SIZE=20) of the *filtered* result — this
+        // footer is what keeps that number honest instead of silently truncating the list.
+        <p className="mini-more">
+          <Link
+            className="chip"
+            href={libraryHref(filter, { page: filter.page + 1 }, "/mini")}
+          >
+            {format(dict.library.moreFooter, { count: remaining })}
+          </Link>
+        </p>
       )}
     </div>
   );

@@ -89,4 +89,21 @@ describe("mini library list page", () => {
     expect(screen.getByText(/没有符合条件的能力/)).toBeTruthy();
     expect(screen.queryByRole("link", { name: /网页抓取技能/ })).toBeNull();
   });
+
+  it("renders a next-page footer, carrying the current filters and the next page, when total exceeds the rendered rows", async () => {
+    listLibrary.mockResolvedValueOnce({ items: [baseRow], total: 25 });
+    const { default: Page } = await import("./page");
+    render(await Page({ searchParams: Promise.resolve({ q: "scrape", type: "skill" }) }));
+
+    const footer = screen.getByRole("link", { name: /还有 24 张/ });
+    expect(footer.getAttribute("href")).toBe("/mini?q=scrape&type=skill&page=2");
+  });
+
+  it("renders no footer when total equals the rendered rows", async () => {
+    listLibrary.mockResolvedValueOnce({ items: [baseRow], total: 1 });
+    const { default: Page } = await import("./page");
+    render(await Page({ searchParams: Promise.resolve({}) }));
+
+    expect(screen.queryByText(/还有 .* 张/)).toBeNull();
+  });
 });

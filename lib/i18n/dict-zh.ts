@@ -115,7 +115,8 @@ export const dictZh = {
     clearFilters: "清除筛选",
     emptyNoFilters: "库里还没有保留的能力。",
     prevPage: "上一页",
-    nextPage: "下一页"
+    nextPage: "下一页",
+    moreFooter: "还有 {count} 张 · 下一页"
   },
   detail: {
     back: "← 能力库",

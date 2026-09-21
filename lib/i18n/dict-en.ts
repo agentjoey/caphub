@@ -110,7 +110,8 @@ export const dictEn: Dict = {
     clearFilters: "Clear filters",
     emptyNoFilters: "No kept capabilities in the library yet.",
     prevPage: "Previous",
-    nextPage: "Next"
+    nextPage: "Next",
+    moreFooter: "{count} more · Next page"
   },
   detail: {
     back: "← Library",
