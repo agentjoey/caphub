@@ -50,6 +50,14 @@ export async function POST(request: Request): Promise<Response> {
 
   const cookieValue = issueMiniSession(result.userId, { botToken });
   const response = Response.json({ ok: true });
+  // SameSite=Lax is deliberate, not an oversight: the Mini App is scoped to the iOS/Android
+  // Telegram clients, which render it same-site (a Lax cookie is sent there). Telegram Web and
+  // Desktop render it in a cross-site iframe, where Lax is never sent, so those clients 401 —
+  // accepted, because /library is one click away on desktop and this feature exists to remove
+  // "leave Telegram and log in again" friction on the phone. SameSite=None would make this
+  // cookie ride along on cross-site requests to a surface that can decide, retire and delete
+  // capability cards — do not "fix" this without weighing that CSRF exposure. (Controller
+  // ruling, task-1 review round 1.)
   response.headers.set(
     "Set-Cookie",
     `${MINI_COOKIE}=${cookieValue}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=43200`

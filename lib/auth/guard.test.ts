@@ -222,10 +222,56 @@ describe("guardRequest", () => {
     it("still 401s /api/mcp when the request carries a valid mini session cookie (no identity crossover)", async () => {
       const res = await guardRequest(
         mcp({ "cf-access-jwt-assertion": "t", cookie: `${MINI_COOKIE}=${validMiniCookie()}` }),
-        MINI_ENV,
-        { verify: vi.fn().mockResolvedValue({ email: "", commonName: "" }) }
+        { ...MINI_ENV, ...MCP_ENV },
+        { verify: vi.fn().mockResolvedValue({ email: "", commonName: "someone-elses-token" }) }
       );
       expect(res.status).toBe(401);
+    });
+
+    it("401s a service-token identity (no email) holding a valid mini cookie on /mini", async () => {
+      const verify = vi.fn().mockResolvedValue({ email: "", commonName: "caphub-agent" });
+      const res = await guardRequest(
+        request({ headers: { "cf-access-jwt-assertion": "t" }, path: "/mini", cookie: `${MINI_COOKIE}=${validMiniCookie()}` }),
+        MINI_ENV,
+        { verify }
+      );
+      expect(res.status).toBe(401);
+    });
+
+    it("401s a service-token identity (no email) POSTing /api/mini/session", async () => {
+      const verify = vi.fn().mockResolvedValue({ email: "", commonName: "caphub-agent" });
+      const res = await guardRequest(
+        request({ headers: { "cf-access-jwt-assertion": "t" }, path: "/api/mini/session", method: "POST" }),
+        MINI_ENV,
+        { verify }
+      );
+      expect(res.status).toBe(401);
+    });
+
+    it("logs mini-specific reason codes instead of the MCP ones", async () => {
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await guardRequest(
+        request({ headers: { "cf-access-jwt-assertion": "t" }, path: "/mini", cookie: `${MINI_COOKIE}=${validMiniCookie()}` }),
+        MINI_ENV,
+        { verify: vi.fn().mockResolvedValue({ email: "", commonName: "caphub-agent" }) }
+      );
+      await guardRequest(
+        request({ headers: { "cf-access-jwt-assertion": "t" }, path: "/mini" }),
+        ENV,
+        { verify: vi.fn().mockResolvedValue({ email: "theagentjoey@gmail.com", commonName: "" }) }
+      );
+      await guardRequest(
+        request({ headers: { "cf-access-jwt-assertion": "t" }, path: "/mini" }),
+        MINI_ENV,
+        { verify: vi.fn().mockResolvedValue({ email: "theagentjoey@gmail.com", commonName: "" }) }
+      );
+
+      const logged = log.mock.calls.map((c) => c[0]).join("\n");
+      expect(logged).toContain('"reason":"mini_no_email"');
+      expect(logged).toContain('"reason":"mini_secrets_unset"');
+      expect(logged).toContain('"reason":"mini_session_invalid"');
+      log.mockRestore();
     });
   });
 });
