@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { decideAction, editSuggestionAction, rerunAction, setProgressAction, softDeleteAction } from "../../app/actions";
 import type { CapabilityType } from "../../lib/analysis/card";
@@ -109,6 +109,9 @@ export function MiniActions({
   }
 
   async function saveEdit(nextType: CapabilityType, nextUsage: "integrate" | "reference", nextTags: string[]): Promise<string | null> {
+    // Same guard as its five sibling writes: once the card is busy or `stale`, no action may
+    // fire another write with the token this one is about to invalidate (or has already lost).
+    if (locked) return null;
     setState("busy");
     setMessage(null);
     try {
@@ -133,7 +136,12 @@ export function MiniActions({
     }
   }
 
-  async function startBuilding() {
+  // The one handler that is also bound to Telegram's native MainButton, whose effect is keyed on
+  // the handler's identity. A plain function declaration gave it a fresh identity on *every*
+  // render, so each `router.refresh()` — i.e. each write anywhere on the card — made the native
+  // button visibly offClick+hide then onClick+show again. Memoized, a re-render that changes
+  // nothing rebinds nothing.
+  const startBuilding = useCallback(async () => {
     if (locked) return;
     setState("busy");
     setMessage(null);
@@ -155,7 +163,7 @@ export function MiniActions({
       setState("idle");
       haptic("warning");
     }
-  }
+  }, [id, dict, haptic, router, setUpdatedAt, locked, updatedAt, progressLink]);
 
   async function saveProgress() {
     if (locked) return;

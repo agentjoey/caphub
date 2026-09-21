@@ -18,7 +18,11 @@ vi.mock("../../app/actions", () => ({
   rerunAction: (...args: unknown[]) => rerunAction(...(args as [])),
   softDeleteAction: (...args: unknown[]) => softDeleteAction(...(args as []))
 }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }) }));
+// One stable router instance, like the real `useRouter()` (a context value, not a fresh object
+// per render) — a mock that returned a new object each render would invalidate every
+// useCallback that depends on it and hide the very rebinding this file asserts against.
+const router = { push: vi.fn(), refresh: vi.fn() };
+vi.mock("next/navigation", () => ({ useRouter: () => router }));
 
 const haptic = vi.fn();
 vi.mock("./telegram-webapp", async (importOriginal) => {
@@ -131,6 +135,56 @@ describe("MiniActions", () => {
     // request with the same (now stale) token — it must wait for a reload instead.
     fireEvent.click(screen.getByRole("button", { name: "丢弃" }));
     expect(decideAction).toHaveBeenCalledOnce();
+  });
+
+  it("does not re-fire a lock-carrying write from the edit form once the control is frozen", async () => {
+    decideAction.mockResolvedValueOnce({ ok: false, reason: "CONFLICT", message: "已被修改，请刷新" });
+    render(
+      <MiniActions
+        id="cab_1"
+        captureId="cap_1"
+        updatedAt="2026-09-21T00:00:00.000Z"
+        verdict="pending"
+        type="skill"
+        usage="integrate"
+        tags={["python"]}
+      />
+    );
+    // Open the editor first: once frozen, the 改建议 button is disabled and cannot open it.
+    fireEvent.click(screen.getByRole("button", { name: "改建议" }));
+    fireEvent.click(screen.getByRole("button", { name: "保留" }));
+    await waitFor(() => expect(screen.getByText("已被修改，请刷新")).toBeTruthy());
+
+    // saveEdit carries the same (now stale) optimistic-lock token as its five sibling writes and
+    // must refuse for the same reason — it used to be the one write missing that guard.
+    fireEvent.click(screen.getByRole("button", { name: /保存/ }));
+    await waitFor(() => expect(decideAction).toHaveBeenCalledOnce());
+    expect(editSuggestionAction).not.toHaveBeenCalled();
+  });
+
+  it("keeps MainButton bound across a re-render instead of unbinding and re-showing it", () => {
+    const wa = fakeWebApp();
+    const props = {
+      id: "cab_1",
+      captureId: "cap_1",
+      updatedAt: "t",
+      verdict: "keep" as const,
+      type: "skill" as const,
+      usage: "reference" as const,
+      tags: [] as string[],
+      progress: "todo" as const,
+      progressLink: null
+    };
+    const { rerender } = render(<MiniActions {...props} />, { wrapper: withFakeTelegram(wa) });
+    expect(wa.MainButton.show).toHaveBeenCalledTimes(1);
+
+    // What `router.refresh()` does after any sibling write: a re-render with identical props.
+    // An unstable handler identity re-keyed MainButton's effect here, so the native button
+    // visibly unbound and re-showed on every write.
+    rerender(<MiniActions {...props} />);
+    expect(wa.MainButton.offClick).not.toHaveBeenCalled();
+    expect(wa.MainButton.hide).not.toHaveBeenCalled();
+    expect(wa.MainButton.show).toHaveBeenCalledTimes(1);
   });
 
   it("never binds MainButton for a pending card — that state is only ever rendered on /mini/review, which always passes enableMainButton={false}", () => {

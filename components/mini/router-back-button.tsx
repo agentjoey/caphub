@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { BackButton } from "./back-button";
 
@@ -10,5 +11,9 @@ import { BackButton } from "./back-button";
  */
 export function RouterBackButton() {
   const router = useRouter();
-  return <BackButton onClick={() => router.back()} />;
+  // Stable identity on purpose: BackButton's effect is keyed on the handler, so a fresh arrow
+  // per render would make every `router.refresh()` (i.e. every write on the page) unbind and
+  // re-show Telegram's native back button — a visible blink.
+  const goBack = useCallback(() => router.back(), [router]);
+  return <BackButton onClick={goBack} />;
 }
