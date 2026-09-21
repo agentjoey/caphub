@@ -113,3 +113,33 @@ Screenshots go under `.agent/screens/aj-301/` once taken, referenced here by rel
 ## Sign-off
 
 - [ ] Human Owner confirms the walkthrough above and approves release.
+
+## 上线（2026-09-21）
+
+| 步骤 | 结果 |
+|---|---|
+| 合并 `aj-301-miniapp` → main（`8d5fd83`，53 文件 / +3043），web + worker 部署 | SUCCESS |
+| Human 在 Railway `web` 设 `TELEGRAM_BOT_TOKEN` | 完成 |
+| Human 把 Access 邮箱策略的 session duration 调长 | 完成 |
+| 底色修复（`1824b20`） | SUCCESS |
+
+## 走查结果（Human，iPhone Telegram）
+
+- Mini App 能从 bot 菜单按钮打开，库列表正常显示。
+- **首次打开没有被要求过邮箱验证码**——Telegram 的 WebView 里已有可用的 Access 会话（应是此前点「去 web」时在内置浏览器登录留下的）。设计时预估的那段摩擦，在实际环境里没有出现。
+- 其余交互项（检索、返回键回到原筛选、改进度的触感、卡片按钮直达、深浅色跟随）由 Human 判断"要调整的地方比较多"，决定**另开 issue 逐项处理**，不阻塞本期收尾。
+
+## 上线后修掉的问题
+
+| 问题 | 根因 | 修复 |
+|---|---|---|
+| 打开 Mini App 只显示 `{"error":"unauthorized"}` | `web` 服务只配了 `TELEGRAM_BOT_TOKEN`，缺 `TELEGRAM_OWNER_CHAT_ID`；守卫要求两者齐备，缺一即 fail closed。交接清单里漏写了第二个变量 | 从库中已有投递记录读出 owner chat id 并设进 Railway |
+| Mini App 底色接近纯白，与 mobile web 的纸感底色不一致 | 实现把 Telegram 的 `themeParams` 映射到了 `--paper`/`--ink`，并在 mini.css 里自造了一套暗色；而 globals.css 只有一套配色、没有暗色块 | 颜色全部回归 globals.css；`data-theme` 属性保留作为将来真做暗色时的挂钩；加测试钉住"绝不把 Telegram 的颜色写进 token"（`1824b20`） |
+
+## 已知遗留
+
+- 交互细节（检索、返回、触感、深浅色等）待 Human 另开 issue。
+- 全局 404 页面在路由组重构后失去了外壳与样式（只影响打错的 URL）。
+- 两处测试不保护它们声称的东西：`saveEdit` 的 `locked` 守卫、mini layout 的隔离渲染。
+- `SameSite=None` 的注释把 CSRF 防护说得过于绝对——无 `Origin` 头的请求 Next 只告警不拦，但浏览器 POST 总会带 `Origin`。
+- Telegram SDK 脚本若 404，界面会静默停在外壳。
