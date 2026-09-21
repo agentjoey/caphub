@@ -94,12 +94,17 @@ export async function guardRequest(
         return unauthorized();
       }
       if (path === "/mini" && request.method === "GET") {
-        // Chicken-and-egg: the very first load inside Telegram has no mini cookie yet (Task 2
-        // controller ruling). Only the top-level entry DOCUMENT is exempt — a GET on exactly
-        // "/mini", still behind Access (checked above) and the secrets check above. The page it
-        // serves calls POST /api/mini/session client-side, then router.refresh()es to pick the
-        // cookie up. Every other /mini/* path, and any server-action POST back to "/mini"
-        // itself, falls through to the cookie check below like normal.
+        // Chicken-and-egg: the very first load inside Telegram has no mini cookie yet. Only the
+        // top-level entry DOCUMENT is exempt — a GET on exactly "/mini", still behind Access
+        // (checked above) and the secrets check above. The page it serves calls
+        // POST /api/mini/session client-side, then router.refresh()es to pick the cookie up.
+        // Every other /mini/* path, and any server-action POST back to "/mini" itself, falls
+        // through to the cookie check below like normal.
+        //
+        // The exemption is not a hole: app/mini/page.tsx re-checks this very cookie with
+        // `verifyMiniSession` and renders only the shell — no query, no library data — when it
+        // is missing or invalid. Keep those two in step; loosening either one alone would let an
+        // Access session with no Telegram read the whole library.
         return NextResponse.next();
       }
       if (!verifyMiniSession(request.cookies.get(MINI_COOKIE)?.value, { botToken, ownerId })) {

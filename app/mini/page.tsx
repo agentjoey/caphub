@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { loadScenarios } from "../../lib/analysis/scenarios";
+import { MINI_COOKIE, verifyMiniSession } from "../../lib/telegram/mini-session";
 import { ScoreBadge } from "../../components/capability/score-badge";
 import { TagList } from "../../components/capability/tag-list";
 import { embedSearchQuery } from "../../lib/library/query-embedding";
@@ -20,11 +22,26 @@ export const dynamic = "force-dynamic";
 const LIST_ROW_TAGS = 3;
 
 /**
- * `/mini` — the Telegram mini app's library entry page. Exempt from the mini-session cookie
- * (see task-2-brief.md), so it must render sanely with no session yet; it reads nothing from
- * Telegram itself, just the same DB-backed library data `/library` shows.
+ * `GET /mini` is the one route `lib/auth/guard.ts` lets through without a mini-session cookie —
+ * it has to, or the shell that exchanges `initData` for that cookie could never load. So the
+ * exemption is paid for here instead: the page verifies the cookie itself and, without a valid
+ * one, renders the shell and nothing else. That is what keeps a Cloudflare Access session alone
+ * (no Telegram) from reading the library, paging it via `?page=N`, or spending the Gemini
+ * embedding key via `?q=…`. The check must stay `verifyMiniSession` — the same function the
+ * guard uses — so the two can never drift apart into two different notions of "signed in".
+ */
+async function hasMiniSession(telegram: { botToken?: string; ownerChatId?: string }): Promise<boolean> {
+  const botToken = telegram.botToken?.trim();
+  const ownerId = telegram.ownerChatId?.trim();
+  if (!botToken || !ownerId) return false; // Fail closed, exactly like the guard.
+  const store = await cookies();
+  return verifyMiniSession(store.get(MINI_COOKIE)?.value, { botToken, ownerId });
+}
+
+/**
+ * `/mini` — the Telegram mini app's library entry page.
  *
- * Data path is intentionally identical to `app/library/page.tsx`:
+ * Data path is intentionally identical to `app/(chrome)/library/page.tsx`:
  * parseLibraryParams -> matchScenarios / embedSearchQuery -> listLibrary. Do not fork this into
  * a second search implementation — extend the shared lib functions instead.
  */
@@ -33,11 +50,24 @@ export default async function MiniLibraryPage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
-  const params = await searchParams;
-  const filter = parseLibraryParams(params);
   const { pool, config } = getRuntime();
   const locale = await getLocale();
   const dict = getDict(locale);
+
+  // Before any query, any embedding call and even before reading the search params: without a
+  // verified Telegram session this render must produce no library data at all. TelegramProvider
+  // exchanges initData and calls router.refresh(), which re-runs this page with the cookie set.
+  if (!(await hasMiniSession(config.telegram))) {
+    return (
+      <div className="mini-library">
+        <h1 className="page-title">{dict.library.title}</h1>
+        <p className="page-subtitle">{dict.mini.connecting}</p>
+      </div>
+    );
+  }
+
+  const params = await searchParams;
+  const filter = parseLibraryParams(params);
 
   const q = filter.q;
   const isSerialQuery = Boolean(q && parseSerialQuery(q) !== null);

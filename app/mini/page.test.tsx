@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { CapabilityRow } from "../../lib/library/queries";
 import { NO_OVERLAP } from "../../lib/analysis/card";
+import { issueMiniSession, MINI_COOKIE } from "../../lib/telegram/mini-session";
 
 vi.mock("next/link", () => ({
   default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) => <a href={href} {...rest}>{children}</a>
@@ -19,10 +20,30 @@ vi.mock("../../lib/library/queries", () => ({
   scenarioStats: (...args: unknown[]) => scenarioStats(...args)
 }));
 
-vi.mock("../../lib/library/query-embedding", () => ({ embedSearchQuery: async () => null }));
+const embedSearchQuery = vi.fn(async () => null);
+vi.mock("../../lib/library/query-embedding", () => ({ embedSearchQuery: (...args: unknown[]) => embedSearchQuery(...(args as [])) }));
 vi.mock("../../lib/analysis/scenarios", () => ({ loadScenarios: async () => [] }));
-vi.mock("../../lib/runtime", () => ({ getRuntime: () => ({ pool: {}, config: { providers: { geminiApiKey: undefined } } }) }));
+
+const BOT_TOKEN = "123:test-bot-token";
+const OWNER_ID = "4242";
+vi.mock("../../lib/runtime", () => ({
+  getRuntime: () => ({
+    pool: {},
+    config: {
+      providers: { geminiApiKey: "test-gemini-key" },
+      telegram: { enabled: true, botToken: BOT_TOKEN, ownerChatId: OWNER_ID }
+    }
+  })
+}));
 vi.mock("../../lib/i18n/locale", () => ({ getLocale: async () => "zh" }));
+
+// The mini-session cookie is NOT mocked away: these tests exercise the real `verifyMiniSession`
+// the guard uses, so a change that made the page accept an unsigned or foreign cookie would fail
+// here instead of silently reopening the leak.
+let cookieValue: string | undefined;
+vi.mock("next/headers", () => ({
+  cookies: async () => ({ get: (name: string) => (name === MINI_COOKIE && cookieValue ? { name, value: cookieValue } : undefined) })
+}));
 
 const STATS = { byType: { skill: 1, experience: 0, plugin: 0, prompt: 0, tool: 0, model: 0, other: 0 }, total: 1, tagCount: 1, pending: 0, toBuild: 0 };
 
@@ -44,6 +65,10 @@ const baseRow: CapabilityRow = {
 };
 
 beforeEach(() => {
+  // A genuine, correctly signed session for the configured owner — every test below except the
+  // no-session ones renders as the signed-in owner does.
+  cookieValue = issueMiniSession(OWNER_ID, { botToken: BOT_TOKEN });
+  embedSearchQuery.mockClear();
   listLibrary.mockReset();
   libraryStats.mockReset();
   allTags.mockReset();
@@ -109,6 +134,42 @@ describe("mini library list page", () => {
     listLibrary.mockResolvedValueOnce({ items: [baseRow], total: 2 });
     render(await Page({ searchParams: Promise.resolve({}) }));
     expect(screen.getByText(/还有 1 张/)).toBeTruthy();
+  });
+
+  // `GET /mini` is cookie-exempt in lib/auth/guard.ts (the shell has to load before it can
+  // exchange initData), so the page itself is the only thing keeping an Access session with no
+  // Telegram from reading the library.
+  describe("without a valid mini session", () => {
+    it("renders only the shell: no library data, no query, no embedding call", async () => {
+      cookieValue = undefined;
+      const { default: Page } = await import("./page");
+      render(await Page({ searchParams: Promise.resolve({ q: "scrape", page: "3" }) }));
+
+      expect(listLibrary).not.toHaveBeenCalled();
+      expect(libraryStats).not.toHaveBeenCalled();
+      expect(scenarioStats).not.toHaveBeenCalled();
+      expect(allTags).not.toHaveBeenCalled();
+      expect(embedSearchQuery).not.toHaveBeenCalled();
+      expect(screen.queryByRole("link", { name: /网页抓取技能/ })).toBeNull();
+      expect(document.body.textContent).not.toContain("网页抓取技能");
+      expect(document.body.textContent).not.toContain("SKL-0012");
+      // No search box either — it would only ever submit back into this same empty shell.
+      expect(screen.queryByRole("searchbox")).toBeNull();
+    });
+
+    it("refuses a tampered or foreign cookie the same way", async () => {
+      for (const bad of [
+        "not-a-cookie",
+        issueMiniSession(OWNER_ID, { botToken: "a-different-bot-token" }),
+        issueMiniSession("9999", { botToken: BOT_TOKEN })
+      ]) {
+        cookieValue = bad;
+        const { default: Page } = await import("./page");
+        render(await Page({ searchParams: Promise.resolve({}) }));
+        expect(listLibrary).not.toHaveBeenCalled();
+        cleanup();
+      }
+    });
   });
 
   it("never puts a page param on a row href, even when the list itself is on page 2", async () => {
