@@ -10,10 +10,27 @@ export interface InlineKeyboardButton {
   text: string;
   callback_data?: string;
   url?: string;
+  /**
+   * Opens `url` inside Telegram's in-app Mini App WebView instead of the system browser. Only
+   * valid on a button in a private chat (Telegram rejects it in groups/channels) — this bot only
+   * ever talks to its owner one-on-one, so every button that carries this is safe.
+   */
+  web_app?: { url: string };
 }
 
 export interface InlineKeyboardMarkup {
   inline_keyboard: InlineKeyboardButton[][];
+}
+
+/**
+ * `setChatMenuButton`'s `menu_button` payload for a bot-wide `web_app` button (Telegram also
+ * supports `"default"`/`"commands"`, which this bot never sets). Same private-chat-only caveat
+ * as {@link InlineKeyboardButton.web_app}.
+ */
+export interface MenuButton {
+  type: "web_app";
+  text: string;
+  web_app: { url: string };
 }
 
 export interface TelegramUpdate {
@@ -53,6 +70,7 @@ export interface TelegramApi {
   getFile(params: { fileId: string; signal?: AbortSignal }): Promise<TelegramFile>;
   downloadFile(params: { filePath: string; maxBytes: number; signal?: AbortSignal }): Promise<Uint8Array>;
   setMyCommands(params: { commands: BotCommand[]; signal?: AbortSignal }): Promise<true>;
+  setChatMenuButton(params: { menuButton: MenuButton; signal?: AbortSignal }): Promise<true>;
 }
 
 /** Escapes the characters Telegram's `parse_mode: "HTML"` requires escaped outside of tags. */
@@ -179,6 +197,10 @@ export function createTelegramApi(opts: { token: string; fetch?: typeof fetch; t
 
     setMyCommands({ commands, signal }) {
       return callApi<true>("setMyCommands", { commands }, defaultTimeoutMs, signal);
+    },
+
+    setChatMenuButton({ menuButton, signal }) {
+      return callApi<true>("setChatMenuButton", { menu_button: menuButton }, defaultTimeoutMs, signal);
     }
   };
 }

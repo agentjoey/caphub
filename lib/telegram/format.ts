@@ -136,6 +136,16 @@ function libraryLink(id: string): string {
   return `${publicBaseUrl()}/library/${id}`;
 }
 
+/**
+ * A card's path inside the Telegram Mini App (`/mini`), used by every "🔗 去 web" button's
+ * `web_app.url` (AJ-301 Task 5) — the in-text `详情` links (see {@link libraryLinkHtml}) still
+ * point at the plain `/library/<id>` page, since those open in the system browser, not the
+ * Mini App WebView.
+ */
+function miniLink(id: string): string {
+  return `${publicBaseUrl()}/mini/library/${id}`;
+}
+
 /** An HTML anchor to a card's library page, labeled with `label` rather than showing the raw URL (and its internal id) as visible text. */
 function libraryLinkHtml(id: string, label: string): string {
   return `<a href="${escapeHtml(libraryLink(id))}">${escapeHtml(label)}</a>`;
@@ -282,7 +292,7 @@ function formatKeep(card: DecidedCardInput): FormattedMessage {
   // A kept card is the one card deep analysis applies to (requestDeepAnalysis rejects anything
   // else), so this is where the 🔬 深度分析 button lives.
   const replyMarkup: InlineKeyboardMarkup = {
-    inline_keyboard: [[deepButton(card.id, card.updatedAt), { text: "🔗 去 web", url: libraryLink(card.id) }]]
+    inline_keyboard: [[deepButton(card.id, card.updatedAt), { text: "🔗 去 web", web_app: { url: miniLink(card.id) } }]]
   };
   return { text, replyMarkup };
 }
@@ -335,7 +345,7 @@ function formatPending(card: DecidedCardInput): FormattedMessage {
       ],
       [
         { text: "♻️ 重跑分析", callback_data: encodeDecision("rerun", card.id, card.updatedAt) },
-        { text: "🔗 去 web", url: libraryLink(card.id) }
+        { text: "🔗 去 web", web_app: { url: miniLink(card.id) } }
       ]
     ]
   };
@@ -379,7 +389,7 @@ function formatTodo(card: TodoCardInput): FormattedMessage {
       ],
       [
         { text: "🚫 放弃", callback_data: encodeDecision("progress-dropped", card.id, card.updatedAt) },
-        { text: "🔗 去 web", url: libraryLink(card.id) }
+        { text: "🔗 去 web", web_app: { url: miniLink(card.id) } }
       ]
     ]
   };

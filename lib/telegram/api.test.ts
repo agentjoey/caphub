@@ -110,6 +110,18 @@ describe("createTelegramApi", () => {
     expect(body).toEqual({ commands });
   });
 
+  it("setChatMenuButton posts the menu_button payload", async () => {
+    let body: Record<string, unknown> = {};
+    const fetchFn = (async (_u: string, i: RequestInit) => {
+      body = JSON.parse(i.body as string);
+      return new Response(JSON.stringify({ ok: true, result: true }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const api = createTelegramApi({ token: TOKEN, fetch: fetchFn });
+    const menuButton = { type: "web_app" as const, text: "能力库", web_app: { url: "https://caphub.agentjoey.ai/mini" } };
+    await api.setChatMenuButton({ menuButton });
+    expect(body).toEqual({ menu_button: menuButton });
+  });
+
   it("getFile posts file_id and returns the result", async () => {
     let body: Record<string, unknown> = {};
     const fetchFn = (async (_u: string, i: RequestInit) => {

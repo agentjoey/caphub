@@ -212,11 +212,29 @@ export async function handleCommand(deps: CommandDeps, params: CommandParams): P
   }
 }
 
-/** `setMyCommands` at worker startup. Failures only log — a stale command list is never fatal. */
-export async function syncCommands(api: Pick<TelegramApi, "setMyCommands">): Promise<void> {
+/** The text on the bot-wide menu button that opens the Mini App (`/mini`). */
+const MENU_BUTTON_TEXT = "能力库";
+
+/**
+ * `setMyCommands` and `setChatMenuButton` at worker startup. Both failures only log — a stale
+ * command list or menu button is never fatal, and one failing must not skip the other.
+ *
+ * The menu button is a `web_app` button (see {@link MenuButton}), which Telegram only honors in
+ * private chats — this bot only ever talks to its owner privately, so that's exactly this bot's
+ * only chat type. With no `chat_id` in the request, this sets the *default* menu button for every
+ * private chat with the bot, rather than one specific chat.
+ */
+export async function syncCommands(api: Pick<TelegramApi, "setMyCommands" | "setChatMenuButton">): Promise<void> {
   try {
     await api.setMyCommands({ commands: COMMANDS });
   } catch (error) {
     console.error(JSON.stringify({ msg: "telegram setMyCommands failed", error: error instanceof Error ? error.message : String(error) }));
+  }
+  try {
+    await api.setChatMenuButton({
+      menuButton: { type: "web_app", text: MENU_BUTTON_TEXT, web_app: { url: `${publicBaseUrl()}/mini` } }
+    });
+  } catch (error) {
+    console.error(JSON.stringify({ msg: "telegram setChatMenuButton failed", error: error instanceof Error ? error.message : String(error) }));
   }
 }
