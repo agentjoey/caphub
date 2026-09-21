@@ -72,7 +72,7 @@ describe("MiniActions", () => {
     haptic.mockReset();
   });
 
-  it("fires a notification haptic after a decision succeeds, and none when it conflicts", async () => {
+  it("fires a success haptic when a decision succeeds and a warning haptic when it conflicts", async () => {
     decideAction.mockResolvedValueOnce({ ok: true, updatedAt: "2026-09-21T00:00:01.000Z" });
     render(
       <MiniActions
@@ -133,10 +133,9 @@ describe("MiniActions", () => {
     expect(decideAction).toHaveBeenCalledOnce();
   });
 
-  it("binds MainButton to the primary action for the card's current state", () => {
+  it("never binds MainButton for a pending card — that state is only ever rendered on /mini/review, which always passes enableMainButton={false}", () => {
     const wa = fakeWebApp();
-    // 待决卡片：MainButton 绑定「保留」
-    const { unmount } = render(
+    render(
       <MiniActions
         id="cab_1"
         captureId="cap_1"
@@ -148,9 +147,11 @@ describe("MiniActions", () => {
       />,
       { wrapper: withFakeTelegram(wa) }
     );
-    expect(wa.MainButton.setText).toHaveBeenCalledWith("保留");
-    unmount();
+    expect(wa.MainButton.setText).not.toHaveBeenCalled();
+    expect(wa.MainButton.show).not.toHaveBeenCalled();
+  });
 
+  it("binds MainButton to the primary action for the card's current state", () => {
     // 已保留、参考自研、未开始自研：MainButton 绑定「开始自研」
     const wa2 = fakeWebApp();
     const { unmount: unmount2 } = render(

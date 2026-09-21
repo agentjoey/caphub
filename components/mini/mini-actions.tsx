@@ -42,7 +42,6 @@ export function MiniActions({
   progressLink: initialProgressLink = null,
   allowDelete = false,
   enableMainButton = true,
-  onDecided,
   locale = "zh"
 }: {
   id: string;
@@ -64,8 +63,6 @@ export function MiniActions({
    * review page renders up to PAGE_SIZE cards at once, where a single global MainButton could
    * only ever "belong" to one of them — so it passes `false` and keeps every action in-page. */
   enableMainButton?: boolean;
-  /** Called after a successful decide(), e.g. so the review page can drop the row from its list. */
-  onDecided?: (verdict: "keep" | "discard") => void;
   locale?: Locale;
 }) {
   const dict = getDict(locale);
@@ -98,7 +95,6 @@ export function MiniActions({
         setVerdict(nextVerdict);
         setState("idle");
         haptic("success");
-        onDecided?.(nextVerdict);
         router.refresh();
         return;
       }
@@ -226,12 +222,15 @@ export function MiniActions({
     }
   }
 
+  // No `verdict === 'pending'` branch here: a pending card only ever renders on /mini/review,
+  // which always passes `enableMainButton={false}` (a multi-row queue has no single card for one
+  // global MainButton to represent — see that prop's doc comment), and /mini/library/[id]
+  // redirects pending cards away before this component ever mounts for one. Binding MainButton
+  // to 保留 here would be dead code every real caller disables.
   const primaryAction =
-    verdict === "pending"
-      ? { text: dict.detailActions.keep, onClick: () => decide("keep") }
-      : hasProgress && usage === "reference" && progress === "todo"
-        ? { text: dict.progressControl.startBuilding, onClick: startBuilding }
-        : null;
+    hasProgress && usage === "reference" && progress === "todo"
+      ? { text: dict.progressControl.startBuilding, onClick: startBuilding }
+      : null;
 
   return (
     <div className="mini-actions">

@@ -48,3 +48,21 @@
   margin-top: var(--space-4);
   text-align: center;
 }
+
+/*
+ * Task 4 (write loop): `.mini-actions__buttons` is the mobile counterpart of globals.css's
+ * `.detail-actions__buttons` — same rule (flex, wrap, `--space-2` gap), so up to five buttons
+ * (保留/丢弃/改建议/重跑分析/删除) wrap onto their own lines instead of overflowing a 390px
+ * screen the way bare inline-blocks with no gap would. `.mini-actions` just stacks its own
+ * children (the button row, the edit form, the progress panel) with the same token.
+ */
+.mini-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.mini-actions__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
