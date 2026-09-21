@@ -1,18 +1,24 @@
 import { describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { guardRequest } from "./guard";
+import { MINI_COOKIE, issueMiniSession } from "../telegram/mini-session";
 
 const ENV = { NODE_ENV: "production", CF_ACCESS_AUD: "aud1", CF_ACCESS_TEAM_DOMAIN: "team.cloudflareaccess.com" };
 
-function request(init: { headers?: Record<string, string>; cookie?: string } = {}) {
+function request(init: { headers?: Record<string, string>; cookie?: string; path?: string; method?: string } = {}) {
   const headers: Record<string, string> = { ...init.headers };
   if (init.cookie) headers.cookie = init.cookie;
-  return new NextRequest("http://localhost/api/captures", { headers });
+  return new NextRequest(`http://localhost${init.path ?? "/api/captures"}`, { headers, method: init.method });
 }
 
 const mcp = (headers: Record<string, string> = {}) =>
   new NextRequest("http://localhost/api/mcp", { method: "POST", headers });
 const MCP_ENV = { ...ENV, CF_ACCESS_SERVICE_TOKEN_CN: "caphub-agent" };
+
+const BOT_TOKEN = "123456:test-token";
+const OWNER_ID = "99";
+const MINI_ENV = { ...ENV, TELEGRAM_BOT_TOKEN: BOT_TOKEN, TELEGRAM_OWNER_CHAT_ID: OWNER_ID };
+const validMiniCookie = () => issueMiniSession(OWNER_ID, { botToken: BOT_TOKEN });
 
 describe("guardRequest", () => {
   it("401s on /api/mcp when no service-token common name is configured", async () => {
@@ -162,6 +168,64 @@ describe("guardRequest", () => {
       expect(allLogged).not.toContain(secretCn);
       expect(allLogged).not.toContain(MCP_ENV.CF_ACCESS_SERVICE_TOKEN_CN);
       log.mockRestore();
+    });
+  });
+
+  describe("/mini", () => {
+    const verify = () => vi.fn().mockResolvedValue({ email: "theagentjoey@gmail.com", commonName: "" });
+
+    it("401s a /mini page request with no mini session cookie", async () => {
+      const res = await guardRequest(
+        request({ headers: { "cf-access-jwt-assertion": "t" }, path: "/mini" }),
+        MINI_ENV,
+        { verify: verify() }
+      );
+      expect(res.status).toBe(401);
+    });
+
+    it("401s a /mini/library/x POST with no mini session cookie (simulated server action)", async () => {
+      const res = await guardRequest(
+        request({ headers: { "cf-access-jwt-assertion": "t" }, path: "/mini/library/x", method: "POST" }),
+        MINI_ENV,
+        { verify: verify() }
+      );
+      expect(res.status).toBe(401);
+    });
+
+    it("lets /api/mini/session through with no mini session cookie", async () => {
+      const res = await guardRequest(
+        request({ headers: { "cf-access-jwt-assertion": "t" }, path: "/api/mini/session", method: "POST" }),
+        MINI_ENV,
+        { verify: verify() }
+      );
+      expect(res.status).not.toBe(401);
+    });
+
+    it("401s /mini whenever the bot token / owner id are not configured", async () => {
+      const res = await guardRequest(
+        request({ headers: { "cf-access-jwt-assertion": "t" }, path: "/mini", cookie: `${MINI_COOKIE}=${validMiniCookie()}` }),
+        ENV,
+        { verify: verify() }
+      );
+      expect(res.status).toBe(401);
+    });
+
+    it("lets /mini through with a valid mini session cookie", async () => {
+      const res = await guardRequest(
+        request({ headers: { "cf-access-jwt-assertion": "t" }, path: "/mini", cookie: `${MINI_COOKIE}=${validMiniCookie()}` }),
+        MINI_ENV,
+        { verify: verify() }
+      );
+      expect(res.status).not.toBe(401);
+    });
+
+    it("still 401s /api/mcp when the request carries a valid mini session cookie (no identity crossover)", async () => {
+      const res = await guardRequest(
+        mcp({ "cf-access-jwt-assertion": "t", cookie: `${MINI_COOKIE}=${validMiniCookie()}` }),
+        MINI_ENV,
+        { verify: vi.fn().mockResolvedValue({ email: "", commonName: "" }) }
+      );
+      expect(res.status).toBe(401);
     });
   });
 });
