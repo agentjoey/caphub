@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fetchUrlText, stripHtml, type DnsLookup } from "./url";
+import { fetchUrlText, stripHtml, htmlToText, MAX_URL_BODY_BYTES, type DnsLookup } from "./url";
 
 // A stand-in for `dns.promises.lookup` that resolves any hostname to a
 // single public address, so tests never touch real DNS or the network.
@@ -11,15 +11,32 @@ describe("stripHtml", () => {
   });
 });
 
+describe("htmlToText", () => {
+  it("keeps block and <br> boundaries as line breaks and collapses runs of spaces within a line", () => {
+    expect(htmlToText("<div><p>第一行</p><p>第二行  有  空格<br>第三行</p></div><script>x()</script>")).toBe(
+      "第一行\n第二行 有 空格\n第三行"
+    );
+  });
+
+  it("keeps <pre> content's own line breaks", () => {
+    expect(htmlToText("<pre>line 1\n  line 2</pre>")).toBe("line 1\nline 2");
+  });
+});
+
 describe("fetchUrlText", () => {
   it("returns null for non-https", async () => {
     expect(await fetchUrlText("http://a.b")).toBeNull();
   });
 
-  it("caps body to 20480 bytes", async () => {
-    const fetchFn = (async () => new Response("<p>" + "a".repeat(50000) + "</p>", { status: 200, headers: { "content-type": "text/html" } })) as unknown as typeof fetch;
+  it("caps body to MAX_URL_BODY_BYTES", async () => {
+    const fetchFn = (async () => new Response("<p>" + "a".repeat(200_000) + "</p>", { status: 200, headers: { "content-type": "text/html" } })) as unknown as typeof fetch;
     const t = await fetchUrlText("https://a.b/", fetchFn, publicLookup);
-    expect(t!.length).toBeLessThanOrEqual(20480);
+    expect(t!.length).toBeLessThanOrEqual(MAX_URL_BODY_BYTES);
+  });
+
+  it("keeps line breaks in plain-text bodies", async () => {
+    const fetchFn = (async () => new Response("a\n\n\nb   c", { status: 200, headers: { "content-type": "text/plain" } })) as unknown as typeof fetch;
+    expect(await fetchUrlText("https://a.b/", fetchFn, publicLookup)).toBe("a\n\nb c");
   });
 
   it("returns null on non-2xx", async () => {

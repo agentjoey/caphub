@@ -4,7 +4,7 @@ import { lookup as defaultDnsLookup } from "node:dns/promises";
 export { defaultDnsLookup };
 import { stripNul } from "../../text/sanitize";
 
-export const MAX_URL_BODY_BYTES = 20_480;
+export const MAX_URL_BODY_BYTES = 102_400;
 export const URL_TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 2;
 
@@ -27,6 +27,37 @@ export function stripHtml(html: string): string {
     .replace(/&quot;/g, '"')
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/** Collapses spaces/tabs inside each line, trims each line, and keeps at most one blank line in a row. */
+function tidyLines(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => line.replace(/[ \t\f\v\r]+/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+const BLOCK_TAGS = "p|div|br|li|ul|ol|h[1-6]|pre|blockquote|tr|section|article|header|footer|hr";
+
+/**
+ * Like stripHtml, but keeps block-level and <br> boundaries as line breaks, so a prompt's own
+ * line structure survives and prompt locators (prompt-locate.ts) slice it back out intact.
+ */
+export function htmlToText(html: string): string {
+  const text = html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(new RegExp(`<\\/?(?:${BLOCK_TAGS})\\b[^>]*>`, "gi"), "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&");
+  return tidyLines(text).replace(/\n{2,}/g, "\n");
 }
 
 function isIPv4(address: string): boolean {
@@ -181,7 +212,7 @@ export async function fetchUrlText(
       await reader.cancel().catch(() => {});
       const raw = new TextDecoder().decode(Buffer.concat(chunks).subarray(0, MAX_URL_BODY_BYTES));
       const type = response.headers.get("content-type") ?? "";
-      return stripNul(type.includes("html") ? stripHtml(raw) : raw.replace(/\s+/g, " ").trim());
+      return stripNul(type.includes("html") ? htmlToText(raw) : tidyLines(raw));
     }
   } catch {
     return null;
