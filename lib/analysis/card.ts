@@ -3,6 +3,10 @@ import { z } from "zod";
 export const capabilityTypeSchema = z.enum(["skill", "experience", "plugin", "prompt", "tool", "model", "other"]);
 export type CapabilityType = z.infer<typeof capabilityTypeSchema>;
 
+/** Per-card cap on verbatim prompts, and per-prompt character cap (spec 2026-09-22). Over-cap items are dropped, never truncated. */
+export const MAX_PROMPTS = 20;
+export const MAX_PROMPT_CHARS = 20_000;
+
 export const extractionSchema = z.object({
   what: z.string().min(1).max(400),
   visible_text: z.string().max(8000),
