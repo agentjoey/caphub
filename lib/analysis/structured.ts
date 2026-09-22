@@ -65,6 +65,9 @@ export async function runStructured<T>(req: RunStructuredRequest<T>): Promise<T>
           throw budgetError;
         }
         await recordStep(req.pool, { ...base, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, durationMs, ok: false, error: "INVALID_JSON", output: { raw: rawText } });
+        // Same don't-retry-into-a-guaranteed-BUDGET-throw guard as the schema-failure path below.
+        const attemptTokens = usage.inputTokens + usage.outputTokens;
+        if (req.budget.tokens + attemptTokens > req.budget.limits.maxTokens) break;
         issues = ["response was not a single valid JSON object"];
         continue;
       }
@@ -89,6 +92,12 @@ export async function runStructured<T>(req: RunStructuredRequest<T>): Promise<T>
     }
     issues = parsed.error.issues.map((i) => `${i.path.join(".") || "$"}: ${i.message}`);
     await recordStep(req.pool, { ...base, inputTokens: raw.usage.inputTokens, outputTokens: raw.usage.outputTokens, durationMs, ok: false, error: "INVALID_OUTPUT", output: raw.value });
+    // Don't pay for a second full attempt that's certain to blow the budget: if this attempt's
+    // own tokens, charged again on top of what's already spent, would exceed the limit, a retry
+    // can only end in a BUDGET throw after an extra (wasted) call. Fail fast with the schema
+    // failure already recorded above instead.
+    const attemptTokens = raw.usage.inputTokens + raw.usage.outputTokens;
+    if (req.budget.tokens + attemptTokens > req.budget.limits.maxTokens) break;
   }
   throw new ProviderError("INVALID_OUTPUT");
 }

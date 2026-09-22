@@ -112,6 +112,31 @@ describe("runStructured", () => {
     expect(rows[0].error).toContain("400");
   });
 
+  it("does not retry when the first attempt's usage already would not fit again within the remaining budget: throws INVALID_OUTPUT, not BUDGET", async () => {
+    const { rows, pool } = recorder();
+    let calls = 0;
+    const budget = new RunBudget({ maxCalls: 4, maxTokens: 600_000 });
+    const call: StructuredCall = {
+      provider: "x", model: "m",
+      invoke: async () => { calls += 1; return { value: { n: "bad" }, usage: { inputTokens: 200_000, outputTokens: 200_000 } }; }
+    };
+    await expect(runStructured({ ...base(call, pool), budget })).rejects.toMatchObject({ code: "INVALID_OUTPUT" });
+    expect(calls).toBe(1);
+    expect(rows).toHaveLength(1);
+  });
+
+  it("still retries once when the first attempt's usage is small enough to fit again within the remaining budget", async () => {
+    const { pool } = recorder();
+    let calls = 0;
+    const budget = new RunBudget({ maxCalls: 4, maxTokens: 600_000 });
+    const call: StructuredCall = {
+      provider: "x", model: "m",
+      invoke: async () => { calls += 1; return { value: { n: "bad" }, usage: { inputTokens: 1000, outputTokens: 1000 } }; }
+    };
+    await expect(runStructured({ ...base(call, pool), budget })).rejects.toMatchObject({ code: "INVALID_OUTPUT" });
+    expect(calls).toBe(2);
+  });
+
   it("passes video input through to call.invoke", async () => {
     const { pool } = recorder();
     const videoInput = { url: "https://www.youtube.com/watch?v=tYvu6IpSfiM", endOffsetSec: 300 };
