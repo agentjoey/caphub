@@ -12,6 +12,8 @@ export type Material =
 export interface MaterialDeps {
   ocr?: (png: Uint8Array) => Promise<string>;
   fetch?: typeof fetch;
+  /** YouTube Data API v3 key, used by the pipeline's own metadata fetch step (not by prepareMaterial itself). */
+  youtubeApiKey?: string;
 }
 
 export async function prepareMaterial(

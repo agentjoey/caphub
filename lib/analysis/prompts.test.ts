@@ -351,7 +351,7 @@ describe("video prompts", () => {
     expect(ok).toContain("Jev 实测");
     expect(ok).toContain("视频内容提取结果");
     expect(ok).toContain("prompt_locators 给空数组");
-    const failed = reasonPrompt({ ...common, material: video, extraction: null, videoFailed: true } as never);
+    const failed = reasonPrompt({ ...common, material: video, extraction: null } as never);
     expect(failed).toContain("视频内容未能读取");
     const long = reasonPrompt({ ...common, material: { ...video, meta: { ...meta, durationSec: 7200 } }, extraction: null } as never);
     expect(long).toContain("只分析了前 90 分钟");

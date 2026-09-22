@@ -83,8 +83,6 @@ export function reasonPrompt(input: {
    * a backstop against a disobedient model.
    */
   pinnedType?: CapabilityType | null;
-  /** True when the video-understanding call itself failed (never mistaken for "no prompts found"); video materials only. */
-  videoFailed?: boolean;
 }): string {
   const materialText = input.material.kind === "text" ? input.material.text
     : input.material.kind === "url" ? `URL: ${input.material.url}\n页面正文：${input.material.text ?? "（抓取失败）"}`

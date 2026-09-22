@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { ProviderError, type ProviderErrorCode } from "../providers/errors";
 import { createPipelineDeps, runPipeline, type PipelineDeps } from "./pipeline";
 
 const card = {
@@ -12,7 +13,9 @@ const pendingCard = { ...card, confidence: 0.5 };
 const experienceCard = { ...card, type: "experience", playbook: { kind: "experience", content: "做法本身", when_to_use: "何时用" } };
 const extraction = { what: "w", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [] };
 
-type Kind = "image" | "text" | "url";
+type Kind = "image" | "text" | "url" | "video";
+
+const YOUTUBE_URL = "https://youtu.be/tYvu6IpSfiM";
 
 function deps(kind: Kind, opts: {
   reasonValue?: unknown; failTagBump?: boolean; pinnedType?: string;
@@ -34,10 +37,21 @@ function deps(kind: Kind, opts: {
   sourceText?: string;
   /** What the vision fake resolves to; defaults to the shared `extraction` fixture. */
   extractionValue?: unknown;
+  /** What the video fake resolves to; defaults to the shared `extraction` fixture. */
+  videoValue?: unknown;
+  /** Makes the video fake throw a ProviderError of this code instead of resolving. */
+  videoThrows?: ProviderErrorCode;
+  /** No `deps.video` at all (as if no Gemini key were configured). */
+  noVideo?: boolean;
+  /** Overrides for the YouTube Data API fake's `snippet` fields; `null` makes the fetch 404. */
+  meta?: Record<string, unknown> | null;
+  /** ISO 8601 duration the YouTube Data API fake reports; defaults to a short video. */
+  durationIso?: string;
 } = {}) {
   const calls: string[] = [];
   const sql: Array<{ text: string; values: unknown[]; client?: boolean }> = [];
   let reasonPromptSeen = "";
+  let videoInputSeen: unknown;
   let released = 0;
   const query = async (text: string, values: unknown[] = []) => {
     sql.push({ text, values });
@@ -51,11 +65,11 @@ function deps(kind: Kind, opts: {
     if (text.startsWith("SELECT kind, object_key")) {
       return {
         rows: [{
-          kind,
+          kind: kind === "video" ? "url" : kind,
           object_key: kind === "image" ? "sha256/aa/" + "a".repeat(64) : null,
           mime_type: "image/png",
           text: kind === "text" ? (opts.sourceText ?? "hello") : null,
-          url: kind === "url" ? "https://example.com/a" : null
+          url: kind === "url" ? "https://example.com/a" : kind === "video" ? YOUTUBE_URL : null
         }]
       };
     }
@@ -99,15 +113,36 @@ function deps(kind: Kind, opts: {
       provider: "deepseek", model: "d",
       invoke: async (input: { prompt: string }) => { calls.push("reason"); reasonPromptSeen = input.prompt; return { value: opts.reasonValue ?? card, usage: { inputTokens: 1, outputTokens: 1 } }; }
     },
-    material: { ocr: async () => "", fetch: kind === "url" ? (async () => new Response("hello world", { status: 200, headers: { "content-type": "text/plain" } })) as typeof fetch : undefined },
+    material: {
+      ocr: async () => "",
+      fetch: kind === "url"
+        ? (async () => new Response("hello world", { status: 200, headers: { "content-type": "text/plain" } })) as typeof fetch
+        : kind === "video"
+          ? (async () => {
+              if (opts.meta === null) return new Response("not found", { status: 404 });
+              const snippet = { title: "Jev 实测", channelTitle: "01Coder", publishedAt: "2026-09-20T00:00:00Z", description: "简介文本", ...(opts.meta ?? {}) };
+              return new Response(JSON.stringify({ items: [{ snippet, contentDetails: { duration: opts.durationIso ?? "PT16M55S" } }] }), { status: 200, headers: { "content-type": "application/json" } });
+            }) as typeof fetch
+          : undefined,
+      youtubeApiKey: "yt-fake-key"
+    },
     threshold: 0.8,
     embedQuery: async () => {
       calls.push("embed");
       if (opts.embedQueryThrows) throw new Error("embed provider exploded");
       return opts.embedQueryResult ?? null;
+    },
+    video: opts.noVideo ? undefined : {
+      provider: "gemini", model: "gemini-video",
+      invoke: async (input: { video?: unknown }) => {
+        calls.push("video");
+        videoInputSeen = input.video;
+        if (opts.videoThrows) throw new ProviderError(opts.videoThrows);
+        return { value: opts.videoValue ?? extraction, usage: { inputTokens: 1, outputTokens: 1 } };
+      }
     }
   };
-  return { d, calls, sql, released: () => released, reasonPrompt: () => reasonPromptSeen };
+  return { d, calls, sql, released: () => released, reasonPrompt: () => reasonPromptSeen, videoInput: () => videoInputSeen };
 }
 
 describe("runPipeline", () => {
@@ -474,6 +509,79 @@ describe("runPipeline", () => {
       await runPipeline(d, { runId: "r_p4", captureId: "c_p4", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
       const insert = sql.find((q) => q.text.includes("INSERT INTO caphub_v2.capabilities"))!;
       expect(insert.values).toContain(JSON.stringify([{ text: "逐字原文 --s 250" }]));
+    });
+  });
+
+  describe("video materials", () => {
+    it("fetches metadata, runs the video call, and keeps normally", async () => {
+      const { d, calls, sql, reasonPrompt, videoInput } = deps("video");
+      const out = await runPipeline(d, { runId: "run_video", captureId: "cap_video", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
+      expect(calls).toEqual(["video", "search", "embed", "reason"]);
+      const fetchStep = sql.find((q) => q.text.includes("caphub_v2.analysis_steps") && q.values[1] === "fetch");
+      expect(fetchStep).toBeDefined();
+      expect(fetchStep!.values[2]).toBe("youtube");
+      expect(fetchStep!.values[8]).toBe(true);
+      expect(videoInput()).toEqual({ url: "https://www.youtube.com/watch?v=tYvu6IpSfiM" });
+      expect(reasonPrompt()).toContain("视频内容提取结果");
+      expect(reasonPrompt()).toContain("Jev 实测");
+      expect(out.verdict).toBe("keep");
+    });
+
+    it("uses the video budget (600k tokens), not the default 200k, to fit a large video call plus reason", async () => {
+      const { d, calls } = deps("video");
+      d.video = {
+        provider: "gemini", model: "gemini-video",
+        invoke: async () => { calls.push("video"); return { value: extraction, usage: { inputTokens: 450_000, outputTokens: 1000 } }; }
+      };
+      const out = await runPipeline(d, { runId: "run_video_budget", captureId: "cap_video_budget", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
+      expect(calls).toContain("reason");
+      expect(out.verdict).toBe("keep");
+    });
+
+    it("clips a video over 90 minutes and notes it in the reason prompt", async () => {
+      const { d, reasonPrompt, videoInput } = deps("video", { durationIso: "PT2H" });
+      await runPipeline(d, { runId: "run_video_clip", captureId: "cap_video_clip", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
+      expect(videoInput()).toEqual({ url: "https://www.youtube.com/watch?v=tYvu6IpSfiM", endOffsetSec: 5400 });
+      expect(reasonPrompt()).toContain("只分析了前 90 分钟");
+    });
+
+    it("falls back to a metadata-only, forced-pending analysis when the video call fails with INVALID_OUTPUT", async () => {
+      const { d, reasonPrompt } = deps("video", { videoThrows: "INVALID_OUTPUT" });
+      const out = await runPipeline(d, { runId: "run_video_fail", captureId: "cap_video_fail", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
+      expect(reasonPrompt()).toContain("视频内容未能读取");
+      expect(out.verdict).toBe("pending");
+    });
+
+    it("rethrows BUDGET from the video call and fails the run", async () => {
+      const { d } = deps("video", { videoThrows: "BUDGET" });
+      await expect(
+        runPipeline(d, { runId: "run_video_budget_fail", captureId: "cap_video_budget_fail", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal)
+      ).rejects.toMatchObject({ code: "BUDGET" });
+    });
+
+    it("skips the video call entirely, but still records the fetch step, when no Gemini key is configured", async () => {
+      const { d, calls, sql } = deps("video", { noVideo: true });
+      const out = await runPipeline(d, { runId: "run_video_none", captureId: "cap_video_none", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
+      expect(calls).not.toContain("video");
+      expect(sql.some((q) => q.text.includes("caphub_v2.analysis_steps") && q.values[1] === "fetch")).toBe(true);
+      expect(out.verdict).toBe("pending");
+    });
+
+    it("still calls the video model, marked with '无元数据', when the metadata fetch fails", async () => {
+      const { d, calls, sql, reasonPrompt } = deps("video", { meta: null });
+      await runPipeline(d, { runId: "run_video_no_meta", captureId: "cap_video_no_meta", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
+      const fetchStep = sql.find((q) => q.text.includes("caphub_v2.analysis_steps") && q.values[1] === "fetch");
+      expect(fetchStep!.values[8]).toBe(false);
+      expect(calls).toContain("video");
+      expect(reasonPrompt()).toContain("无元数据");
+    });
+
+    it("stores the video call's dictated prompts the same way an image's are stored", async () => {
+      const { d, sql } = deps("video", { videoValue: { ...extraction, prompts: ["口述 prompt"] } });
+      await runPipeline(d, { runId: "run_video_prompt", captureId: "cap_video_prompt", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
+      const insert = sql.find((q) => q.text.includes("INSERT INTO caphub_v2.capabilities"))!;
+      // $24 in the SQL text (1-indexed placeholder) is `values[23]` in the JS array (0-indexed).
+      expect(insert.values[23]).toBe(JSON.stringify([{ text: "口述 prompt" }]));
     });
   });
 });

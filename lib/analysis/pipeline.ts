@@ -7,13 +7,15 @@ import { createMiniMaxSearch, type SearchCall } from "../providers/minimax-searc
 import { createTavilySearch } from "../providers/tavily";
 import { enqueueEnrichRun, type Lease } from "../queue/runs";
 import type { ObjectStore } from "../storage/s3";
+import { createGeminiVideoCall } from "../providers/gemini-video";
 import { RunBudget } from "./budget";
 import { upsertCapability } from "./capabilities";
-import { extractionSchema, type CapabilityType, type Extraction } from "./card";
+import { extractionSchema, videoExtractionSchema, VIDEO_CLIP_SEC, type CapabilityType, type Extraction } from "./card";
 import { embedMaterialQuery } from "./material-embedding";
+import { fetchYouTubeMeta } from "./material/youtube";
 import { prepareMaterial, type MaterialDeps } from "./material";
 import { collectPrompts } from "./prompt-locate";
-import { reasonPrompt, searchQuery, visionPrompt } from "./prompts";
+import { reasonPrompt, searchQuery, videoPrompt, visionPrompt } from "./prompts";
 import { cardSchemaFor, loadScenarios } from "./scenarios";
 import { findSimilar, similarByEmbedding, type SimilarCandidate } from "./similar";
 import { recordStep } from "./steps";
@@ -21,10 +23,15 @@ import { runStructured, withTimeout, type StructuredCall } from "./structured";
 import { bumpTags, topTags } from "./tags";
 import { decideVerdict } from "./verdict";
 
-export const TIMEOUTS = { vision: 60_000, search: 60_000, reason: 120_000, review: 120_000 } as const;
+export const TIMEOUTS = { vision: 60_000, search: 60_000, reason: 120_000, review: 120_000, video: 300_000 } as const;
+
+/** Budget for a video analysis run: the video call itself is far larger than an image/text one, so it gets its own, roomier cap (Task 4). */
+export const VIDEO_BUDGET = { maxCalls: 4, maxTokens: 600_000 } as const;
 
 export interface PipelineDeps {
   pool: Pool; objects: ObjectStore; vision: StructuredCall; search: SearchCall; reason: StructuredCall;
+  /** The Gemini video-understanding call (lib/providers/gemini-video.ts); undefined when no Gemini key is configured -- a video analysis then falls back to metadata-only (see runPipeline). */
+  video?: StructuredCall;
   material: MaterialDeps; threshold: number;
   /**
    * A throwaway query embedding for overlap-candidate lookup only (see `loadSimilar` below) --
@@ -37,32 +44,34 @@ export interface PipelineDeps {
 }
 
 export function createPipelineDeps(config: Config, pool: Pool, objects: ObjectStore, pipeline: Pipeline): PipelineDeps {
-  const { minimaxApiKey, deepseekApiKey, tavilyApiKey, geminiApiKey } = config.providers;
+  const { minimaxApiKey, deepseekApiKey, tavilyApiKey, geminiApiKey, youtubeApiKey } = config.providers;
   if (!minimaxApiKey) throw new Error("MINIMAX_API_KEY is required to run analysis");
   const minimax = createMiniMaxCall({ apiKey: minimaxApiKey });
   const embedQuery = (text: string, signal: AbortSignal) => embedMaterialQuery(geminiApiKey, text, signal);
+  const video = geminiApiKey ? createGeminiVideoCall({ apiKey: geminiApiKey, model: config.geminiVideoModel }) : undefined;
+  const material: MaterialDeps = { youtubeApiKey };
   if (pipeline === "mixed") {
     if (!tavilyApiKey) throw new Error("TAVILY_API_KEY is required when pipeline is 'mixed'");
     if (!deepseekApiKey) throw new Error("DEEPSEEK_API_KEY is required when pipeline is 'mixed'");
     return {
-      pool, objects, vision: minimax,
+      pool, objects, vision: minimax, video,
       search: createTavilySearch({ apiKey: tavilyApiKey }),
       reason: createDeepSeekCall({ apiKey: deepseekApiKey }),
-      material: {}, threshold: config.verdictAutoThreshold, embedQuery
+      material, threshold: config.verdictAutoThreshold, embedQuery
     };
   }
   if (pipeline === "minimax_tavily") {
     if (!tavilyApiKey) throw new Error("TAVILY_API_KEY is required when pipeline is 'minimax_tavily'");
     return {
-      pool, objects, vision: minimax,
+      pool, objects, vision: minimax, video,
       search: createTavilySearch({ apiKey: tavilyApiKey }),
       reason: minimax,
-      material: {}, threshold: config.verdictAutoThreshold, embedQuery
+      material, threshold: config.verdictAutoThreshold, embedQuery
     };
   }
   return {
-    pool, objects, vision: minimax, search: createMiniMaxSearch({ apiKey: minimaxApiKey }), reason: minimax,
-    material: {}, threshold: config.verdictAutoThreshold, embedQuery
+    pool, objects, vision: minimax, video, search: createMiniMaxSearch({ apiKey: minimaxApiKey }), reason: minimax,
+    material, threshold: config.verdictAutoThreshold, embedQuery
   };
 }
 
@@ -177,11 +186,37 @@ export async function runPipeline(deps: PipelineDeps, lease: Lease, signal: Abor
       throw Object.assign(new Error("OBJECT_UNAVAILABLE"), { code: "OBJECT_UNAVAILABLE", cause: error });
     }
   }
-  const material = await prepareMaterial({ kind: capture.kind, bytes: bytes ?? undefined, text: capture.text, url: capture.url }, deps.material, signal);
-  const budget = new RunBudget();
+  let material = await prepareMaterial({ kind: capture.kind, bytes: bytes ?? undefined, text: capture.text, url: capture.url }, deps.material, signal);
+  const budget = new RunBudget(material.kind === "video" ? VIDEO_BUDGET : undefined);
 
   let extraction: Extraction | null = null;
-  if (material.kind === "image") {
+  // Forces the eventual verdict to pending (below) rather than running decideVerdict against a
+  // card built from metadata alone: a video whose content couldn't be read (no Gemini key, or
+  // the call itself failing) always needs a human look, never an auto-keep/auto-discard.
+  let videoFailed = false;
+  if (material.kind === "video") {
+    const started = Date.now();
+    const meta = await fetchYouTubeMeta(material.videoId, deps.material.youtubeApiKey, deps.material.fetch, signal);
+    await recordStep(deps.pool, { runId: lease.runId, step: "fetch", provider: "youtube", model: "data-api-v3", attempt: 1, durationMs: Date.now() - started, ok: meta !== null, output: meta });
+    material = { ...material, meta };
+    const clipped = (meta?.durationSec ?? 0) > VIDEO_CLIP_SEC;
+    if (!deps.video) {
+      videoFailed = true;
+    } else {
+      try {
+        extraction = await runStructured({
+          pool: deps.pool, runId: lease.runId, step: "vision", call: deps.video,
+          prompt: videoPrompt(meta, clipped), video: { url: material.url, ...(clipped ? { endOffsetSec: VIDEO_CLIP_SEC } : {}) },
+          schemaName: "video_extraction", schema: videoExtractionSchema, budget, timeoutMs: TIMEOUTS.video, signal
+        });
+      } catch (error) {
+        // Budget exhaustion and cancellation must still end the run; anything else (private /
+        // removed video, Gemini outage) falls back to a metadata-only analysis sent to Review.
+        if (error instanceof ProviderError && (error.code === "BUDGET" || error.code === "ABORTED")) throw error;
+        videoFailed = true;
+      }
+    }
+  } else if (material.kind === "image") {
     extraction = await runStructured({
       pool: deps.pool, runId: lease.runId, step: "vision", call: deps.vision,
       prompt: visionPrompt(material.ocrText), images: [{ data: material.png, mediaType: "image/png" }],
@@ -190,11 +225,9 @@ export async function runPipeline(deps: PipelineDeps, lease: Lease, signal: Abor
   }
 
   const search = await runSearch(deps, lease.runId, searchQuery(extraction, material), budget, signal);
-  // Placeholder for the "video" kind: seeding similarity search from real video metadata is
-  // Task 4's job, this just keeps the pipeline compiling and pointed at the URL meanwhile.
   const similarSeed = extraction?.what ?? (material.kind === "text" ? material.text
     : material.kind === "url" ? material.text ?? material.url
-    : material.kind === "video" ? material.url : "");
+    : material.kind === "video" ? material.meta?.title ?? material.url : "");
   const [existing, existingTags, scenarios, pinnedType] = await Promise.all([
     loadExistingCapability(deps.pool, lease.captureId), topTags(deps.pool), loadScenarios(deps.pool), loadPinnedType(deps.pool, lease.captureId)
   ]);
@@ -225,7 +258,9 @@ export async function runPipeline(deps: PipelineDeps, lease: Lease, signal: Abor
   // Verbatim prompts come from the input source only (spec 2026-09-22): the vision transcription
   // for an image, or the reason step's locators resolved against the same text it was shown.
   const found = collectPrompts({ material, extraction, locators: card.prompt_locators });
-  const decision = decideVerdict(card, deps.threshold, { count: found.prompts.length, unresolved: found.unresolved });
+  const decision = videoFailed
+    ? { verdict: "pending" as const, by: null }
+    : decideVerdict(card, deps.threshold, { count: found.prompts.length, unresolved: found.unresolved });
   // The card and its tag counts are saved atomically: a failing tag bump must not leave a kept card behind.
   const db = await deps.pool.connect();
   try {
