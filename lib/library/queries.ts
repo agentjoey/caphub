@@ -19,7 +19,7 @@ const CARD_COLUMNS = `
   cb.progress, cb.progress_link AS "progressLink", cb.progress_at AS "progressAt",
   cb.review_note AS "reviewNote", cb.review_requested_at AS "reviewRequestedAt", cb.review_error AS "reviewError",
   cb.status, cb.superseded_by AS "supersededBy", cb.status_at AS "statusAt", cb.status_note AS "statusNote", cb.overlap,
-  cb.build_notes AS "buildNotes",
+  cb.build_notes AS "buildNotes", cb.prompts, cb.prompt_unresolved AS "promptUnresolved",
   (cb.deep_analysis IS NOT NULL) AS "hasDeepAnalysis",
   cb.synced_at AS "syncedAt", cb.deleted_at AS "deletedAt", cb.created_at AS "createdAt", cb.updated_at AS "updatedAt",
   json_build_object('kind', c.kind, 'objectKey', c.object_key, 'thumbKey', c.thumb_key, 'text', c.text, 'url', c.url) AS capture`;
@@ -43,6 +43,10 @@ export interface CapabilityRow {
   status: CapabilityStatus; supersededBy: string | null; statusAt: string | null; statusNote: string | null;
   /** Library-overlap finding written by the analysis reason step; `target` is a serial code (e.g. "TOL-0009") or null. */
   overlap: Overlap;
+  /** Verbatim prompts taken from the input source (spec 2026-09-22); `[]` when none. Never model-written. */
+  prompts: Array<{ text: string }>;
+  /** How many prompts the last analysis could not locate verbatim in the source; > 0 sends the card to Review. */
+  promptUnresolved: number;
   /** Whether this card has a stored deep analysis (M3.6 Task 4) — the 🔬 已深挖 badge and the 已深度分析 filter. The blob itself is only loaded on the detail page (see {@link CapabilityDetail}). */
   hasDeepAnalysis: boolean;
   syncedAt: string | null; deletedAt: string | null; createdAt: string; updatedAt: string;

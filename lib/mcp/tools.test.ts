@@ -34,6 +34,7 @@ function detailRow(overrides: Partial<CapabilityDetail> = {}) {
     status: "active", supersededBy: null, statusAt: null, statusNote: null,
     overlap: { relation: "none", target: null, reason: "" },
     buildNotes: [{ at: "2026-09-21T00:00:00.000Z", by: "agent", text: "started" }],
+    prompts: [], promptUnresolved: 0,
     hasDeepAnalysis: false,
     syncedAt: null, deletedAt: null, createdAt: "2026-09-21T00:00:00.000Z", updatedAt: "2026-09-21T00:00:00.000Z",
     capture: { kind: "url", objectKey: "obj_secret_key", thumbKey: "thumb_secret_key", text: null, url: "https://gsap.com" },
@@ -84,6 +85,18 @@ describe("mcp tools", () => {
     expect(res).toHaveProperty("buildNotes", [{ at: "2026-09-21T00:00:00.000Z", by: "agent", text: "started" }]);
     expect(res).toHaveProperty("openQuestions", ["需要付费吗"]);
     expect(res).toHaveProperty("progress", "todo");
+  });
+
+  it("returns verbatim prompts from the detail (Task 6)", async () => {
+    const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [{ id: "cap_1", capture_id: "cpt_1", updated_at: new Date("2026-09-21T00:00:00.000Z") }] })
+      .mockResolvedValueOnce({ rows: [detailRow({ prompts: [{ text: "原文" }], promptUnresolved: 0 })] })
+      .mockResolvedValueOnce({ rows: [] });
+    const deps = { pool: { query } as never };
+
+    const res = await getCapability(deps, { serial: "SKL-0031" });
+
+    expect(res).toHaveProperty("prompts", ["原文"]);
   });
 
   it("returns null when the serial does not resolve to a visible card", async () => {

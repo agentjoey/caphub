@@ -106,7 +106,8 @@ function toDetailOutput(detail: CapabilityDetail) {
     deepAnalysis: detail.deepAnalysis,
     progress: detail.progress,
     progressLink: detail.progressLink,
-    buildNotes: detail.buildNotes
+    buildNotes: detail.buildNotes,
+    prompts: detail.prompts.map((p) => p.text)
   };
 }
 
