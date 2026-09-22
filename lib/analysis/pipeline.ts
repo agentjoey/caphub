@@ -190,7 +190,11 @@ export async function runPipeline(deps: PipelineDeps, lease: Lease, signal: Abor
   }
 
   const search = await runSearch(deps, lease.runId, searchQuery(extraction, material), budget, signal);
-  const similarSeed = extraction?.what ?? (material.kind === "text" ? material.text : material.kind === "url" ? material.text ?? material.url : "");
+  // Placeholder for the "video" kind: seeding similarity search from real video metadata is
+  // Task 4's job, this just keeps the pipeline compiling and pointed at the URL meanwhile.
+  const similarSeed = extraction?.what ?? (material.kind === "text" ? material.text
+    : material.kind === "url" ? material.text ?? material.url
+    : material.kind === "video" ? material.url : "");
   const [existing, existingTags, scenarios, pinnedType] = await Promise.all([
     loadExistingCapability(deps.pool, lease.captureId), topTags(deps.pool), loadScenarios(deps.pool), loadPinnedType(deps.pool, lease.captureId)
   ]);

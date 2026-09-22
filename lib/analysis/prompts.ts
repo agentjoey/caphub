@@ -43,7 +43,7 @@ export function visionPrompt(ocrText: string): string {
 
 export function searchQuery(extraction: Extraction | null, material: Material): string {
   if (extraction) return [extraction.what, ...extraction.source_hints, ...extraction.questions.slice(0, 2)].join(" ").slice(0, 400);
-  if (material.kind === "url") return material.url;
+  if (material.kind === "url" || material.kind === "video") return material.url;
   return material.kind === "text" ? material.text.slice(0, 400) : "";
 }
 
@@ -60,8 +60,12 @@ export function reasonPrompt(input: {
    */
   pinnedType?: CapabilityType | null;
 }): string {
+  // Placeholder for the "video" kind: real video-aware prompting (title/channel/description,
+  // Gemini video understanding) is Task 3/4's job, this just keeps the reason step compiling
+  // and pointed at the URL in the meantime.
   const materialText = input.material.kind === "text" ? input.material.text
     : input.material.kind === "url" ? `URL: ${input.material.url}\n页面正文：${input.material.text ?? "（抓取失败）"}`
+    : input.material.kind === "video" ? `YouTube URL: ${input.material.url}`
     : `（图片，见视觉提取结果）`;
   return [
     `你在为一个个人 agent 能力库做评估与建档。${CAPABILITY_TYPE_DEFINITIONS}`,

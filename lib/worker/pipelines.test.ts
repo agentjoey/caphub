@@ -16,7 +16,8 @@ function config(tavilyApiKey?: string): Config {
     pipeline: "minimax",
     verdictAutoThreshold: 0.8,
     analysisEnabled: true,
-    retentionEnabled: true
+    retentionEnabled: true,
+    geminiVideoModel: "gemini-3.8-flash"
   };
 }
 

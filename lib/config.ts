@@ -18,6 +18,8 @@ const envSchema = z.object({
   DEEPSEEK_API_KEY: optional,
   TAVILY_API_KEY: optional,
   GEMINI_API_KEY: optional,
+  YOUTUBE_API_KEY: optional,
+  GEMINI_VIDEO_MODEL: z.preprocess(unsetIfEmpty, z.string().default("gemini-3.8-flash")),
   TELEGRAM_BOT_TOKEN: optional,
   TELEGRAM_OWNER_CHAT_ID: optional,
   CF_ACCESS_AUD: optional,
@@ -41,13 +43,14 @@ export interface Config {
   /** Local-only (vault-sync); never set on Railway. */
   databaseUrlReadonly?: string;
   s3?: S3Config;
-  providers: { minimaxApiKey?: string; deepseekApiKey?: string; tavilyApiKey?: string; geminiApiKey?: string };
+  providers: { minimaxApiKey?: string; deepseekApiKey?: string; tavilyApiKey?: string; geminiApiKey?: string; youtubeApiKey?: string };
   telegram: { enabled: boolean; botToken?: string; ownerChatId?: string };
   access?: { aud: string; teamDomain: string };
   pipeline: Pipeline;
   verdictAutoThreshold: number;
   analysisEnabled: boolean;
   retentionEnabled: boolean;
+  geminiVideoModel: string;
 }
 export type WebConfig = Config & { s3: S3Config; access: { aud: string; teamDomain: string } };
 export type WorkerConfig = Config & { s3: S3Config; providers: { minimaxApiKey: string; deepseekApiKey: string; tavilyApiKey?: string } };
@@ -87,12 +90,13 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>, ro
     databaseUrl: e.DATABASE_URL!,
     databaseUrlReadonly: e.DATABASE_URL_READONLY,
     s3,
-    providers: { minimaxApiKey: e.MINIMAX_API_KEY, deepseekApiKey: e.DEEPSEEK_API_KEY, tavilyApiKey: e.TAVILY_API_KEY, geminiApiKey: e.GEMINI_API_KEY },
+    providers: { minimaxApiKey: e.MINIMAX_API_KEY, deepseekApiKey: e.DEEPSEEK_API_KEY, tavilyApiKey: e.TAVILY_API_KEY, geminiApiKey: e.GEMINI_API_KEY, youtubeApiKey: e.YOUTUBE_API_KEY },
     telegram: { enabled: e.TELEGRAM_ENABLED, botToken: e.TELEGRAM_BOT_TOKEN, ownerChatId: e.TELEGRAM_OWNER_CHAT_ID },
     access: e.CF_ACCESS_AUD && e.CF_ACCESS_TEAM_DOMAIN ? { aud: e.CF_ACCESS_AUD, teamDomain: e.CF_ACCESS_TEAM_DOMAIN } : undefined,
     pipeline: e.PIPELINE,
     verdictAutoThreshold: e.VERDICT_AUTO_THRESHOLD,
     analysisEnabled: e.ANALYSIS_ENABLED,
-    retentionEnabled: e.RETENTION_ENABLED
+    retentionEnabled: e.RETENTION_ENABLED,
+    geminiVideoModel: e.GEMINI_VIDEO_MODEL
   };
 }

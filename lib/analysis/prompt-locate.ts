@@ -81,7 +81,9 @@ export function collectPrompts(input: { material: Material; extraction: Extracti
     unresolved += Math.max(0, valid.length - MAX_PROMPTS);
     return { prompts: valid.slice(0, MAX_PROMPTS), unresolved };
   }
-  const source = material.text;
+  // Placeholder for the "video" kind: video prompt locating is real work for a later task
+  // (Task 3/4), so for now there's simply no text to locate prompts in.
+  const source = material.kind === "video" ? null : material.text;
   if (source === null) return { prompts: [], unresolved: locators.length };
   return locatePrompts(source, locators);
 }

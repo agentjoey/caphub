@@ -75,6 +75,17 @@ describe("loadConfig worker", () => {
   });
 });
 
+describe("loadConfig video config", () => {
+  it("reads YOUTUBE_API_KEY and defaults GEMINI_VIDEO_MODEL", () => {
+    const base = { DATABASE_URL: "postgres://x" };
+    expect(loadConfig({ ...base }, "script").geminiVideoModel).toBe("gemini-3.8-flash");
+    const c = loadConfig({ ...base, YOUTUBE_API_KEY: "yt", GEMINI_VIDEO_MODEL: "gemini-3.5-flash-lite" }, "script");
+    expect(c.providers.youtubeApiKey).toBe("yt");
+    expect(c.geminiVideoModel).toBe("gemini-3.5-flash-lite");
+    expect(loadConfig({ ...base, YOUTUBE_API_KEY: "" }, "script").providers.youtubeApiKey).toBeUndefined();
+  });
+});
+
 describe("loadConfig script", () => {
   it("needs only DATABASE_URL; S3 is optional and typed so", () => {
     const c = loadConfig(db, "script");
