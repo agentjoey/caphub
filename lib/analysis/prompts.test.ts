@@ -344,6 +344,7 @@ describe("video prompts", () => {
     const extraction = { what: "w", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [] };
     const v = reasonPrompt({ ...common, sources, material: video, extraction } as never);
     expect(v).toContain(VIDEO_CONTENT_ONLY);
+    expect(VIDEO_CONTENT_ONLY).toContain('kind: "experience"');
     expect(v).toContain("视频投递：只能用于 source_facts 和那条来源可信度 signal");
     const text = reasonPrompt({ ...common, sources, material: { kind: "text", text: "hi" }, extraction: null } as never);
     expect(text).not.toContain(VIDEO_CONTENT_ONLY);

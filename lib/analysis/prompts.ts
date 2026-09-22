@@ -56,7 +56,7 @@ function videoMetaText(meta: YouTubeMeta | null): string {
  * source-credibility signal; everything describing the capability comes from the video.
  */
 export const VIDEO_CONTENT_ONLY =
-  "这是一条视频投递：卡片记录的是这个视频本身讲了什么、演示了什么，而不是视频话题的通用介绍。title、summary、summary_points、playbook 以及除来源可信度那一条之外的 signals，只能依据「视频内容提取结果」（尤其是 content_points）与视频简介来写；不得引入视频里没有出现的功能、数据、基准、版本或观点，即使联网来源里有也不行。视频没讲到的方面就不写，不要用联网来源补全。open_questions 写视频里没说清、但对复用这个能力重要的问题。";
+  "这是一条视频投递：卡片记录的是这个视频本身讲了什么、演示了什么，而不是视频话题的通用介绍。title、summary、summary_points、playbook 以及除来源可信度那一条之外的 signals，只能依据「视频内容提取结果」（尤其是 content_points）与视频简介来写；不得引入视频里没有出现的功能、数据、基准、版本或观点，即使联网来源里有也不行。视频没讲到的方面就不写，不要用联网来源补全。open_questions 写视频里没说清、但对复用这个能力重要的问题。如果把这条视频定为 experience（一次具体实践的记录），playbook 必须是 { kind: \"experience\", content, when_to_use }，把视频里的做法本身写进 content；定为其他类型时按 usage 给 integrate 或 reference 形状。";
 
 export function videoPrompt(meta: YouTubeMeta | null, clipped: boolean): string {
   return [
