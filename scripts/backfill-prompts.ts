@@ -54,21 +54,50 @@ const CANDIDATES = `
 
 /**
  * Fills `prompts` and drops the legacy `playbook.prompt_text` in one UPDATE. Cards that can't be
- * filled keep their legacy text untouched for a human decision. `updated_at` is deliberately not
- * touched (a data move, not a re-analysis); `prompts = '[]'` guards against overwriting prompts a
- * concurrent rerun just stored.
+ * filled keep their legacy text untouched for a human decision -- except a non-`prompt`-type card
+ * whose legacy `playbook.prompt_text` is a model-written usage example (not the capture's own
+ * verbatim text): that text is moved into `playbook.usage_prompt` instead of being left
+ * unresolved (Task 11). By construction of the CANDIDATES query, any non-`prompt`-type row that
+ * reaches this branch already has a non-empty legacy `prompt_text` (the WHERE clause only admits
+ * `type = 'prompt'` rows or rows with a non-empty `prompt_text`), so no further guard is needed.
+ * A `prompt`-type card with no verifiable source stays unresolved -- its legacy `prompt_text`
+ * really might be the missing verbatim prompt, not a usage example, so it needs a human decision.
+ * `updated_at` is deliberately not touched in either case (a data move, not a re-analysis);
+ * `prompts = '[]'`/`playbook ? 'prompt_text'` guards against a concurrent rerun that already
+ * touched the row.
  */
 export async function runPromptBackfill(
   pool: Pick<Pool, "query">, apply: boolean, log: (o: Record<string, unknown>) => void
-): Promise<{ candidates: number; filled: number; unresolved: number; skipped: number }> {
+): Promise<{ candidates: number; filled: number; unresolved: number; skipped: number; moved: number }> {
   const { rows } = await pool.query<BackfillRow>(CANDIDATES);
   log({ mode: apply ? "apply" : "dry-run", candidates: rows.length });
   let filled = 0;
   let unresolved = 0;
   let skipped = 0;
+  let moved = 0;
   for (const row of rows) {
     const pick = pickBackfill(row);
     if ("unresolved" in pick) {
+      if (row.type !== "prompt" && row.playbook.prompt_text) {
+        if (apply) {
+          const { rowCount } = await pool.query(
+            `UPDATE caphub_v2.capabilities SET playbook = (playbook - 'prompt_text') || jsonb_build_object('usage_prompt', playbook->'prompt_text')
+             WHERE id = $1 AND playbook ? 'prompt_text'`,
+            [row.id]
+          );
+          if (rowCount === 0) {
+            skipped += 1;
+            log({ capabilityId: row.id, skipped: "prompt_text already migrated" });
+          } else {
+            moved += 1;
+            log({ capabilityId: row.id, serial: row.serial, type: row.type, movedToUsagePrompt: true, applied: true });
+          }
+        } else {
+          moved += 1;
+          log({ capabilityId: row.id, serial: row.serial, type: row.type, movedToUsagePrompt: true, applied: false });
+        }
+        continue;
+      }
       unresolved += 1;
       // Legacy prompt_text and capture_kind are logged in full so Joey can decide by hand from
       // the dry-run log which of these should be filled manually.
@@ -97,8 +126,8 @@ export async function runPromptBackfill(
       log({ capabilityId: row.id, serial: row.serial, type: row.type, prompts: pick.prompts, applied: false, ...maybeMultipleField });
     }
   }
-  log({ filled, unresolved, skipped, mode: apply ? "apply" : "dry-run" });
-  return { candidates: rows.length, filled, unresolved, skipped };
+  log({ filled, unresolved, skipped, moved, mode: apply ? "apply" : "dry-run" });
+  return { candidates: rows.length, filled, unresolved, skipped, moved };
 }
 
 async function main() {

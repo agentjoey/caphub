@@ -141,7 +141,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           )}
           <OpenQuestions questions={detail.openQuestions} locale={locale} />
           <SourcePrompts prompts={detail.prompts} locale={locale} />
-          {(playbookHasContent(detail.playbook) || (detail.sourceUrl && !sourceUrlIsDuplicate)) && (
+          {(playbookHasContent(detail.playbook, detail.type) || (detail.sourceUrl && !sourceUrlIsDuplicate)) && (
             <section className="panel">
               <h2 className="panel-title">{dict.detail.howToUse}</h2>
               <PlaybookView playbook={detail.playbook} type={detail.type} locale={locale} />

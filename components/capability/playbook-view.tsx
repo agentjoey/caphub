@@ -8,7 +8,6 @@ export function repoUrl(repo: string): string {
 }
 
 export function PlaybookView({ playbook, type, locale = "zh" }: { playbook: Playbook; type: CapabilityType; locale?: Locale }) {
-  void type;
   const dict = getDict(locale).playbookView;
   if (playbook.kind === "integrate") {
     return (
@@ -27,6 +26,13 @@ export function PlaybookView({ playbook, type, locale = "zh" }: { playbook: Play
           <p className="playbook__repo">
             <a href={repoUrl(playbook.repo)} target="_blank" rel="noreferrer">{playbook.repo}</a>
           </p>
+        )}
+        {playbook.usage_prompt && type !== "prompt" && (
+          <div className="prompt-block playbook__usage-prompt">
+            <p className="source-prompts__index">{dict.usagePromptLabel}</p>
+            <div className="code-block__copy"><CopyButton text={playbook.usage_prompt} locale={locale} /></div>
+            <pre>{playbook.usage_prompt}</pre>
+          </div>
         )}
       </div>
     );
@@ -49,7 +55,9 @@ export function PlaybookView({ playbook, type, locale = "zh" }: { playbook: Play
 }
 
 /** Whether 怎么用 has anything to show; an integrate card whose prompt moved to 「Prompt 原文」 may have nothing left. */
-export function playbookHasContent(playbook: Playbook): boolean {
-  if (playbook.kind === "integrate") return playbook.install.length > 0 || playbook.repo !== null;
+export function playbookHasContent(playbook: Playbook, type: CapabilityType): boolean {
+  if (playbook.kind === "integrate") {
+    return playbook.install.length > 0 || playbook.repo !== null || (!!playbook.usage_prompt && type !== "prompt");
+  }
   return true;
 }

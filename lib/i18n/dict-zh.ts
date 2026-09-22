@@ -270,7 +270,8 @@ export const dictZh = {
   },
   playbookView: {
     copyAll: "复制全文",
-    whenToUse: "适用场景：{value}"
+    whenToUse: "适用场景：{value}",
+    usagePromptLabel: "用法示例（AI 生成）"
   },
   copyButton: {
     copy: "复制",

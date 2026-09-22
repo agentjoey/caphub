@@ -11,7 +11,7 @@ const valid = {
   ],
   signals: ["解决 CI 里可访问性回归", "与库里已有 e2e-a11y 重叠"],
   suggested_verdict: "keep", suggested_reason: "有可执行命令", confidence: 0.9,
-  usage: "integrate", playbook: { kind: "integrate", install: ["npm i -D @axe-core/playwright"], repo: null },
+  usage: "integrate", playbook: { kind: "integrate", install: ["npm i -D @axe-core/playwright"], repo: null, usage_prompt: null },
   tags: ["testing", "accessibility"], source_url: null, scenarios: [],
   score: 4, score_reason: "有仓库和安装命令，可复现性高", source_facts: {},
   overlap: { relation: "none", target: null, reason: "" }, open_questions: [], prompt_locators: []
@@ -445,9 +445,14 @@ describe("verbatim prompt fields", () => {
     expect(() => extractionSchema.parse({ ...base, prompts: Array(MAX_PROMPT_ITEMS_ACCEPTED + 1).fill("x") })).toThrow();
   });
 
-  it("integrate playbooks no longer carry prompt text", () => {
+  it("integrate playbooks no longer carry prompt text, but default usage_prompt to null", () => {
     const parsed = playbookSchema.parse({ kind: "integrate", install: [], repo: null, prompt_text: "legacy" });
-    expect(parsed).toEqual({ kind: "integrate", install: [], repo: null });
+    expect(parsed).toEqual({ kind: "integrate", install: [], repo: null, usage_prompt: null });
+  });
+
+  it("integrate playbooks accept a model-written usage_prompt, distinct from prompt_text", () => {
+    const parsed = playbookSchema.parse({ kind: "integrate", install: [], repo: null, usage_prompt: "用 xyz skill 帮我做 abc" });
+    expect(parsed).toEqual({ kind: "integrate", install: [], repo: null, usage_prompt: "用 xyz skill 帮我做 abc" });
   });
 
   it("cards default prompt_locators to [] and cap anchors short", () => {

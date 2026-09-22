@@ -98,7 +98,7 @@ const SPECS: DemoSpec[] = [
       open_questions: [],
       prompt_locators: [],
       usage: "integrate",
-      playbook: { kind: "integrate", install: ["pip install scrapling"], repo: "https://github.com/D4Vinci/Scrapling" },
+      playbook: { kind: "integrate", install: ["pip install scrapling"], repo: "https://github.com/D4Vinci/Scrapling", usage_prompt: null },
       tags: ["web-scraping", "python", "anti-bot"],
       source_url: "https://github.com/D4Vinci/Scrapling",
       scenarios: ["coding", "data"]
@@ -168,7 +168,7 @@ const SPECS: DemoSpec[] = [
       open_questions: [],
       prompt_locators: [],
       usage: "integrate",
-      playbook: { kind: "integrate", install: ["npm install -g tavily-mcp"], repo: "https://github.com/tavily-ai/tavily-mcp" },
+      playbook: { kind: "integrate", install: ["npm install -g tavily-mcp"], repo: "https://github.com/tavily-ai/tavily-mcp", usage_prompt: null },
       tags: ["mcp", "search", "tavily"],
       source_url: "https://github.com/tavily-ai/tavily-mcp",
       scenarios: ["coding", "research", "automation"]
@@ -205,7 +205,8 @@ const SPECS: DemoSpec[] = [
       playbook: {
         kind: "integrate",
         install: [],
-        repo: null
+        repo: null,
+        usage_prompt: null
       },
       tags: ["prompt-engineering", "summarization"],
       source_url: null,
@@ -312,7 +313,7 @@ const SPECS: DemoSpec[] = [
       open_questions: [],
       prompt_locators: [],
       usage: "integrate",
-      playbook: { kind: "integrate", install: ["brew install example/tap/local-dev-tool"], repo: "https://github.com/example/local-dev-tool" },
+      playbook: { kind: "integrate", install: ["brew install example/tap/local-dev-tool"], repo: "https://github.com/example/local-dev-tool", usage_prompt: null },
       tags: ["cli", "developer-tools"],
       source_url: "https://github.com/example/local-dev-tool",
       scenarios: ["coding"]
@@ -345,7 +346,7 @@ const SPECS: DemoSpec[] = [
       open_questions: [],
       prompt_locators: [],
       usage: "integrate",
-      playbook: { kind: "integrate", install: ["pip install example-tsfm"], repo: "https://huggingface.co/example/timeseries-foundation-model" },
+      playbook: { kind: "integrate", install: ["pip install example-tsfm"], repo: "https://huggingface.co/example/timeseries-foundation-model", usage_prompt: null },
       tags: ["library", "time-series"],
       source_url: "https://huggingface.co/example/timeseries-foundation-model",
       scenarios: ["coding"]

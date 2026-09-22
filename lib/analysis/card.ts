@@ -40,7 +40,21 @@ export const searchResultSchema = z.object({
 export type SearchResult = z.infer<typeof searchResultSchema>;
 
 export const playbookSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("integrate"), install: z.array(z.string().max(500)).max(10), repo: z.string().min(1).max(300).nullable() }),
+  z.object({
+    kind: z.literal("integrate"),
+    install: z.array(z.string().max(500)).max(10),
+    repo: z.string().min(1).max(300).nullable(),
+    /**
+     * A model-written usage example (a one/several-sentence prompt you could hand an agent
+     * directly) for non-`prompt` type cards -- e.g. "使用 srt-whiteboard-animation skill，把我
+     * 提供的 SRT 字幕做成…". This is NOT the capture's verbatim prompt text (that lives in
+     * `capabilities.prompts`, spec 2026-09-22); it's the model's own illustration of how to
+     * invoke the capability. `null` when the model found nothing worth illustrating, or when
+     * `type === "prompt"` (the prompt itself already is the usage). Not to be confused with the
+     * removed legacy `prompt_text` field this schema still discards below.
+     */
+    usage_prompt: z.string().max(8000).nullable().default(null)
+  }),
   z.object({ kind: z.literal("reference"), points: z.array(z.string().max(300)).min(1).max(10) }),
   z.object({ kind: z.literal("experience"), content: z.string().min(1).max(8000), when_to_use: z.string().max(300) })
 ]);

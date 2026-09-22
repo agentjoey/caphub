@@ -47,13 +47,39 @@ describe("PlaybookView", () => {
     expect(screen.getByText("要点一")).toBeTruthy();
     expect(screen.getByText("要点二")).toBeTruthy();
   });
+
+  it("renders usage_prompt with its AI-generated label and a copy button for a non-prompt integrate card", () => {
+    render(<PlaybookView type="skill" playbook={{ kind: "integrate", install: [], repo: null, usage_prompt: "使用 xyz skill，把我提供的内容做成…" }} />);
+    expect(screen.getByText("用法示例（AI 生成）")).toBeTruthy();
+    expect(screen.getByText("使用 xyz skill，把我提供的内容做成…")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /复制/ }).length).toBeGreaterThan(0);
+  });
+
+  it("does not render usage_prompt for a prompt-type card even when the field is set", () => {
+    render(<PlaybookView type="prompt" playbook={{ kind: "integrate", install: [], repo: null, usage_prompt: "不该出现的示例" }} />);
+    expect(screen.queryByText("用法示例（AI 生成）")).toBeNull();
+    expect(screen.queryByText("不该出现的示例")).toBeNull();
+  });
+
+  it("does not render the usage_prompt block when usage_prompt is null", () => {
+    render(<PlaybookView type="skill" playbook={{ kind: "integrate", install: [], repo: null, usage_prompt: null }} />);
+    expect(screen.queryByText("用法示例（AI 生成）")).toBeNull();
+  });
 });
 
 describe("playbookHasContent", () => {
   it("playbookHasContent is false for an empty integrate playbook", () => {
-    expect(playbookHasContent({ kind: "integrate", install: [], repo: null })).toBe(false);
-    expect(playbookHasContent({ kind: "integrate", install: ["npm i x"], repo: null })).toBe(true);
-    expect(playbookHasContent({ kind: "reference", points: ["p"] })).toBe(true);
+    expect(playbookHasContent({ kind: "integrate", install: [], repo: null, usage_prompt: null }, "skill")).toBe(false);
+    expect(playbookHasContent({ kind: "integrate", install: ["npm i x"], repo: null, usage_prompt: null }, "skill")).toBe(true);
+    expect(playbookHasContent({ kind: "reference", points: ["p"] }, "skill")).toBe(true);
+  });
+
+  it("counts a non-empty usage_prompt as content for a non-prompt type", () => {
+    expect(playbookHasContent({ kind: "integrate", install: [], repo: null, usage_prompt: "示例" }, "skill")).toBe(true);
+  });
+
+  it("does not count usage_prompt as content for a prompt-type card", () => {
+    expect(playbookHasContent({ kind: "integrate", install: [], repo: null, usage_prompt: "示例" }, "prompt")).toBe(false);
   });
 });
 

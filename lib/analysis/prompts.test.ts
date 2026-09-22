@@ -44,6 +44,14 @@ describe("reasonPrompt", () => {
     expect(prompt).toContain(CAPABILITY_TYPE_DEFINITIONS);
   });
 
+  it("asks integrate to give usage_prompt as a model-written invocation example, distinct from the verbatim source prompt, null for prompt-type cards", () => {
+    const prompt = reasonPrompt({ material, extraction: null, sources: [], similar: [], existingTags: [], scenarios });
+    expect(prompt).toContain("usage_prompt");
+    expect(prompt).toMatch(/usage_prompt[^；。]*可直接发给 agent 的调用示例/);
+    expect(prompt).toMatch(/不是投递原文/);
+    expect(prompt).toMatch(/prompt 类型必须填 null/);
+  });
+
   it("says nothing about a pinned type when none is given", () => {
     const prompt = reasonPrompt({ material, extraction: null, sources: [], similar: [], existingTags: [], scenarios, pinnedType: null });
     expect(prompt).not.toMatch(/硬性约束/);
@@ -242,7 +250,7 @@ describe("enrichPrompt", () => {
   const subject: EnrichSubject = {
     title: "Scrapling", type: "tool", usage: "integrate", summary: "一个抓取库",
     summary_points: [{ label: "定位", text: "自适应反爬抓取库" }],
-    signals: ["s1"], playbook: { kind: "integrate", install: ["pip install scrapling"], repo: null },
+    signals: ["s1"], playbook: { kind: "integrate", install: ["pip install scrapling"], repo: null, usage_prompt: null },
     tags: ["web-scraping"], source_url: "https://github.com/a/b", open_questions: [], pinned: false
   };
 
@@ -254,6 +262,14 @@ describe("enrichPrompt", () => {
   it("renders a （无） placeholder for 摘要要点 when the subject has no summary_points yet", () => {
     const prompt = enrichPrompt({ ...subject, summary_points: [] }, null, []);
     expect(prompt).toContain("摘要要点：（无）");
+  });
+
+  it("asks integrate to give usage_prompt as a model-written invocation example, distinct from the verbatim source prompt, null for prompt-type cards", () => {
+    const prompt = enrichPrompt(subject, null, []);
+    expect(prompt).toContain("usage_prompt");
+    expect(prompt).toMatch(/usage_prompt[^；。]*可直接发给 agent 的调用示例/);
+    expect(prompt).toMatch(/不是投递原文/);
+    expect(prompt).toMatch(/prompt 类型必须填 null/);
   });
 
   it("tells summary it's the lead only (≤120 chars), not a process narration", () => {

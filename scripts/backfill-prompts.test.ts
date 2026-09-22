@@ -71,14 +71,14 @@ describe("runPromptBackfill", () => {
   it("writes nothing in dry-run", async () => {
     const { pool, writes } = fakePool([{ ...base, vision_output: { prompt_text: "原文" } }]);
     const out = await runPromptBackfill(pool as never, false, () => {});
-    expect(out).toEqual({ candidates: 1, filled: 1, unresolved: 0, skipped: 0 });
+    expect(out).toEqual({ candidates: 1, filled: 1, unresolved: 0, skipped: 0, moved: 0 });
     expect(writes).toHaveLength(0);
   });
 
   it("fills prompts, strips playbook.prompt_text and guards on an empty prompts column when applying", async () => {
     const { pool, writes } = fakePool([{ ...base, vision_output: { prompt_text: "原文" } }, { ...base, id: "cab_2" }]);
     const out = await runPromptBackfill(pool as never, true, () => {});
-    expect(out).toEqual({ candidates: 2, filled: 1, unresolved: 1, skipped: 0 });
+    expect(out).toEqual({ candidates: 2, filled: 1, unresolved: 1, skipped: 0, moved: 0 });
     expect(writes).toHaveLength(1);
     expect(writes[0].text).toContain("playbook - 'prompt_text'");
     expect(writes[0].text).toContain("prompts = '[]'::jsonb");
@@ -89,8 +89,57 @@ describe("runPromptBackfill", () => {
   it("detects when a concurrent rerun already set prompts (rowCount = 0) and counts as skipped", async () => {
     const { pool, writes } = fakePool([{ ...base, vision_output: { prompt_text: "原文" } }], [0]);
     const out = await runPromptBackfill(pool as never, true, () => {});
-    expect(out).toEqual({ candidates: 1, filled: 0, unresolved: 0, skipped: 1 });
+    expect(out).toEqual({ candidates: 1, filled: 0, unresolved: 0, skipped: 1, moved: 0 });
     expect(writes).toHaveLength(1);
+  });
+
+  it("migrates a non-prompt card's unresolved legacy prompt_text into playbook.usage_prompt instead of leaving it unresolved", async () => {
+    const row: BackfillRow = {
+      ...base, type: "skill", capture_kind: "text", capture_text: "unrelated text",
+      playbook: { kind: "integrate", install: [], repo: null, prompt_text: "not verbatim in capture" }, vision_output: null
+    };
+    const { pool, writes } = fakePool([row]);
+    const out = await runPromptBackfill(pool as never, true, () => {});
+    expect(out).toEqual({ candidates: 1, filled: 0, unresolved: 0, skipped: 0, moved: 1 });
+    expect(writes).toHaveLength(1);
+    expect(writes[0].text).toContain("playbook = (playbook - 'prompt_text') || jsonb_build_object('usage_prompt', playbook->'prompt_text')");
+    expect(writes[0].text).toContain("playbook ? 'prompt_text'");
+    expect(writes[0].text).not.toContain("prompts =");
+    expect(writes[0].text).not.toContain("updated_at");
+    expect(writes[0].values).toEqual(["cab_1"]);
+  });
+
+  it("does not write anything for a migrated card in dry-run, but still counts it as moved", async () => {
+    const row: BackfillRow = {
+      ...base, type: "skill", capture_kind: "text", capture_text: "unrelated text",
+      playbook: { kind: "integrate", install: [], repo: null, prompt_text: "not verbatim in capture" }, vision_output: null
+    };
+    const { pool, writes } = fakePool([row]);
+    const out = await runPromptBackfill(pool as never, false, () => {});
+    expect(out).toEqual({ candidates: 1, filled: 0, unresolved: 0, skipped: 0, moved: 1 });
+    expect(writes).toHaveLength(0);
+  });
+
+  it("logs movedToUsagePrompt: true for a migrated card", async () => {
+    const row: BackfillRow = {
+      ...base, type: "skill", capture_kind: "text", capture_text: "unrelated text",
+      playbook: { kind: "integrate", install: [], repo: null, prompt_text: "not verbatim in capture" }, vision_output: null
+    };
+    const { pool } = fakePool([row]);
+    const logs: Array<Record<string, unknown>> = [];
+    await runPromptBackfill(pool as never, true, (o) => logs.push(o));
+    const entry = logs.find((l) => l.capabilityId === "cab_1" && l.movedToUsagePrompt === true);
+    expect(entry).toMatchObject({ capabilityId: "cab_1", serial: 27, type: "skill", movedToUsagePrompt: true, applied: true });
+  });
+
+  it("leaves a prompt-type card with no verifiable source as unresolved, not migrated", async () => {
+    const row: BackfillRow = {
+      ...base, type: "prompt", capture_kind: "image", playbook: { kind: "reference", points: ["p"] }, vision_output: null
+    };
+    const { pool, writes } = fakePool([row]);
+    const out = await runPromptBackfill(pool as never, true, () => {});
+    expect(out).toEqual({ candidates: 1, filled: 0, unresolved: 1, skipped: 0, moved: 0 });
+    expect(writes).toHaveLength(0);
   });
 
   it("logs the legacy playbook.prompt_text and capture_kind for an unresolved row", async () => {

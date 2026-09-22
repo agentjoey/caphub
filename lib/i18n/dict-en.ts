@@ -265,7 +265,8 @@ export const dictEn: Dict = {
   },
   playbookView: {
     copyAll: "Copy all",
-    whenToUse: "When to use: {value}"
+    whenToUse: "When to use: {value}",
+    usagePromptLabel: "Usage example (AI-generated)"
   },
   copyButton: {
     copy: "Copy",
