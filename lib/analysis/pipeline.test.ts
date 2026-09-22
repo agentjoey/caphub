@@ -52,6 +52,7 @@ function deps(kind: Kind, opts: {
   const sql: Array<{ text: string; values: unknown[]; client?: boolean }> = [];
   let reasonPromptSeen = "";
   let videoInputSeen: unknown;
+  let videoPromptSeen = "";
   let released = 0;
   const query = async (text: string, values: unknown[] = []) => {
     sql.push({ text, values });
@@ -134,15 +135,16 @@ function deps(kind: Kind, opts: {
     },
     video: opts.noVideo ? undefined : {
       provider: "gemini", model: "gemini-video",
-      invoke: async (input: { video?: unknown }) => {
+      invoke: async (input: { video?: unknown; prompt: string }) => {
         calls.push("video");
         videoInputSeen = input.video;
+        videoPromptSeen = input.prompt;
         if (opts.videoThrows) throw new ProviderError(opts.videoThrows);
         return { value: opts.videoValue ?? extraction, usage: { inputTokens: 1, outputTokens: 1 } };
       }
     }
   };
-  return { d, calls, sql, released: () => released, reasonPrompt: () => reasonPromptSeen, videoInput: () => videoInputSeen };
+  return { d, calls, sql, released: () => released, reasonPrompt: () => reasonPromptSeen, videoInput: () => videoInputSeen, videoPrompt: () => videoPromptSeen };
 }
 
 describe("runPipeline", () => {
@@ -545,6 +547,27 @@ describe("runPipeline", () => {
       expect(reasonPrompt()).toContain("只分析了前 90 分钟");
     });
 
+    it("sends endOffsetSec 5400 (defensive clip), but no 90-minute note, when the duration is unknown (metadata fetch failed)", async () => {
+      const { d, videoInput, videoPrompt } = deps("video", { meta: null });
+      const out = await runPipeline(d, { runId: "run_video_unknown_dur", captureId: "cap_video_unknown_dur", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
+      expect(videoInput()).toEqual({ url: "https://www.youtube.com/watch?v=tYvu6IpSfiM", endOffsetSec: 5400 });
+      expect(videoPrompt()).not.toContain("只提供了前 90 分钟");
+      expect(out.verdict).toBe("keep");
+    });
+
+    it("sends endOffsetSec 5400, but no 90-minute note, when durationSec is 0 (a live stream)", async () => {
+      const { d, videoInput, videoPrompt } = deps("video", { durationIso: "PT0S" });
+      await runPipeline(d, { runId: "run_video_live", captureId: "cap_video_live", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
+      expect(videoInput()).toEqual({ url: "https://www.youtube.com/watch?v=tYvu6IpSfiM", endOffsetSec: 5400 });
+      expect(videoPrompt()).not.toContain("只提供了前 90 分钟");
+    });
+
+    it("sends no endOffsetSec for a known, short duration", async () => {
+      const { d, videoInput } = deps("video", { durationIso: "PT10M" });
+      await runPipeline(d, { runId: "run_video_short", captureId: "cap_video_short", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
+      expect(videoInput()).toEqual({ url: "https://www.youtube.com/watch?v=tYvu6IpSfiM" });
+    });
+
     it("falls back to a metadata-only, forced-pending analysis when the video call fails with INVALID_OUTPUT", async () => {
       const { d, reasonPrompt } = deps("video", { videoThrows: "INVALID_OUTPUT" });
       const out = await runPipeline(d, { runId: "run_video_fail", captureId: "cap_video_fail", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
@@ -557,6 +580,20 @@ describe("runPipeline", () => {
       await expect(
         runPipeline(d, { runId: "run_video_budget_fail", captureId: "cap_video_budget_fail", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal)
       ).rejects.toMatchObject({ code: "BUDGET" });
+    });
+
+    it("rethrows ABORTED from the video call and fails the run", async () => {
+      const { d } = deps("video", { videoThrows: "ABORTED" });
+      await expect(
+        runPipeline(d, { runId: "run_video_aborted", captureId: "cap_video_aborted", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal)
+      ).rejects.toMatchObject({ code: "ABORTED" });
+    });
+
+    it("falls back to a metadata-only, forced-pending analysis when the video call fails with TIMEOUT", async () => {
+      const { d, reasonPrompt } = deps("video", { videoThrows: "TIMEOUT" });
+      const out = await runPipeline(d, { runId: "run_video_timeout", captureId: "cap_video_timeout", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
+      expect(reasonPrompt()).toContain("视频内容未能读取");
+      expect(out.verdict).toBe("pending");
     });
 
     it("skips the video call entirely, but still records the fetch step, when no Gemini key is configured", async () => {
@@ -574,6 +611,13 @@ describe("runPipeline", () => {
       expect(fetchStep!.values[8]).toBe(false);
       expect(calls).toContain("video");
       expect(reasonPrompt()).toContain("无元数据");
+    });
+
+    it("never puts the YouTube API key into the recorded fetch step's output", async () => {
+      const { d, sql } = deps("video");
+      await runPipeline(d, { runId: "run_video_key_leak", captureId: "cap_video_key_leak", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
+      const fetchStep = sql.find((q) => q.text.includes("caphub_v2.analysis_steps") && q.values[1] === "fetch")!;
+      expect(JSON.stringify(fetchStep.values)).not.toContain("yt-fake-key");
     });
 
     it("stores the video call's dictated prompts the same way an image's are stored", async () => {
@@ -631,5 +675,34 @@ describe("createPipelineDeps", () => {
     const config = { ...baseConfig, providers: { ...baseConfig.providers, tavilyApiKey: "tv" } };
     const out = createPipelineDeps(config as never, {} as never, {} as never, "mixed");
     await expect(out.embedQuery("some material text", new AbortController().signal)).resolves.toBeNull();
+  });
+
+  describe("video deps wiring", () => {
+    const geminiVideoModel = "gemini-3.8-flash";
+
+    it.each(["mixed", "minimax_tavily", "minimax"] as const)(
+      "builds deps.video with provider gemini and the configured model, and passes material.youtubeApiKey, for pipeline=%s",
+      (pipeline) => {
+        const config = {
+          ...baseConfig, pipeline,
+          providers: { ...baseConfig.providers, tavilyApiKey: "tv", geminiApiKey: "gk", youtubeApiKey: "yk" },
+          geminiVideoModel
+        };
+        const out = createPipelineDeps(config as never, {} as never, {} as never, pipeline);
+        expect(out.video).toBeDefined();
+        expect(out.video!.provider).toBe("gemini");
+        expect(out.video!.model).toBe(geminiVideoModel);
+        expect(out.material.youtubeApiKey).toBe("yk");
+      }
+    );
+
+    it.each(["mixed", "minimax_tavily", "minimax"] as const)(
+      "leaves deps.video undefined when no Gemini key is configured, for pipeline=%s",
+      (pipeline) => {
+        const config = { ...baseConfig, pipeline, providers: { ...baseConfig.providers, tavilyApiKey: "tv" }, geminiVideoModel };
+        const out = createPipelineDeps(config as never, {} as never, {} as never, pipeline);
+        expect(out.video).toBeUndefined();
+      }
+    );
   });
 });

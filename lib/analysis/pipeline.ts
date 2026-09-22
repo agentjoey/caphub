@@ -199,14 +199,21 @@ export async function runPipeline(deps: PipelineDeps, lease: Lease, signal: Abor
     const meta = await fetchYouTubeMeta(material.videoId, deps.material.youtubeApiKey, deps.material.fetch, signal);
     await recordStep(deps.pool, { runId: lease.runId, step: "fetch", provider: "youtube", model: "data-api-v3", attempt: 1, durationMs: Date.now() - started, ok: meta !== null, output: meta });
     material = { ...material, meta };
-    const clipped = (meta?.durationSec ?? 0) > VIDEO_CLIP_SEC;
+    // "known duration over the clip length" only -- an unknown duration (null, unparseable, or
+    // 0 for a live stream) must not claim in the prompt that only the first 90 minutes were
+    // shown, since we don't actually know that. The endOffsetSec sent to Gemini is broader: it
+    // also defensively clips an unknown-length video, so a long/live video can't blow the
+    // token budget just because YouTube's metadata didn't give us a duration to check.
+    const durationKnown = meta?.durationSec !== null && meta?.durationSec !== undefined;
+    const knownOverClip = durationKnown && meta!.durationSec! > VIDEO_CLIP_SEC;
+    const shouldClipRequest = !durationKnown || meta!.durationSec === 0 || knownOverClip;
     if (!deps.video) {
       videoFailed = true;
     } else {
       try {
         extraction = await runStructured({
           pool: deps.pool, runId: lease.runId, step: "vision", call: deps.video,
-          prompt: videoPrompt(meta, clipped), video: { url: material.url, ...(clipped ? { endOffsetSec: VIDEO_CLIP_SEC } : {}) },
+          prompt: videoPrompt(meta, knownOverClip), video: { url: material.url, ...(shouldClipRequest ? { endOffsetSec: VIDEO_CLIP_SEC } : {}) },
           schemaName: "video_extraction", schema: videoExtractionSchema, budget, timeoutMs: TIMEOUTS.video, signal
         });
       } catch (error) {
