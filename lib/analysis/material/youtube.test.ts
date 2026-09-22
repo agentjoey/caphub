@@ -49,4 +49,28 @@ describe("fetchYouTubeMeta", () => {
     expect(await fetchYouTubeMeta("x", "K", (async () => new Response(JSON.stringify({ items: [] }), { status: 200 })) as never)).toBeNull();
     expect(await fetchYouTubeMeta("x", "K", (async () => { throw new Error("net"); }) as never)).toBeNull();
   });
+
+  it("still applies the internal timeout cap when a caller signal is passed, instead of replacing it", async () => {
+    const caller = new AbortController();
+    let receivedSignal: AbortSignal | undefined;
+    const fetchFn = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      receivedSignal = init?.signal ?? undefined;
+      return new Promise<Response>((resolve, reject) => {
+        receivedSignal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+      });
+    });
+
+    const pending = fetchYouTubeMeta("x", "K", fetchFn as never, caller.signal);
+
+    // The signal handed to fetch must be a composed one (caller signal AND the internal
+    // timeout), never the caller's own signal object -- otherwise passing a long-lived caller
+    // signal (e.g. a run's signal, as Task 4 will) would silently drop the 10s cap.
+    expect(receivedSignal).toBeDefined();
+    expect(receivedSignal).not.toBe(caller.signal);
+
+    // Aborting the caller's signal must abort the composed signal too, proving the composition
+    // actually includes the caller signal (not just the timeout).
+    caller.abort();
+    expect(await pending).toBeNull();
+  });
 });

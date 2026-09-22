@@ -44,7 +44,9 @@ export async function fetchYouTubeMeta(videoId: string, apiKey: string | undefin
   if (!apiKey) return null;
   const params = new URLSearchParams({ part: "snippet,contentDetails", id: videoId, key: apiKey });
   try {
-    const response = await fetchFn(`https://www.googleapis.com/youtube/v3/videos?${params}`, { signal: signal ?? AbortSignal.timeout(TIMEOUT_MS) });
+    const response = await fetchFn(`https://www.googleapis.com/youtube/v3/videos?${params}`, {
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]) : AbortSignal.timeout(TIMEOUT_MS)
+    });
     if (!response.ok) return null;
     const parsed = responseSchema.safeParse(await response.json());
     const item = parsed.success ? parsed.data.items[0] : undefined;
