@@ -77,7 +77,7 @@ export function CapturePreview({ capture, size = "thumb", locale = "zh" }: { cap
     if (size === "thumb") return thumbImg ?? <span className="thumb">{dict.linkThumb}</span>;
     if (!capture.url) return <span className="capture-url">{dict.noLink}</span>;
     const link = <a className="capture-url" href={capture.url} target="_blank" rel="noreferrer">{capture.url}</a>;
-    return thumbImg ? <div>{thumbImg}{link}</div> : link;
+    return thumbImg ? <div className="capture-video">{thumbImg}{link}</div> : link;
   }
   if (size === "thumb") return <span className="thumb">{dict.textThumb}</span>;
   const text = capture.text ?? "";

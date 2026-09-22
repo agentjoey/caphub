@@ -654,11 +654,12 @@ a.stat--accent:hover { background: #fcebcc; border-color: var(--amber-border); }
 .detail-source { margin-top: var(--space-4); font-family: var(--font-mono); font-size: var(--text-xs); overflow-wrap: anywhere; }
 .detail-source a { color: var(--ink-muted); }
 /* Video summary panel (YouTube capability detail) */
-.video-summary__title { max-width: var(--measure); font-size: var(--text-md); font-weight: 600; line-height: var(--leading-body); }
+.video-summary__title { max-width: var(--measure); font-size: var(--text-md); font-weight: 600; line-height: var(--leading-body); overflow-wrap: anywhere; }
 .video-summary__title a { color: var(--ink); }
 .video-summary__meta { margin-top: 4px; color: var(--ink-muted); font-size: var(--text-sm); }
 .video-summary__subtitle { margin-top: var(--space-4); font-size: var(--text-sm); font-weight: 700; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.04em; }
 .video-moments { margin-top: var(--space-2); display: grid; gap: 6px; font-size: var(--text-sm); line-height: 1.6; }
+.video-moments li { overflow-wrap: anywhere; }
 .video-moments__t { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--ink-muted); }
 a.video-moments__t:hover { color: var(--ink); }
 .detail-synced { margin-top: var(--space-3); color: var(--ink-faint); font-size: var(--text-xs); }
