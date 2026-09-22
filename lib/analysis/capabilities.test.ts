@@ -11,6 +11,9 @@ const card: Card = {
   open_questions: [], prompt_locators: []
 };
 
+/** Spread into calls that don't exercise prompts/promptUnresolved themselves. */
+const noPrompts = { prompts: [] as string[], promptUnresolved: 0 };
+
 describe("upsertCapability", () => {
   it("reports previousVerdict null and deleted false for a brand-new row", async () => {
     let sql = "";
@@ -20,7 +23,7 @@ describe("upsertCapability", () => {
         return { rows: [{ id: "cab_1", verdict: "keep", previous_verdict: null, deleted: false }] };
       }
     };
-    const out = await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card, verdict: "keep", verdictBy: "auto" });
+    const out = await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card, verdict: "keep", verdictBy: "auto", ...noPrompts });
     expect(sql).toContain("WITH prev AS");
     expect(sql).toContain("INSERT INTO caphub_v2.capabilities");
     expect(sql).toContain("review_error = NULL");
@@ -40,7 +43,7 @@ describe("upsertCapability", () => {
       }
     };
     const withFacts: Card = { ...card, score: 4, score_reason: "有仓库", source_facts: { repo_url: "https://github.com/a/b", stars: 10 } };
-    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card: withFacts, verdict: "keep", verdictBy: "auto" });
+    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card: withFacts, verdict: "keep", verdictBy: "auto", ...noPrompts });
     expect(sql).toContain("score");
     expect(sql).toContain("score_reason");
     expect(sql).toContain("source_facts");
@@ -57,7 +60,7 @@ describe("upsertCapability", () => {
         return { rows: [{ id: "cab_1", verdict: "keep", previous_verdict: "keep", deleted: false }] };
       }
     };
-    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_2", card, verdict: "keep", verdictBy: "auto" });
+    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_2", card, verdict: "keep", verdictBy: "auto", ...noPrompts });
     // A human-verdict row keeps its score/score_reason regardless of what this run's card carries,
     // mirroring how verdict/verdict_by/verdict_at are preserved for verdict_by = 'human'.
     expect(sql).toMatch(/score = CASE WHEN caphub_v2\.capabilities\.verdict_by = 'human' THEN caphub_v2\.capabilities\.score ELSE excluded\.score END/);
@@ -74,7 +77,7 @@ describe("upsertCapability", () => {
       }
     };
     const overlap: Card["overlap"] = { relation: "duplicate", target: "TOL-0009", reason: "与 TOL-0009 功能重复" };
-    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card: { ...card, overlap }, verdict: "keep", verdictBy: "auto" });
+    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card: { ...card, overlap }, verdict: "keep", verdictBy: "auto", ...noPrompts });
     expect(sql).toContain("overlap");
     expect(params).toContain(JSON.stringify(overlap));
   });
@@ -87,7 +90,7 @@ describe("upsertCapability", () => {
         return { rows: [{ id: "cab_1", verdict: "keep", previous_verdict: "keep", deleted: false }] };
       }
     };
-    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_2", card, verdict: "keep", verdictBy: "auto" });
+    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_2", card, verdict: "keep", verdictBy: "auto", ...noPrompts });
     expect(sql).toContain("overlap = excluded.overlap");
     expect(sql).not.toMatch(/overlap = CASE WHEN/);
   });
@@ -100,7 +103,7 @@ describe("upsertCapability", () => {
         return { rows: [{ id: "cab_1", verdict: "keep", previous_verdict: "keep", deleted: false }] };
       }
     };
-    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_2", card, verdict: "keep", verdictBy: "auto" });
+    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_2", card, verdict: "keep", verdictBy: "auto", ...noPrompts });
     expect(sql).toMatch(/type = CASE WHEN caphub_v2\.capabilities\.type_by = 'human' THEN caphub_v2\.capabilities\.type ELSE excluded\.type END/);
     expect(sql).toMatch(/type_by = CASE WHEN caphub_v2\.capabilities\.type_by = 'human' THEN 'human' ELSE excluded\.type_by END/);
   });
@@ -115,7 +118,7 @@ describe("upsertCapability", () => {
       }
     };
     const open_questions = ["是否需要登录才能用", "免费额度上限是多少"];
-    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card: { ...card, open_questions }, verdict: "keep", verdictBy: "auto" });
+    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card: { ...card, open_questions }, verdict: "keep", verdictBy: "auto", ...noPrompts });
     expect(sql).toContain("open_questions");
     expect(sql).toContain("open_questions = excluded.open_questions");
     expect(params).toContain(JSON.stringify(open_questions));
@@ -133,7 +136,7 @@ describe("upsertCapability", () => {
     const summary_points: Card["summary_points"] = [
       { label: "定位", text: "一句话定位" }, { label: "适用", text: "适用场景" }, { label: "限制", text: "已知限制" }
     ];
-    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card: { ...card, summary_points }, verdict: "keep", verdictBy: "auto" });
+    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card: { ...card, summary_points }, verdict: "keep", verdictBy: "auto", ...noPrompts });
     expect(sql).toContain("summary_points");
     expect(sql).toContain("summary_points = excluded.summary_points");
     expect(params).toContain(JSON.stringify(summary_points));
@@ -147,7 +150,7 @@ describe("upsertCapability", () => {
         return { rows: [{ id: "cab_1", verdict: "keep", previous_verdict: "keep", deleted: false }] };
       }
     };
-    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card, verdict: "keep", verdictBy: "auto" });
+    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card, verdict: "keep", verdictBy: "auto", ...noPrompts });
     const [upsertSql, followUpSql] = calls;
     // VALUES always passes a literal NULL for serial; nextval() never appears in the INSERT list.
     expect(upsertSql).toMatch(/VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$23, \$7, \$8, \$9, \$10, \$11, \$12,[\s\S]*?\n\s*NULL, \$18, \$19, \$20, \$21, \$22, \$24::jsonb, \$25\)/);
@@ -170,7 +173,7 @@ describe("upsertCapability", () => {
         return { rows: [{ id: "cab_1", verdict: "discard", previous_verdict: null, deleted: false }] };
       }
     };
-    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card, verdict: "discard", verdictBy: "auto" });
+    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card, verdict: "discard", verdictBy: "auto", ...noPrompts });
     expect(calls).toHaveLength(1);
   });
 
@@ -178,7 +181,7 @@ describe("upsertCapability", () => {
     const pool = {
       query: async () => ({ rows: [{ id: "cab_1", verdict: "keep", previous_verdict: "pending", deleted: true }] })
     };
-    const out = await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_2", card, verdict: "keep", verdictBy: "auto" });
+    const out = await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_2", card, verdict: "keep", verdictBy: "auto", ...noPrompts });
     expect(out).toEqual({ id: "cab_1", verdict: "keep", previousVerdict: "pending", deleted: true });
   });
 
@@ -197,8 +200,8 @@ describe("upsertCapability", () => {
     });
     expect(sql).toContain("prompts = excluded.prompts");
     expect(sql).toContain("prompt_unresolved = excluded.prompt_unresolved");
-    expect(params).toContain(JSON.stringify([{ text: "原文一" }, { text: "原文二" }]));
-    expect(params).toContain(1);
+    expect(params[23]).toBe(JSON.stringify([{ text: "原文一" }, { text: "原文二" }]));
+    expect(params[24]).toBe(1);
   });
 
   it("strips U+0000 from every text and jsonb parameter before it reaches SQL", async () => {
@@ -218,7 +221,7 @@ describe("upsertCapability", () => {
       overlap: { relation: "duplicate", target: "TOL-0009", reason: "重\u0000复" },
       summary_points: [{ label: "l\u00001", text: "t\u00001" }, { label: "l2", text: "t2" }, { label: "l3", text: "t3" }]
     };
-    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card: dirty, verdict: "keep", verdictBy: "auto" });
+    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card: dirty, verdict: "keep", verdictBy: "auto", ...noPrompts });
     for (const p of params) {
       if (typeof p === "string") expect(p).not.toContain("\u0000");
       if (Array.isArray(p)) for (const item of p) expect(String(item)).not.toContain("\u0000");

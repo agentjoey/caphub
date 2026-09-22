@@ -16,7 +16,7 @@ export async function upsertCapability(
   db: Pick<Pool | PoolClient, "query">,
   row: {
     captureId: string; runId: string; card: Card; verdict: "keep" | "discard" | "pending"; verdictBy: "auto" | null;
-    prompts?: string[]; promptUnresolved?: number;
+    prompts: string[]; promptUnresolved: number;
   }
 ): Promise<UpsertCapabilityResult> {
   const c = row.card;
@@ -76,7 +76,7 @@ export async function upsertCapability(
       c.tags.map(stripNul), c.source_url === null ? null : stripNul(c.source_url), c.scenarios.map(stripNul),
       c.score, stripNul(c.score_reason), jsonStringifyStripNul(c.source_facts), jsonStringifyStripNul(c.overlap),
       jsonStringifyStripNul(c.open_questions), jsonStringifyStripNul(c.summary_points),
-      jsonStringifyStripNul((row.prompts ?? []).map((text) => ({ text }))), row.promptUnresolved ?? 0]);
+      jsonStringifyStripNul(row.prompts.map((text) => ({ text }))), row.promptUnresolved]);
   const out = r.rows[0];
   // Brand-new (or previously-non-keep, now-keep, still-serial-less) rows get their serial
   // assigned here, after the upsert, instead of via nextval() in VALUES — the WHERE clause
