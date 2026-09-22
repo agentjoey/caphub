@@ -275,9 +275,17 @@ describe("library queries", () => {
       expect(buildVideoDetail("not-a-url", steps)).toBeNull();
     });
 
-    it("returns VideoDetail with null metadata when YouTube URL has no fetch step", () => {
+    it("returns null when there is no fetch/youtube step at all (a card analysed before this feature)", () => {
       const steps: Array<{ step: string; provider: string; ok: boolean; output: unknown }> = [
         { step: "search", provider: "tavily", ok: true, output: { sources: [] } },
+        { step: "vision", provider: "gemini", ok: true, output: { what: "test", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [], key_moments: [{ t: "1:30", note: "Key point" }] } }
+      ];
+      expect(buildVideoDetail("https://www.youtube.com/watch?v=dQw4w9WgXcQ", steps)).toBeNull();
+    });
+
+    it("returns VideoDetail with null metadata when the fetch/youtube step exists but is not ok", () => {
+      const steps: Array<{ step: string; provider: string; ok: boolean; output: unknown }> = [
+        { step: "fetch", provider: "youtube", ok: false, output: null },
         { step: "vision", provider: "gemini", ok: true, output: { what: "test", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [], key_moments: [{ t: "1:30", note: "Key point" }] } }
       ];
       const result = buildVideoDetail("https://www.youtube.com/watch?v=dQw4w9WgXcQ", steps);

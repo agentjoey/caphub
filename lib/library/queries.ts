@@ -296,10 +296,12 @@ export interface CapabilityDetail extends CapabilityRow {
 
 /**
  * Pure function to assemble VideoDetail from a capture URL and analysis steps.
- * Returns null only if the URL is not a YouTube URL. Metadata fetch failures
- * result in null title/channel/durationSec but the VideoDetail is still returned.
+ * Returns null when the URL is not a YouTube URL, or when there is no fetch/youtube step at all
+ * (a card analysed before this feature shipped -- the analysis pipeline always records a
+ * fetch/youtube step, win or lose, from this feature onward). A fetch/youtube step that exists
+ * but failed still yields a VideoDetail, just with null title/channel/durationSec.
  * - Extracts videoId from the URL
- * - Finds the last successful fetch/youtube step for metadata (optional)
+ * - Finds the last fetch/youtube step (ok or not) for metadata (null metadata when not ok)
  * - Finds the last successful vision/gemini step for key moments
  * - Sets clipped=true if durationSec > VIDEO_CLIP_SEC
  * - Sets failed=true only if no successful vision extraction exists
@@ -313,11 +315,12 @@ export function buildVideoDetail(
   const videoId = parseYouTubeUrl(captureUrl);
   if (!videoId) return null;
 
-  // Find last successful fetch/youtube step for metadata (optional)
-  const fetchStep = steps.findLast(
-    (s) => s.step === "fetch" && s.provider === "youtube" && s.ok
-  );
-  const meta = fetchStep?.output as { title?: string | null; channel?: string | null; durationSec?: number | null } | null;
+  // Find the last fetch/youtube step, ok or not: its mere presence is what distinguishes a
+  // YouTube capture analysed under this feature (always records a fetch step, win or lose) from
+  // one analysed before it existed (no fetch step at all) -- only the latter returns null below.
+  const fetchStep = steps.findLast((s) => s.step === "fetch" && s.provider === "youtube");
+  if (!fetchStep) return null;
+  const meta = fetchStep.ok ? (fetchStep.output as { title?: string | null; channel?: string | null; durationSec?: number | null } | null) : null;
 
   // Find last successful vision/gemini step for extraction
   const visionStep = steps.findLast(
