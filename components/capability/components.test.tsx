@@ -2,7 +2,7 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { CardSummary } from "./card-summary";
-import { PlaybookView } from "./playbook-view";
+import { PlaybookView, playbookHasContent } from "./playbook-view";
 import { CopyButton } from "./copy-button";
 
 afterEach(cleanup);
@@ -46,6 +46,14 @@ describe("PlaybookView", () => {
     render(<PlaybookView type="skill" playbook={{ kind: "reference", points: ["要点一", "要点二"] }} />);
     expect(screen.getByText("要点一")).toBeTruthy();
     expect(screen.getByText("要点二")).toBeTruthy();
+  });
+});
+
+describe("playbookHasContent", () => {
+  it("playbookHasContent is false for an empty integrate playbook", () => {
+    expect(playbookHasContent({ kind: "integrate", install: [], repo: null })).toBe(false);
+    expect(playbookHasContent({ kind: "integrate", install: ["npm i x"], repo: null })).toBe(true);
+    expect(playbookHasContent({ kind: "reference", points: ["p"] })).toBe(true);
   });
 });
 

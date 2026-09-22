@@ -8,10 +8,11 @@ import { CollapsedCapturePreview } from "../../../../components/capability/captu
 import { DeepAnalysisSection } from "../../../../components/capability/deep-analysis";
 import { OpenQuestions } from "../../../../components/capability/open-questions";
 import { OverlapNotice } from "../../../../components/capability/overlap-notice";
-import { PlaybookView, repoUrl } from "../../../../components/capability/playbook-view";
+import { PlaybookView, playbookHasContent, repoUrl } from "../../../../components/capability/playbook-view";
 import { ProgressControl } from "../../../../components/capability/progress-control";
 import { ScoreBadge } from "../../../../components/capability/score-badge";
 import { SourceFacts } from "../../../../components/capability/source-facts";
+import { SourcePrompts } from "../../../../components/capability/source-prompts";
 import { StatusControl } from "../../../../components/capability/status-control";
 import { SummaryBody } from "../../../../components/capability/summary-points";
 import { VerdictBadge } from "../../../../components/capability/verdict-badge";
@@ -139,22 +140,25 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             </section>
           )}
           <OpenQuestions questions={detail.openQuestions} locale={locale} />
-          <section className="panel">
-            <h2 className="panel-title">{dict.detail.howToUse}</h2>
-            <PlaybookView playbook={detail.playbook} type={detail.type} locale={locale} />
-            {detail.sourceUrl && !sourceUrlIsDuplicate && (
-              // detail.sourceUrl is model-supplied (analysis's source_url) and the zod schema
-              // accepts any z.string().url() value, including javascript:/data: — only render an
-              // anchor when it parses as http/https (see safeHttpUrl).
-              <p className="detail-source">
-                {safeHttpUrl(detail.sourceUrl) ? (
-                  <a href={detail.sourceUrl} target="_blank" rel="noreferrer">{detail.sourceUrl}</a>
-                ) : (
-                  detail.sourceUrl
-                )}
-              </p>
-            )}
-          </section>
+          <SourcePrompts prompts={detail.prompts} locale={locale} />
+          {(playbookHasContent(detail.playbook) || (detail.sourceUrl && !sourceUrlIsDuplicate)) && (
+            <section className="panel">
+              <h2 className="panel-title">{dict.detail.howToUse}</h2>
+              <PlaybookView playbook={detail.playbook} type={detail.type} locale={locale} />
+              {detail.sourceUrl && !sourceUrlIsDuplicate && (
+                // detail.sourceUrl is model-supplied (analysis's source_url) and the zod schema
+                // accepts any z.string().url() value, including javascript:/data: — only render an
+                // anchor when it parses as http/https (see safeHttpUrl).
+                <p className="detail-source">
+                  {safeHttpUrl(detail.sourceUrl) ? (
+                    <a href={detail.sourceUrl} target="_blank" rel="noreferrer">{detail.sourceUrl}</a>
+                  ) : (
+                    detail.sourceUrl
+                  )}
+                </p>
+              )}
+            </section>
+          )}
         </div>
         <div>
           <CollapsedCapturePreview

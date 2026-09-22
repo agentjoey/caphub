@@ -35,7 +35,7 @@ const baseDetail = {
   progress: "todo", progressLink: null, progressAt: null,
   steps: [], sources: [], runPipeline: "mixed", runState: "done", runId: "run_1",
   deepAnalysis: null, deepAnalysisOf: null, deepRunState: null, deepRunErrorCode: null,
-  openQuestions: [], enrichedAt: null, buildNotes: []
+  openQuestions: [], enrichedAt: null, buildNotes: [], prompts: [], promptUnresolved: 0
 };
 
 const DEEP = {

@@ -139,7 +139,9 @@ export const dictZh = {
     syncedAt: "最后同步到 Obsidian：{date}",
     notSynced: "尚未同步",
     enrichedBadge: "已补充调研 · {date}",
-    enrichedBadgeAria: "第二轮补充调研于 {date} 完成"
+    enrichedBadgeAria: "第二轮补充调研于 {date} 完成",
+    sourcePrompts: "Prompt 原文",
+    promptIndex: "第 {n} 条"
   },
   scoreBadge: {
     label: "★ {score}/5",
@@ -262,7 +264,9 @@ export const dictZh = {
     textThumb: "文字"
   },
   cardSummary: {
-    suggestion: "建议{verdict} · 置信度 {confidence} — {reason}"
+    suggestion: "建议{verdict} · 置信度 {confidence} — {reason}",
+    promptUnresolved: "有 {count} 条 prompt 原文未能在投递内容里定位，请对照原始投递核对",
+    promptMissing: "未摘到 prompt 原文，请对照原始投递补充或改判"
   },
   playbookView: {
     copyAll: "复制全文",

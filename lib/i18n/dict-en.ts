@@ -134,7 +134,9 @@ export const dictEn: Dict = {
     syncedAt: "Last synced to Obsidian: {date}",
     notSynced: "Not synced yet",
     enrichedBadge: "Enriched · {date}",
-    enrichedBadgeAria: "Second-pass enrichment completed {date}"
+    enrichedBadgeAria: "Second-pass enrichment completed {date}",
+    sourcePrompts: "Source prompts",
+    promptIndex: "#{n}"
   },
   scoreBadge: {
     label: "★ {score}/5",
@@ -257,7 +259,9 @@ export const dictEn: Dict = {
     textThumb: "Text"
   },
   cardSummary: {
-    suggestion: "Suggests {verdict} · confidence {confidence} — {reason}"
+    suggestion: "Suggests {verdict} · confidence {confidence} — {reason}",
+    promptUnresolved: "{count} prompt(s) could not be located in the capture; check against the original",
+    promptMissing: "No source prompt was captured; check against the original"
   },
   playbookView: {
     copyAll: "Copy all",

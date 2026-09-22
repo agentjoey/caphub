@@ -47,3 +47,9 @@ export function PlaybookView({ playbook, type, locale = "zh" }: { playbook: Play
     </div>
   );
 }
+
+/** Whether 怎么用 has anything to show; an integrate card whose prompt moved to 「Prompt 原文」 may have nothing left. */
+export function playbookHasContent(playbook: Playbook): boolean {
+  if (playbook.kind === "integrate") return playbook.install.length > 0 || playbook.repo !== null;
+  return true;
+}

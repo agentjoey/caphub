@@ -669,6 +669,9 @@ a.stat--accent:hover { background: #fcebcc; border-color: var(--amber-border); }
 .playbook > .prompt-block:first-child { margin-top: 0; }
 .prompt-block .code-block__copy { float: right; margin: -4px -6px 6px 12px; }
 .prompt-block pre { margin: 0; font-family: var(--font-sans); font-size: var(--text-md); line-height: var(--leading-body); color: var(--ink); }
+.source-prompts > .prompt-block:first-child { margin-top: 0; }
+.source-prompts__index { margin: 0 0 6px; font-family: var(--font-mono); font-size: var(--text-xs); color: var(--ink-faint); }
+.prompt-notice { margin: 6px 0; font-size: var(--text-sm); color: var(--amber-text); }
 .playbook__points { max-width: var(--measure); padding-left: 1.5em; list-style: decimal; font-size: var(--text-md); line-height: var(--leading-body); }
 .playbook__points li + li { margin-top: var(--para-gap); }
 .playbook__points li::marker { color: var(--ink-faint); font-family: var(--font-mono); font-size: var(--text-sm); }
