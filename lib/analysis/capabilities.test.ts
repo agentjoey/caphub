@@ -150,7 +150,7 @@ describe("upsertCapability", () => {
     await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_1", card, verdict: "keep", verdictBy: "auto" });
     const [upsertSql, followUpSql] = calls;
     // VALUES always passes a literal NULL for serial; nextval() never appears in the INSERT list.
-    expect(upsertSql).toMatch(/VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$23, \$7, \$8, \$9, \$10, \$11, \$12,[\s\S]*?\n\s*NULL, \$18, \$19, \$20, \$21, \$22\)/);
+    expect(upsertSql).toMatch(/VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$23, \$7, \$8, \$9, \$10, \$11, \$12,[\s\S]*?\n\s*NULL, \$18, \$19, \$20, \$21, \$22, \$24::jsonb, \$25\)/);
     expect(upsertSql.split("VALUES")[1]).not.toContain("nextval");
     // ON CONFLICT keeps whatever serial the row already has.
     expect(upsertSql).toContain("serial = coalesce(caphub_v2.capabilities.serial, excluded.serial)");
@@ -180,6 +180,25 @@ describe("upsertCapability", () => {
     };
     const out = await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_2", card, verdict: "keep", verdictBy: "auto" });
     expect(out).toEqual({ id: "cab_1", verdict: "keep", previousVerdict: "pending", deleted: true });
+  });
+
+  it("stores prompts and prompt_unresolved, replacing them on every rerun", async () => {
+    let sql = "";
+    let params: unknown[] = [];
+    const pool = {
+      query: async (text: string, values: unknown[] = []) => {
+        if (sql === "") { sql = text; params = values; }
+        return { rows: [{ id: "cab_1", verdict: "keep", previous_verdict: null, deleted: false }] };
+      }
+    };
+    await upsertCapability(pool as never, {
+      captureId: "cap_1", runId: "run_1", card, verdict: "keep", verdictBy: "auto",
+      prompts: ["原文一", "原文二"], promptUnresolved: 1
+    });
+    expect(sql).toContain("prompts = excluded.prompts");
+    expect(sql).toContain("prompt_unresolved = excluded.prompt_unresolved");
+    expect(params).toContain(JSON.stringify([{ text: "原文一" }, { text: "原文二" }]));
+    expect(params).toContain(1);
   });
 
   it("strips U+0000 from every text and jsonb parameter before it reaches SQL", async () => {

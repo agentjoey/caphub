@@ -12,6 +12,7 @@ import { upsertCapability } from "./capabilities";
 import { extractionSchema, type CapabilityType, type Extraction } from "./card";
 import { embedMaterialQuery } from "./material-embedding";
 import { prepareMaterial, type MaterialDeps } from "./material";
+import { collectPrompts } from "./prompt-locate";
 import { reasonPrompt, searchQuery, visionPrompt } from "./prompts";
 import { cardSchemaFor, loadScenarios } from "./scenarios";
 import { findSimilar, similarByEmbedding, type SimilarCandidate } from "./similar";
@@ -217,12 +218,18 @@ export async function runPipeline(deps: PipelineDeps, lease: Lease, signal: Abor
   // pinnedType is set (z.literal), so this is a no-op assignment, not the enforcement itself.
   if (pinnedType) card.type = pinnedType;
 
-  const decision = decideVerdict(card, deps.threshold);
+  // Verbatim prompts come from the input source only (spec 2026-09-22): the vision transcription
+  // for an image, or the reason step's locators resolved against the same text it was shown.
+  const found = collectPrompts({ material, extraction, locators: card.prompt_locators });
+  const decision = decideVerdict(card, deps.threshold, { count: found.prompts.length, unresolved: found.unresolved });
   // The card and its tag counts are saved atomically: a failing tag bump must not leave a kept card behind.
   const db = await deps.pool.connect();
   try {
     await db.query("BEGIN");
-    const stored = await upsertCapability(db, { captureId: lease.captureId, runId: lease.runId, card, verdict: decision.verdict, verdictBy: decision.by });
+    const stored = await upsertCapability(db, {
+      captureId: lease.captureId, runId: lease.runId, card, verdict: decision.verdict, verdictBy: decision.by,
+      prompts: found.prompts, promptUnresolved: found.unresolved
+    });
     const enteringKeep = stored.verdict === "keep" && stored.previousVerdict !== "keep" && !stored.deleted;
     if (enteringKeep) await bumpTags(db, card.tags);
     await db.query("COMMIT");

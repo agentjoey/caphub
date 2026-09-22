@@ -30,6 +30,10 @@ function deps(kind: Kind, opts: {
   /** Throws from the enqueue's INSERT; code defaults to 23505 (a concurrent duplicate) unless overridden. */
   enrichEnqueueThrows?: boolean;
   enrichEnqueueThrowsCode?: string;
+  /** The text capture's own `text` column; defaults to "hello" as before. */
+  sourceText?: string;
+  /** What the vision fake resolves to; defaults to the shared `extraction` fixture. */
+  extractionValue?: unknown;
 } = {}) {
   const calls: string[] = [];
   const sql: Array<{ text: string; values: unknown[]; client?: boolean }> = [];
@@ -50,7 +54,7 @@ function deps(kind: Kind, opts: {
           kind,
           object_key: kind === "image" ? "sha256/aa/" + "a".repeat(64) : null,
           mime_type: "image/png",
-          text: kind === "text" ? "hello" : null,
+          text: kind === "text" ? (opts.sourceText ?? "hello") : null,
           url: kind === "url" ? "https://example.com/a" : null
         }]
       };
@@ -89,7 +93,7 @@ function deps(kind: Kind, opts: {
   const d: PipelineDeps = {
     pool: pool as never,
     objects: { get: async () => new Uint8Array([1]) } as never,
-    vision: { provider: "minimax", model: "m", invoke: async () => { calls.push("vision"); return { value: extraction, usage: { inputTokens: 1, outputTokens: 1 } }; } },
+    vision: { provider: "minimax", model: "m", invoke: async () => { calls.push("vision"); return { value: opts.extractionValue ?? extraction, usage: { inputTokens: 1, outputTokens: 1 } }; } },
     search: { provider: "tavily", model: "s", search: async () => { calls.push("search"); return { value: { sources: [] }, usage: { inputTokens: 0, outputTokens: 0 } }; } },
     reason: {
       provider: "deepseek", model: "d",
@@ -433,6 +437,44 @@ describe("runPipeline", () => {
     const { d, reasonPrompt } = deps("text");
     await runPipeline(d, { runId: "run_unpinned", captureId: "cap_unpinned", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
     expect(reasonPrompt()).not.toMatch(/硬性约束/);
+  });
+
+  describe("verbatim prompts", () => {
+    const promptCard = { ...card, type: "prompt", usage: "integrate", playbook: { kind: "integrate", install: [], repo: null } };
+
+    it("stores the text capture's own span for each locator", async () => {
+      const src = "前言\n你是助手。\n请逐条回答。\n后记";
+      const { d, sql } = deps("text", { sourceText: src, reasonValue: { ...promptCard, prompt_locators: [{ start: "你是助手", end: "请逐条回答。" }] } });
+      const out = await runPipeline(d, { runId: "r_p1", captureId: "c_p1", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
+      expect(out.verdict).toBe("keep");
+      const insert = sql.find((q) => q.text.includes("INSERT INTO caphub_v2.capabilities"))!;
+      expect(insert.values).toContain(JSON.stringify([{ text: "你是助手。\n请逐条回答。" }]));
+      expect(insert.values[24]).toBe(0);
+    });
+
+    it("sends the card to review when a locator is not in the source", async () => {
+      const { d, sql } = deps("text", { sourceText: "别的内容", reasonValue: { ...promptCard, prompt_locators: [{ start: "不存在", end: "也不存在" }] } });
+      const out = await runPipeline(d, { runId: "r_p2", captureId: "c_p2", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
+      expect(out.verdict).toBe("pending");
+      const insert = sql.find((q) => q.text.includes("INSERT INTO caphub_v2.capabilities"))!;
+      expect(insert.values[24]).toBe(1);
+    });
+
+    it("sends a prompt card with no prompt found to review", async () => {
+      const { d } = deps("text", { reasonValue: promptCard });
+      const out = await runPipeline(d, { runId: "r_p3", captureId: "c_p3", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
+      expect(out.verdict).toBe("pending");
+    });
+
+    it("stores the vision transcription for an image", async () => {
+      const { d, sql } = deps("image", { reasonValue: promptCard, extractionValue: { ...extraction, prompts: ["逐字原文 --s 250"] } });
+      const sharp = (await import("sharp")).default;
+      const png = new Uint8Array(await sharp({ create: { width: 1, height: 1, channels: 3, background: "#fff" } }).png().toBuffer());
+      d.objects = { get: async () => png } as never;
+      await runPipeline(d, { runId: "r_p4", captureId: "c_p4", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
+      const insert = sql.find((q) => q.text.includes("INSERT INTO caphub_v2.capabilities"))!;
+      expect(insert.values).toContain(JSON.stringify([{ text: "逐字原文 --s 250" }]));
+    });
   });
 });
 

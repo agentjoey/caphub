@@ -50,6 +50,7 @@ function deps(opts: {
   const steps: Array<{ step: string; ok: boolean; error: string | null; output: string | null }> = [];
   const updates: Array<{ text: string; values: unknown[] }> = [];
   const tagBumps: string[][] = [];
+  let reasonPromptSeen = "";
   const capability = opts.capability === undefined ? capabilityRow : opts.capability;
   const reasonUsage = opts.reasonUsage ?? { inputTokens: 10, outputTokens: 10 };
   const searchUsage = opts.searchUsage ?? { inputTokens: 5, outputTokens: 5 };
@@ -79,8 +80,9 @@ function deps(opts: {
     pool: pool as never,
     reason: {
       provider: "deepseek", model: "d",
-      invoke: async (_input: StructuredInput) => {
+      invoke: async (input: StructuredInput) => {
         calls.push("reason");
+        reasonPromptSeen = input.prompt;
         return { value: opts.rewrittenOverride ?? rewrittenValue, usage: reasonUsage };
       }
     },
@@ -97,12 +99,12 @@ function deps(opts: {
       return opts.canonical === undefined ? canonicalRepo : opts.canonical;
     }
   };
-  return { d, calls, steps, updates, tagBumps };
+  return { d, calls, steps, updates, tagBumps, reasonPrompt: () => reasonPromptSeen };
 }
 
 describe("runEnrichment", () => {
   it("fetches the canonical source, searches up to 2 open_questions, rewrites the card, and writes it back", async () => {
-    const { d, calls, steps, updates } = deps();
+    const { d, calls, steps, updates, reasonPrompt } = deps();
     const out = await runEnrichment(d, lease, new AbortController().signal);
     expect(out).toEqual({ capabilityId: "cab_1" });
     expect(calls).toEqual([
@@ -120,6 +122,11 @@ describe("runEnrichment", () => {
     expect(usage).toBe("integrate");
     expect(tags).toEqual(["cli", "automation"]);
     expect(summary).toBe(rewrittenValue.summary);
+    // Verbatim prompts are re-taken from the input source only, on the analysis pipeline's own
+    // run (spec 2026-09-22) -- enrich never reads or writes them.
+    expect(updates[0].text).not.toMatch(/\bprompts\b/);
+    expect(updates[0].text).not.toMatch(/\bprompt_unresolved\b/);
+    expect(reasonPrompt()).not.toContain("prompt 全文");
   });
 
   it("skips the fetch step entirely when the card has no source_url", async () => {
@@ -213,7 +220,7 @@ describe("runEnrichment", () => {
     // Assert against the statement text itself, not just the param count -- a param-count-only
     // check can't catch a literal `notified_at = NULL` (or similar) being added to the SET list
     // without adding a corresponding placeholder.
-    for (const forbidden of ["verdict", "verdict_by", "status", "progress", "deep_analysis", "notified_at"]) {
+    for (const forbidden of ["verdict", "verdict_by", "status", "progress", "deep_analysis", "notified_at", "prompts", "prompt_unresolved"]) {
       expect(updates[0].text).not.toMatch(new RegExp(`\\b${forbidden}\\b`));
     }
     expect(updates[0].values).toHaveLength(12);

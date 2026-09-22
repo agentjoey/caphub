@@ -14,7 +14,10 @@ export interface UpsertCapabilityResult {
 
 export async function upsertCapability(
   db: Pick<Pool | PoolClient, "query">,
-  row: { captureId: string; runId: string; card: Card; verdict: "keep" | "discard" | "pending"; verdictBy: "auto" | null }
+  row: {
+    captureId: string; runId: string; card: Card; verdict: "keep" | "discard" | "pending"; verdictBy: "auto" | null;
+    prompts?: string[]; promptUnresolved?: number;
+  }
 ): Promise<UpsertCapabilityResult> {
   const c = row.card;
   // The INSERT's VALUES list is evaluated even when the row hits ON CONFLICT (Postgres builds
@@ -30,9 +33,10 @@ export async function upsertCapability(
      ), upsert AS (
        INSERT INTO caphub_v2.capabilities
          (id, capture_id, run_id, title, type, summary, summary_points, signals, suggested_verdict, suggested_reason, confidence,
-          verdict, verdict_by, verdict_at, usage, playbook, tags, source_url, scenarios, serial, score, score_reason, source_facts, overlap, open_questions)
+          verdict, verdict_by, verdict_at, usage, playbook, tags, source_url, scenarios, serial, score, score_reason, source_facts, overlap, open_questions,
+          prompts, prompt_unresolved)
        VALUES ($1, $2, $3, $4, $5, $6, $23, $7, $8, $9, $10, $11, $12, CASE WHEN $12::text IS NULL THEN NULL ELSE now() END, $13, $14, $15, $16, $17,
-         NULL, $18, $19, $20, $21, $22)
+         NULL, $18, $19, $20, $21, $22, $24::jsonb, $25)
        ON CONFLICT (capture_id) DO UPDATE SET
          run_id = excluded.run_id, title = excluded.title, summary = excluded.summary,
          summary_points = excluded.summary_points,
@@ -44,6 +48,9 @@ export async function upsertCapability(
          -- above: it isn't a human-editable field (see migration 010), so there is nothing to
          -- preserve.
          overlap = excluded.overlap,
+         -- Verbatim prompts are re-taken from the input source on every run (spec 2026-09-22),
+         -- never from a model, so a rerun simply replaces them.
+         prompts = excluded.prompts, prompt_unresolved = excluded.prompt_unresolved,
          review_note = NULL, review_error = NULL, review_requested_at = NULL,
          notified_at = NULL, updated_at = now(),
          verdict = CASE WHEN caphub_v2.capabilities.verdict_by = 'human' THEN caphub_v2.capabilities.verdict ELSE excluded.verdict END,
@@ -68,7 +75,8 @@ export async function upsertCapability(
       c.suggested_verdict, stripNul(c.suggested_reason), c.confidence, row.verdict, row.verdictBy, c.usage, jsonStringifyStripNul(c.playbook),
       c.tags.map(stripNul), c.source_url === null ? null : stripNul(c.source_url), c.scenarios.map(stripNul),
       c.score, stripNul(c.score_reason), jsonStringifyStripNul(c.source_facts), jsonStringifyStripNul(c.overlap),
-      jsonStringifyStripNul(c.open_questions), jsonStringifyStripNul(c.summary_points)]);
+      jsonStringifyStripNul(c.open_questions), jsonStringifyStripNul(c.summary_points),
+      jsonStringifyStripNul((row.prompts ?? []).map((text) => ({ text }))), row.promptUnresolved ?? 0]);
   const out = r.rows[0];
   // Brand-new (or previously-non-keep, now-keep, still-serial-less) rows get their serial
   // assigned here, after the upsert, instead of via nextval() in VALUES — the WHERE clause
