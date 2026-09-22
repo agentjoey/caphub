@@ -24,6 +24,12 @@ describe("pickBackfill", () => {
     const rowEmpty = { ...row, playbook: { ...row.playbook, prompt_text: "" } };
     expect(pickBackfill(rowEmpty)).toEqual({ unresolved: "no verifiable source for a text capture" });
   });
+  it("tolerates a non-array vision_output.prompts and falls back to prompt_text", () => {
+    const visionNonArray = { ...base, vision_output: { prompts: "not an array" as never, prompt_text: "fallback" } };
+    expect(pickBackfill(visionNonArray)).toEqual({ prompts: ["fallback"] });
+    const visionNull = { ...base, vision_output: { prompts: null as never, prompt_text: "also fallback" } };
+    expect(pickBackfill(visionNull)).toEqual({ prompts: ["also fallback"] });
+  });
 });
 
 describe("runPromptBackfill", () => {
@@ -79,7 +85,7 @@ describe("runPromptBackfill", () => {
     expect(candidatesSql).not.toContain("cb.playbook ? 'prompt_text'");
   });
 
-  it("vision output subquery filters to only steps with actual prompt content", async () => {
+  it("vision output subquery filters to only steps with actual prompt content, using CASE guard for safety", async () => {
     let candidatesSql = "";
     const { pool } = fakePool([]);
     pool.query = async (text: string) => {
@@ -87,7 +93,7 @@ describe("runPromptBackfill", () => {
       return { rows: [] };
     };
     await runPromptBackfill(pool as never, false, () => {});
-    expect(candidatesSql).toContain("coalesce(jsonb_array_length(s.output->'prompts'), 0) > 0");
+    expect(candidatesSql).toContain("CASE WHEN jsonb_typeof(s.output->'prompts') = 'array' THEN jsonb_array_length(s.output->'prompts') > 0 ELSE false END");
     expect(candidatesSql).toContain("coalesce(s.output->>'prompt_text', '') <> ''");
   });
 });

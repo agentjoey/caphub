@@ -15,10 +15,12 @@ export interface BackfillRow {
 /**
  * Picks a card's verbatim prompts from what is already stored -- no model call (spec §4). The
  * vision transcription was made from the original image at analysis time; a text capture's old
- * playbook prompt is only trusted if it appears verbatim in the capture.
+ * playbook prompt is only trusted if it appears verbatim in the capture. Tolerates non-array
+ * vision_output.prompts (treats as absent, falls back to prompt_text).
  */
 export function pickBackfill(row: BackfillRow): { prompts: string[] } | { unresolved: string } {
-  const fromVision = (row.vision_output?.prompts ?? (row.vision_output?.prompt_text ? [row.vision_output.prompt_text] : []))
+  const visionPrompts = Array.isArray(row.vision_output?.prompts) ? row.vision_output.prompts : [];
+  const fromVision = (visionPrompts.length > 0 ? visionPrompts : (row.vision_output?.prompt_text ? [row.vision_output.prompt_text] : []))
     .filter((p) => p.trim() !== "" && p.length <= MAX_PROMPT_CHARS);
   if (fromVision.length > 0) return { prompts: fromVision };
   const legacy = row.playbook.prompt_text;
@@ -32,7 +34,7 @@ const CANDIDATES = `
   SELECT cb.id, cb.serial, cb.type, cb.playbook, c.kind AS capture_kind, c.text AS capture_text,
     (SELECT s.output FROM caphub_v2.analysis_steps s JOIN caphub_v2.analysis_runs r ON r.id = s.run_id
      WHERE r.capture_id = cb.capture_id AND s.step = 'vision' AND s.ok
-       AND (coalesce(jsonb_array_length(s.output->'prompts'), 0) > 0 OR coalesce(s.output->>'prompt_text', '') <> '')
+       AND (CASE WHEN jsonb_typeof(s.output->'prompts') = 'array' THEN jsonb_array_length(s.output->'prompts') > 0 ELSE false END OR coalesce(s.output->>'prompt_text', '') <> '')
      ORDER BY s.id DESC LIMIT 1) AS vision_output
   FROM caphub_v2.capabilities cb JOIN caphub_v2.captures c ON c.id = cb.capture_id
   WHERE cb.deleted_at IS NULL AND cb.prompts = '[]'::jsonb
@@ -60,7 +62,6 @@ export async function runPromptBackfill(
       log({ capabilityId: row.id, serial: row.serial, type: row.type, unresolved: pick.unresolved });
       continue;
     }
-    log({ capabilityId: row.id, serial: row.serial, type: row.type, prompts: pick.prompts, applied: apply });
     if (apply) {
       const { rowCount } = await pool.query(
         `UPDATE caphub_v2.capabilities SET prompts = $2::jsonb, playbook = playbook - 'prompt_text'
@@ -72,9 +73,11 @@ export async function runPromptBackfill(
         log({ capabilityId: row.id, skipped: "prompts already set" });
       } else {
         filled += 1;
+        log({ capabilityId: row.id, serial: row.serial, type: row.type, prompts: pick.prompts, applied: true });
       }
     } else {
       filled += 1;
+      log({ capabilityId: row.id, serial: row.serial, type: row.type, prompts: pick.prompts, applied: false });
     }
   }
   log({ filled, unresolved, skipped, mode: apply ? "apply" : "dry-run" });
