@@ -42,6 +42,9 @@ Not on `web`: provider keys, Telegram variables.
 - `S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_BUCKET`
 - `MINIMAX_API_KEY`, `DEEPSEEK_API_KEY`
 - `TAVILY_API_KEY` — required when `PIPELINE` is `mixed` or `minimax_tavily`; if set, the worker can also run `mixed`/`minimax_tavily` runs under `PIPELINE=minimax`
+- `GEMINI_API_KEY` — optional; used both for material-embedding lookups and for the Gemini video-understanding call on YouTube captures. Without it, a YouTube capture falls back to a metadata-only, forced-pending analysis.
+- `YOUTUBE_API_KEY` — optional; a YouTube Data API v3 key restricted to that API, for fetching video metadata (title/channel/duration/description) ahead of the Gemini video call. Without it, the metadata fetch step fails and the video call still runs off the URL alone.
+- `GEMINI_VIDEO_MODEL` — optional, defaults to `gemini-3.8-flash`; the Gemini model used for YouTube video analysis.
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_OWNER_CHAT_ID` — required when `TELEGRAM_ENABLED=true`
 - `PIPELINE`, `VERDICT_AUTO_THRESHOLD`, `ANALYSIS_ENABLED`, `RETENTION_ENABLED`, `TELEGRAM_ENABLED`
 
