@@ -32,10 +32,11 @@ const CANDIDATES = `
   SELECT cb.id, cb.serial, cb.type, cb.playbook, c.kind AS capture_kind, c.text AS capture_text,
     (SELECT s.output FROM caphub_v2.analysis_steps s JOIN caphub_v2.analysis_runs r ON r.id = s.run_id
      WHERE r.capture_id = cb.capture_id AND s.step = 'vision' AND s.ok
+       AND (coalesce(jsonb_array_length(s.output->'prompts'), 0) > 0 OR coalesce(s.output->>'prompt_text', '') <> '')
      ORDER BY s.id DESC LIMIT 1) AS vision_output
   FROM caphub_v2.capabilities cb JOIN caphub_v2.captures c ON c.id = cb.capture_id
   WHERE cb.deleted_at IS NULL AND cb.prompts = '[]'::jsonb
-    AND (cb.type = 'prompt' OR cb.playbook ? 'prompt_text')
+    AND (cb.type = 'prompt' OR coalesce(cb.playbook->>'prompt_text', '') <> '')
   ORDER BY cb.created_at`;
 
 /**
@@ -46,11 +47,12 @@ const CANDIDATES = `
  */
 export async function runPromptBackfill(
   pool: Pick<Pool, "query">, apply: boolean, log: (o: Record<string, unknown>) => void
-): Promise<{ candidates: number; filled: number; unresolved: number }> {
+): Promise<{ candidates: number; filled: number; unresolved: number; skipped: number }> {
   const { rows } = await pool.query<BackfillRow>(CANDIDATES);
   log({ mode: apply ? "apply" : "dry-run", candidates: rows.length });
   let filled = 0;
   let unresolved = 0;
+  let skipped = 0;
   for (const row of rows) {
     const pick = pickBackfill(row);
     if ("unresolved" in pick) {
@@ -58,18 +60,25 @@ export async function runPromptBackfill(
       log({ capabilityId: row.id, serial: row.serial, type: row.type, unresolved: pick.unresolved });
       continue;
     }
-    filled += 1;
     log({ capabilityId: row.id, serial: row.serial, type: row.type, prompts: pick.prompts, applied: apply });
     if (apply) {
-      await pool.query(
+      const { rowCount } = await pool.query(
         `UPDATE caphub_v2.capabilities SET prompts = $2::jsonb, playbook = playbook - 'prompt_text'
          WHERE id = $1 AND prompts = '[]'::jsonb`,
         [row.id, jsonStringifyStripNul(pick.prompts.map((text) => ({ text })))]
       );
+      if (rowCount === 0) {
+        skipped += 1;
+        log({ capabilityId: row.id, skipped: "prompts already set" });
+      } else {
+        filled += 1;
+      }
+    } else {
+      filled += 1;
     }
   }
-  log({ filled, unresolved, mode: apply ? "apply" : "dry-run" });
-  return { candidates: rows.length, filled, unresolved };
+  log({ filled, unresolved, skipped, mode: apply ? "apply" : "dry-run" });
+  return { candidates: rows.length, filled, unresolved, skipped };
 }
 
 async function main() {
