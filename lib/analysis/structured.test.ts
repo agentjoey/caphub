@@ -111,4 +111,16 @@ describe("runStructured", () => {
     await expect(runStructured(base(call, pool))).rejects.toMatchObject({ code: "INVALID_OUTPUT" });
     expect(rows[0].error).toContain("400");
   });
+
+  it("passes video input through to call.invoke", async () => {
+    const { pool } = recorder();
+    const videoInput = { url: "https://www.youtube.com/watch?v=tYvu6IpSfiM", endOffsetSec: 300 };
+    const seenInput: unknown[] = [];
+    const call: StructuredCall = {
+      provider: "x", model: "m",
+      invoke: async (i: unknown) => { seenInput.push(i); return { value: { n: 1 }, usage: { inputTokens: 1, outputTokens: 1 } }; }
+    };
+    await runStructured({ ...base(call, pool), video: videoInput });
+    expect(seenInput[0]).toMatchObject({ video: videoInput });
+  });
 });

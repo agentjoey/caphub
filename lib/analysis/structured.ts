@@ -10,6 +10,7 @@ export interface StructuredInput {
   schemaName: string;
   schema: z.ZodType;
   correction?: { issues: string[] };
+  video?: { url: string; endOffsetSec?: number };
 }
 
 export interface StructuredCall {
@@ -21,6 +22,7 @@ export interface StructuredCall {
 export interface RunStructuredRequest<T> {
   pool: Pick<Pool, "query">; runId: string; step: StepName; call: StructuredCall;
   prompt: string; images?: StructuredInput["images"]; schemaName: string; schema: z.ZodType<T>;
+  video?: StructuredInput["video"];
   budget: RunBudget; timeoutMs: number; signal: AbortSignal;
 }
 
@@ -48,7 +50,7 @@ export async function runStructured<T>(req: RunStructuredRequest<T>): Promise<T>
     const base = { runId: req.runId, step: req.step, provider: req.call.provider, model: req.call.model, attempt };
     let raw: Awaited<ReturnType<StructuredCall["invoke"]>>;
     try {
-      raw = await req.call.invoke({ prompt: req.prompt, images: req.images, schemaName: req.schemaName, schema: req.schema, ...(issues ? { correction: { issues } } : {}) }, t.signal);
+      raw = await req.call.invoke({ prompt: req.prompt, images: req.images, schemaName: req.schemaName, schema: req.schema, video: req.video, ...(issues ? { correction: { issues } } : {}) }, t.signal);
     } catch (error) {
       // HTTP call succeeded (usage present) but the text was not parseable JSON: don't lose it.
       // Charge tokens, record an INVALID_JSON step with the raw text, and retry once via the
