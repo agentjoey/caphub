@@ -240,7 +240,12 @@ export async function runEnrichment(deps: EnrichDeps, lease: Lease, signal: Abor
     // stamping enriched_at. Deep analysis (explicitly requested topic research) is unaffected.
     const capture = (await deps.pool.query<{ url: string | null }>(
       "SELECT url FROM caphub_v2.captures WHERE id = $1", [lease.captureId])).rows[0];
-    if (capture?.url && parseYouTubeUrl(capture.url)) return { capabilityId: capability.id };
+    if (capture?.url && parseYouTubeUrl(capture.url)) {
+      // A card enriched before this rule (or before a rerun rewrote it from the video) would
+      // otherwise keep showing 已补充调研 over content that no longer came from that pass.
+      await deps.pool.query("UPDATE caphub_v2.capabilities SET enriched_at = NULL WHERE id = $1 AND enriched_at IS NOT NULL", [capability.id]);
+      return { capabilityId: capability.id };
+    }
     const budget = new RunBudget(ENRICH_BUDGET_LIMITS);
 
     const canonical = capability.source_url ? await runFetch(deps, lease.runId, capability.source_url, t.signal) : null;

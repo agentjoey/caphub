@@ -113,7 +113,10 @@ describe("runEnrichment", () => {
     const out = await runEnrichment(d, lease, new AbortController().signal);
     expect(out).toEqual({ capabilityId: capabilityRow.id });
     expect(calls).toEqual([]);
-    expect(updates).toEqual([]);
+    // Only the stale-marker reset: no content write-back.
+    expect(updates).toHaveLength(1);
+    expect(updates[0].text).toContain("SET enriched_at = NULL");
+    expect(updates[0].text).not.toContain("summary");
   });
 
   it("still enriches a non-YouTube link capture", async () => {
