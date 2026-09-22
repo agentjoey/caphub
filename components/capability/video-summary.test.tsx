@@ -62,6 +62,22 @@ describe("VideoSummary", () => {
     expect(screen.getByText("Some Channel · unknown")).toBeTruthy();
   });
 
+  it("still renders the duration when channel is null", () => {
+    render(<VideoSummary video={{ ...baseVideo, channel: null }} locale="zh" />);
+    expect(screen.getByText("12:34")).toBeTruthy();
+  });
+
+  it("renders nothing on the meta line when both channel and duration are unknown", () => {
+    render(<VideoSummary video={{ ...baseVideo, channel: null, durationSec: null }} locale="zh" />);
+    expect(screen.queryByText(/未知/)).toBeNull();
+  });
+
+  it("renders the unknown-duration label, not '0:00', when durationSec is 0", () => {
+    render(<VideoSummary video={{ ...baseVideo, durationSec: 0 }} locale="zh" />);
+    expect(screen.getByText("Some Channel · 未知")).toBeTruthy();
+    expect(screen.queryByText(/0:00/)).toBeNull();
+  });
+
   it("shows the clipped notice", () => {
     render(<VideoSummary video={{ ...baseVideo, clipped: true }} locale="zh" />);
     expect(screen.getByText("视频超过 90 分钟，只分析了前 90 分钟")).toBeTruthy();

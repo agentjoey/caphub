@@ -21,12 +21,22 @@ export function VideoSummary({ video, locale = "zh" }: { video: VideoDetail | nu
   if (!video) return null;
   const dict = getDict(locale).detail;
   const watch = (sec?: number) => `https://www.youtube.com/watch?v=${video.videoId}${sec ? `&t=${sec}s` : ""}`;
-  const duration = video.durationSec === null ? dict.videoUnknownDuration : formatDuration(video.durationSec);
+  // durationSec 0 (a live stream, or otherwise never resolved) is treated the same as null: an
+  // unknown duration, not a literal "0:00".
+  const durationKnown = video.durationSec !== null && video.durationSec !== 0;
+  const duration = durationKnown ? formatDuration(video.durationSec) : dict.videoUnknownDuration;
+  // The duration renders even without a channel; the whole meta line only disappears when there
+  // is neither a channel nor a known duration to show.
+  const showMeta = video.channel !== null || durationKnown;
   return (
     <section className="panel">
       <h2 className="panel-title">{dict.video}</h2>
       <p className="video-summary__title"><a href={watch()} target="_blank" rel="noreferrer">{video.title ?? watch()}</a></p>
-      {video.channel && <p className="video-summary__meta">{format(dict.videoMeta, { channel: video.channel, duration })}</p>}
+      {showMeta && (
+        <p className="video-summary__meta">
+          {video.channel ? format(dict.videoMeta, { channel: video.channel, duration }) : duration}
+        </p>
+      )}
       {video.clipped && <p className="prompt-notice">{dict.videoClipped}</p>}
       {video.failed && <p className="prompt-notice">{dict.videoFailed}</p>}
       {video.moments.length > 0 && (
