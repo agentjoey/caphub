@@ -22,6 +22,8 @@ describe("createGeminiVideoCall", () => {
     expect(body.contents[0].parts[0]).toEqual({ fileData: { fileUri: "https://www.youtube.com/watch?v=tYvu6IpSfiM" } });
     expect(body.contents[0].parts[1].text).toContain("p");
     expect(body.generationConfig.responseMimeType).toBe("application/json");
+    // Gemini 3 models are meant to run at default temperature (owner ruling); don't override it.
+    expect(body.generationConfig.temperature).toBeUndefined();
     expect(call.provider).toBe("gemini");
     expect(call.model).toBe("gemini-3.8-flash");
   });

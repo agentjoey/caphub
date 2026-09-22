@@ -30,7 +30,7 @@ export function createGeminiVideoCall(opts: { apiKey: string; model: string; fet
           headers: { "x-goog-api-key": opts.apiKey, "content-type": "application/json" },
           body: JSON.stringify({
             contents: [{ parts: [videoPart, { text: buildStructuredPrompt(input) }] }],
-            generationConfig: { responseMimeType: "application/json", temperature: 0.2 }
+            generationConfig: { responseMimeType: "application/json" }
           }),
           signal
         });
