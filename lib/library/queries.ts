@@ -296,12 +296,13 @@ export interface CapabilityDetail extends CapabilityRow {
 
 /**
  * Pure function to assemble VideoDetail from a capture URL and analysis steps.
- * Returns null if the URL is not a YouTube URL or if no metadata fetch succeeded.
+ * Returns null only if the URL is not a YouTube URL. Metadata fetch failures
+ * result in null title/channel/durationSec but the VideoDetail is still returned.
  * - Extracts videoId from the URL
- * - Finds the last successful fetch/youtube step for metadata (required)
+ * - Finds the last successful fetch/youtube step for metadata (optional)
  * - Finds the last successful vision/gemini step for key moments
  * - Sets clipped=true if durationSec > VIDEO_CLIP_SEC
- * - Sets failed=true if no successful vision extraction exists
+ * - Sets failed=true only if no successful vision extraction exists
  */
 export function buildVideoDetail(
   captureUrl: string | null,
@@ -312,15 +313,13 @@ export function buildVideoDetail(
   const videoId = parseYouTubeUrl(captureUrl);
   if (!videoId) return null;
 
-  // Find last successful fetch/youtube step — required for metadata
+  // Find last successful fetch/youtube step for metadata (optional)
   const fetchStep = steps.findLast(
     (s) => s.step === "fetch" && s.provider === "youtube" && s.ok
   );
-  if (!fetchStep) return null;
+  const meta = fetchStep?.output as { title?: string | null; channel?: string | null; durationSec?: number | null } | null;
 
-  const meta = fetchStep.output as { title?: string | null; channel?: string | null; durationSec?: number | null } | null;
-
-  // Find last successful vision/gemini step
+  // Find last successful vision/gemini step for extraction
   const visionStep = steps.findLast(
     (s) => s.step === "vision" && s.provider === "gemini" && s.ok
   );
@@ -328,21 +327,19 @@ export function buildVideoDetail(
 
   // Validate key_moments from vision output
   let moments: Array<{ t: string; note: string }> = [];
-  let failed = !visionStep;
-
   if (visionOutput) {
     const momentsValidation = videoExtractionSchema.shape.key_moments.safeParse(
       (visionOutput as Record<string, unknown>).key_moments
     );
     if (momentsValidation.success) {
       moments = momentsValidation.data;
-    } else {
-      failed = true;
     }
+    // If invalid key_moments, moments stays [] but extraction still happened
   }
 
   const durationSec = meta?.durationSec ?? null;
   const clipped = (durationSec ?? 0) > VIDEO_CLIP_SEC;
+  const failed = !visionStep; // failed only when no successful vision extraction
 
   return {
     videoId,

@@ -275,11 +275,19 @@ describe("library queries", () => {
       expect(buildVideoDetail("not-a-url", steps)).toBeNull();
     });
 
-    it("returns null when YouTube URL is valid but has no fetch or vision steps", () => {
+    it("returns VideoDetail with null metadata when YouTube URL has no fetch step", () => {
       const steps: Array<{ step: string; provider: string; ok: boolean; output: unknown }> = [
-        { step: "search", provider: "tavily", ok: true, output: { sources: [] } }
+        { step: "search", provider: "tavily", ok: true, output: { sources: [] } },
+        { step: "vision", provider: "gemini", ok: true, output: { what: "test", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [], key_moments: [{ t: "1:30", note: "Key point" }] } }
       ];
-      expect(buildVideoDetail("https://www.youtube.com/watch?v=dQw4w9WgXcQ", steps)).toBeNull();
+      const result = buildVideoDetail("https://www.youtube.com/watch?v=dQw4w9WgXcQ", steps);
+      expect(result).not.toBeNull();
+      expect(result?.videoId).toBe("dQw4w9WgXcQ");
+      expect(result?.title).toBeNull();
+      expect(result?.channel).toBeNull();
+      expect(result?.durationSec).toBeNull();
+      expect(result?.clipped).toBe(false);
+      expect(result?.failed).toBe(false);
     });
 
     it("extracts videoId from standard YouTube URL", () => {
@@ -380,14 +388,14 @@ describe("library queries", () => {
       expect(result?.moments).toEqual([]);
     });
 
-    it("returns empty moments and failed=true when vision output has invalid key_moments structure", () => {
+    it("returns empty moments and failed=false when vision output has invalid key_moments structure", () => {
       const steps: Array<{ step: string; provider: string; ok: boolean; output: unknown }> = [
         { step: "fetch", provider: "youtube", ok: true, output: { title: "Test", channel: "User", publishedAt: "2026-01-01", durationSec: 180, description: "" } },
         { step: "vision", provider: "gemini", ok: true, output: { what: "test", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [], key_moments: "invalid" } }
       ];
       const result = buildVideoDetail("https://www.youtube.com/watch?v=dQw4w9WgXcQ", steps);
       expect(result?.moments).toEqual([]);
-      expect(result?.failed).toBe(true);
+      expect(result?.failed).toBe(false);
     });
 
     it("handles mixed valid and invalid key_moments by validating the array", () => {
@@ -396,9 +404,9 @@ describe("library queries", () => {
         { step: "vision", provider: "gemini", ok: true, output: { what: "test", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [], key_moments: [{ t: "1:30", note: "Valid" }, { t: "invalid", note: "Invalid" }] } }
       ];
       const result = buildVideoDetail("https://www.youtube.com/watch?v=dQw4w9WgXcQ", steps);
-      // Invalid structure means failed=true and moments=[]
+      // Invalid structure means moments=[] but extraction still succeeded (failed=false)
       expect(result?.moments).toEqual([]);
-      expect(result?.failed).toBe(true);
+      expect(result?.failed).toBe(false);
     });
 
     it("returns all metadata fields null when fetch step has null/missing fields", () => {
