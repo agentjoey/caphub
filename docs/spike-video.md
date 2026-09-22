@@ -36,3 +36,20 @@
 - 暂不用智能模式：稳定性不够；长视频（> 30 分钟）再单独评估。
 - YouTube Data API 的简介很有价值：链接、赞助信息、频道名都在里面，且免费额度充足。
 - `processing: { type: "static", fps, end_offset }` 形式的请求被 API 以 `Invalid input at 'input[0].processing'` 拒绝（YouTube 链接），裁剪片段的参数写法需另行确认；超长视频的处理方式在设计中定。
+
+## 上线前预演（2026-09-22，临时 Neon branch `youtube-video-verify`）
+
+本地 worker（`railway run -s worker`，`DATABASE_URL` 指向临时 branch，`TELEGRAM_ENABLED=false`、`RETENTION_ENABLED=false`）对 Joey 投递的 5 个视频各重跑一次（旧流程下这 5 条全部被自动丢弃）。实现走 `generateContent` + `fileData.fileUri`（非实测时的 interactions 接口），`gemini-3.8-flash`，默认 temperature。
+
+| 视频 | 新卡片 | 视频 token | 看视频耗时 | prompt 原文 | 裁决 |
+|---|---|---|---|---|---|
+| Jev 实测（中文，16:55） | Jev：TypeSafe 极速类型化决策模型与官方 Agent Skill；来源 typesafe.ai 官方博客 | 93,456 | 10.9 s | 0 | 待定（0.72） |
+| Jev explained in 7min | Jev：输出概率分布的非自回归决策模型 | 40,058 | 6.8 s | 2 | 待定（0.60） |
+| Open Source, Faster Jev is HERE | Laya：可本地运行的非自回归 System 1 决策模型；来源 github.com/NandhaKishorM/laya，`pip install laya` | 72,020 | 16.0 s | 4 | 待定（0.76） |
+| GPT 6 Astra Web Design | GPT-6 Astra 网页设计提示词三则（prompt 类型） | 39,103 | 11.7 s | 3 | 待定 |
+| Should you use Astra Ultra… | 首次：视频步骤成功，DeepSeek 分析两次输出不合格 → run 失败；重跑成功 | 29,918 | 11.8 s | 1 | — |
+
+- 每条都记录了 `fetch`（YouTube）→ `vision`（Gemini）→ `search` → `reason` 四步；视频 token ≈ 时长 × 91，与实测一致；单条视频输入约 $0.02–0.07。
+- 置信度都低于 0.8，按正常规则进 Review（不是视频读取失败导致的强制待定）。
+- 第 5 条首次失败在 DeepSeek 分析步骤（与视频功能无关的既有失败方式），重跑即成功。
+- 截图 `.agent/screens/youtube-video/`：详情页「视频」面板（标题、频道 · 时长、关键片段带时间点链接）、Prompt 原文、「用法示例（AI 生成）」、列表页 YouTube 缩略图；web 1440 / Mini 390 均无横向溢出。
