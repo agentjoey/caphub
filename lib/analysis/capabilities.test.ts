@@ -6,9 +6,9 @@ const card: Card = {
   title: "t", type: "prompt", summary: "s",
   summary_points: [{ label: "l1", text: "t1" }, { label: "l2", text: "t2" }, { label: "l3", text: "t3" }],
   signals: ["a", "b"], suggested_verdict: "keep", suggested_reason: "r",
-  confidence: 0.9, usage: "integrate", playbook: { kind: "integrate", install: [], repo: null, prompt_text: "p" }, tags: ["x"], source_url: null,
+  confidence: 0.9, usage: "integrate", playbook: { kind: "integrate", install: [], repo: null }, tags: ["x"], source_url: null,
   scenarios: ["coding"], score: 4, score_reason: "r", source_facts: {}, overlap: { relation: "none", target: null, reason: "" },
-  open_questions: []
+  open_questions: [], prompt_locators: []
 };
 
 describe("upsertCapability", () => {
@@ -194,7 +194,7 @@ describe("upsertCapability", () => {
     const dirty: Card = {
       ...card,
       title: "t\u0000itle", summary: "s\u0000ummary", signals: ["a\u0000", "b"], suggested_reason: "r\u0000eason",
-      playbook: { kind: "integrate", install: [], repo: null, prompt_text: "p\u0000" }, tags: ["x\u0000"], source_url: "https://a.b/\u0000",
+      playbook: { kind: "integrate", install: [], repo: null }, tags: ["x\u0000"], source_url: "https://a.b/\u0000",
       scenarios: ["coding\u0000"], score_reason: "s\u0000core reason", source_facts: { license: "M\u0000IT" },
       overlap: { relation: "duplicate", target: "TOL-0009", reason: "重\u0000复" },
       summary_points: [{ label: "l\u00001", text: "t\u00001" }, { label: "l2", text: "t2" }, { label: "l3", text: "t3" }]
@@ -208,7 +208,7 @@ describe("upsertCapability", () => {
     expect(params[5]).toBe("summary");
     expect(JSON.parse(params[6] as string)).toEqual(["a", "b"]);
     expect(params[8]).toBe("reason");
-    expect(JSON.parse(params[13] as string)).toEqual({ kind: "integrate", install: [], repo: null, prompt_text: "p" });
+    expect(JSON.parse(params[13] as string)).toEqual({ kind: "integrate", install: [], repo: null });
     expect(params[14]).toEqual(["x"]);
     expect(params[15]).toBe("https://a.b/");
     expect(params[16]).toEqual(["coding"]);

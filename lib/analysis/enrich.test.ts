@@ -14,7 +14,7 @@ const capabilityRow: {
 } = {
   id: "cab_1", title: "Some Tool", type: "tool", usage: "integrate", summary: "A tool.",
   summary_points: [{ label: "l1", text: "t1" }, { label: "l2", text: "t2" }, { label: "l3", text: "t3" }],
-  signals: ["s1", "s2"], playbook: { kind: "integrate", install: ["npm i x"], repo: "https://github.com/a/b", prompt_text: null },
+  signals: ["s1", "s2"], playbook: { kind: "integrate", install: ["npm i x"], repo: "https://github.com/a/b" },
   tags: ["cli"], source_url: "https://github.com/a/b", open_questions: ["免费额度上限是多少", "是否需要登录"],
   suggestion_by: "auto"
 };
@@ -29,7 +29,7 @@ const rewrittenValue = {
   summary: "Rewritten summary describing the capability.",
   summary_points: [{ label: "l1", text: "t1" }, { label: "l2", text: "t2" }, { label: "l3", text: "t3" }],
   signals: ["provenance verified against the canonical source", "solves X for Joey's workflow"],
-  playbook: { kind: "integrate", install: ["npm i x"], repo: "https://github.com/a/b", prompt_text: null },
+  playbook: { kind: "integrate", install: ["npm i x"], repo: "https://github.com/a/b" },
   tags: ["cli", "automation"],
   score: 4, score_reason: "well documented and maintained",
   source_facts: {},

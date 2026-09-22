@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { cardSchema, deepAnalysisSchema, deepFactsSchema, deepPlanSchema, finalizeSourceFacts, isValidTag, scoreResultSchema } from "./card";
+import { cardObjectSchema, cardSchema, deepAnalysisSchema, deepFactsSchema, deepPlanSchema, extractionSchema, finalizeSourceFacts, isValidTag, playbookSchema, scoreResultSchema } from "./card";
 
 const valid = {
   title: "用 Playwright 生成 axe 可访问性报告", type: "skill", summary: "一段摘要",
@@ -11,10 +11,10 @@ const valid = {
   ],
   signals: ["解决 CI 里可访问性回归", "与库里已有 e2e-a11y 重叠"],
   suggested_verdict: "keep", suggested_reason: "有可执行命令", confidence: 0.9,
-  usage: "integrate", playbook: { kind: "integrate", install: ["npm i -D @axe-core/playwright"], repo: null, prompt_text: null },
+  usage: "integrate", playbook: { kind: "integrate", install: ["npm i -D @axe-core/playwright"], repo: null },
   tags: ["testing", "accessibility"], source_url: null, scenarios: [],
   score: 4, score_reason: "有仓库和安装命令，可复现性高", source_facts: {},
-  overlap: { relation: "none", target: null, reason: "" }, open_questions: []
+  overlap: { relation: "none", target: null, reason: "" }, open_questions: [], prompt_locators: []
 };
 
 describe("isValidTag", () => {
@@ -114,7 +114,7 @@ describe("cardSchema", () => {
   it("allows repo as owner/repo format in integrate playbook", () => {
     expect(cardSchema.parse({
       ...valid,
-      playbook: { kind: "integrate", install: ["npm i"], repo: "owner/repo", prompt_text: null }
+      playbook: { kind: "integrate", install: ["npm i"], repo: "owner/repo" }
     }).playbook).toMatchObject({ kind: "integrate", repo: "owner/repo" });
   });
 
@@ -431,5 +431,24 @@ describe("deepAnalysisSchema grounding", () => {
       sources: [{ title: "Docs", url: "https://a.example/1" }]
     });
     expect(result.success).toBe(true);
+  });
+});
+
+describe("verbatim prompt fields", () => {
+  it("extraction carries a list of transcribed prompts, capped at MAX_PROMPTS", () => {
+    const base = { what: "w", visible_text: "", commands: [], source_hints: [], questions: [] };
+    expect(extractionSchema.parse({ ...base, prompts: ["a", "b"] }).prompts).toEqual(["a", "b"]);
+    expect(() => extractionSchema.parse({ ...base, prompts: Array(21).fill("x") })).toThrow();
+  });
+
+  it("integrate playbooks no longer carry prompt text", () => {
+    const parsed = playbookSchema.parse({ kind: "integrate", install: [], repo: null, prompt_text: "legacy" });
+    expect(parsed).toEqual({ kind: "integrate", install: [], repo: null });
+  });
+
+  it("cards default prompt_locators to [] and cap anchors short", () => {
+    const shape = cardObjectSchema.shape.prompt_locators;
+    expect(shape.parse(undefined)).toEqual([]);
+    expect(() => shape.parse([{ start: "x".repeat(81), end: "y" }])).toThrow();
   });
 });

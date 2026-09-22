@@ -52,7 +52,7 @@ const baseRow: CapabilityRow = {
   summaryPoints: [], signals: [],
   suggestedVerdict: "keep", suggestedReason: "", confidence: 0.9,
   verdict: "keep", verdictBy: "human",
-  usage: "integrate", playbook: { kind: "integrate", install: [], repo: null, prompt_text: null },
+  usage: "integrate", playbook: { kind: "integrate", install: [], repo: null },
   tags: ["python", "scraping", "http", "cli"], sourceUrl: null,
   serial: 12, scenarios: [],
   score: 4, scoreReason: "solid", sourceFacts: {},

@@ -221,7 +221,7 @@ describe("library detail page sections", () => {
     // 怎么用's link when both happen to share the same URL text.
     it("suppresses the standalone source line when it duplicates the playbook's repo link", async () => {
       const { container } = await renderDetail({
-        playbook: { kind: "integrate", install: [], repo: "https://github.com/a/b", prompt_text: null },
+        playbook: { kind: "integrate", install: [], repo: "https://github.com/a/b" },
         sourceUrl: "https://github.com/a/b", sourceFacts: {}
       });
       const links = Array.from(container.querySelectorAll(".panel a")).filter((a) => a.textContent === "https://github.com/a/b");
@@ -231,7 +231,7 @@ describe("library detail page sections", () => {
 
     it("still normalizes a trailing slash before comparing", async () => {
       const { container } = await renderDetail({
-        playbook: { kind: "integrate", install: [], repo: "https://github.com/a/b", prompt_text: null },
+        playbook: { kind: "integrate", install: [], repo: "https://github.com/a/b" },
         sourceUrl: "https://github.com/a/b/", sourceFacts: {}
       });
       expect(container.querySelector(".detail-source")).toBeNull();
@@ -239,7 +239,7 @@ describe("library detail page sections", () => {
 
     it("still shows the standalone source line when it differs from the playbook's repo link", async () => {
       const { container } = await renderDetail({
-        playbook: { kind: "integrate", install: [], repo: "https://github.com/a/b", prompt_text: null },
+        playbook: { kind: "integrate", install: [], repo: "https://github.com/a/b" },
         sourceUrl: "https://example.com/write-up", sourceFacts: {}
       });
       expect(container.querySelector(".detail-source")).toBeTruthy();

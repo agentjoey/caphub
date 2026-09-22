@@ -2,15 +2,15 @@ import { describe, expect, it, vi } from "vitest";
 import { createPipelineDeps, runPipeline, type PipelineDeps } from "./pipeline";
 
 const card = {
-  title: "t", type: "prompt", summary: "s",
+  title: "t", type: "skill", summary: "s",
   summary_points: [{ label: "l1", text: "t1" }, { label: "l2", text: "t2" }, { label: "l3", text: "t3" }],
   signals: ["a", "b"], suggested_verdict: "keep", suggested_reason: "r",
-  confidence: 0.9, usage: "integrate", playbook: { kind: "integrate", install: [], repo: null, prompt_text: "p" }, tags: ["x"], source_url: null,
+  confidence: 0.9, usage: "integrate", playbook: { kind: "integrate", install: [], repo: null }, tags: ["x"], source_url: null,
   scenarios: ["coding"], score: 4, score_reason: "r", source_facts: {}, overlap: { relation: "none", target: null, reason: "" }
 };
 const pendingCard = { ...card, confidence: 0.5 };
 const experienceCard = { ...card, type: "experience", playbook: { kind: "experience", content: "做法本身", when_to_use: "何时用" } };
-const extraction = { what: "w", visible_text: "", commands: [], prompt_text: null, source_hints: [], questions: [] };
+const extraction = { what: "w", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [] };
 
 type Kind = "image" | "text" | "url";
 
@@ -414,7 +414,7 @@ describe("runPipeline", () => {
   // silently stored instead of caught. This exercises that a mismatch goes through the
   // existing invalid-output retry path and ultimately fails the run, rather than being stored.
   it("retries and then fails the run when the model returns a type/playbook that disagrees with the pinned type", async () => {
-    const { d, calls } = deps("text", { pinnedType: "experience", reasonValue: card }); // card.type is "prompt", not "experience"
+    const { d, calls } = deps("text", { pinnedType: "experience", reasonValue: card }); // card.type is "skill", not "experience"
     await expect(
       runPipeline(d, { runId: "run_pinned_bad", captureId: "cap_pinned_bad", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal)
     ).rejects.toMatchObject({ code: "INVALID_OUTPUT" });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { INTERFACE_TAGS, RESERVED_TAGS } from "./card";
-import { CAPABILITY_TYPE_DEFINITIONS, backfillScorePrompt, deepSynthesizePrompt, enrichPrompt, reasonPrompt, type EnrichSubject } from "./prompts";
+import { CAPABILITY_TYPE_DEFINITIONS, backfillScorePrompt, deepSynthesizePrompt, enrichPrompt, reasonPrompt, visionPrompt, type EnrichSubject } from "./prompts";
 
 const material = { kind: "text" as const, text: "hello" };
 const scenarios = [
@@ -160,7 +160,7 @@ const cardInput = {
   title: "用 Playwright 生成 axe 可访问性报告",
   summary: "一段摘要",
   signals: ["解决 CI 里可访问性回归"],
-  playbook: { kind: "integrate", install: ["npm i -D @axe-core/playwright"], repo: "https://github.com/a/b", prompt_text: null },
+  playbook: { kind: "integrate", install: ["npm i -D @axe-core/playwright"], repo: "https://github.com/a/b" },
   tags: ["testing", "accessibility"],
   source_url: "https://github.com/a/b"
 };
@@ -242,7 +242,7 @@ describe("enrichPrompt", () => {
   const subject: EnrichSubject = {
     title: "Scrapling", type: "tool", usage: "integrate", summary: "一个抓取库",
     summary_points: [{ label: "定位", text: "自适应反爬抓取库" }],
-    signals: ["s1"], playbook: { kind: "integrate", install: ["pip install scrapling"], repo: null, prompt_text: null },
+    signals: ["s1"], playbook: { kind: "integrate", install: ["pip install scrapling"], repo: null },
     tags: ["web-scraping"], source_url: "https://github.com/a/b", open_questions: [], pinned: false
   };
 
@@ -269,4 +269,14 @@ describe("enrichPrompt", () => {
     expect(prompt).toMatch(/text 是不超过 60 字的一句说明句/);
     expect(prompt).toMatch(/绝不能把一整段话塞进一条 point，也不能让多条 point 重复同一件事/);
   });
+});
+
+it("asks vision for verbatim prompts and reason for locators on text, never for prompt 全文", () => {
+  expect(visionPrompt("")).toContain("逐字抄录");
+  const common = { extraction: null, sources: [], similar: [], existingTags: [], scenarios: [{ slug: "coding", labelZh: "编程", labelEn: "Coding", keywords: [] }] };
+  const text = reasonPrompt({ ...common, material: { kind: "text", text: "hi" } } as never);
+  expect(text).toContain("prompt_locators 标出");
+  expect(text).not.toContain("prompt 全文");
+  const image = reasonPrompt({ ...common, material: { kind: "image", png: new Uint8Array(), ocrText: "", width: 1, height: 1 } } as never);
+  expect(image).toContain("prompt_locators 给空数组");
 });

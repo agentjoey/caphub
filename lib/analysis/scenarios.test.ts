@@ -8,7 +8,7 @@ const valid = {
   summary_points: [{ label: "定位", text: "CI 里生成 axe 可访问性报告" }, { label: "适用", text: "已有 e2e 套件的项目" }, { label: "限制", text: "不能替代人工走查" }],
   signals: ["解决 CI 里可访问性回归", "与库里已有 e2e-a11y 重叠"],
   suggested_verdict: "keep", suggested_reason: "有可执行命令", confidence: 0.9,
-  usage: "integrate", playbook: { kind: "integrate", install: ["npm i -D @axe-core/playwright"], repo: null, prompt_text: null },
+  usage: "integrate", playbook: { kind: "integrate", install: ["npm i -D @axe-core/playwright"], repo: null },
   tags: ["testing", "accessibility"], source_url: null,
   score: 4, score_reason: "有仓库和安装命令，可复现性高"
 };
@@ -86,7 +86,7 @@ describe("cardSchemaFor", () => {
     // integrate-shaped playbook still violates refineCard's type/playbook coherence check.
     expect(() => schema.parse({
       ...valid, type: "experience", scenarios: ["coding"],
-      usage: "integrate", playbook: { kind: "integrate", install: [], repo: null, prompt_text: null }
+      usage: "integrate", playbook: { kind: "integrate", install: [], repo: null }
     })).toThrow();
   });
 

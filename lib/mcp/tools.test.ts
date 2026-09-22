@@ -25,7 +25,7 @@ function detailRow(overrides: Partial<CapabilityDetail> = {}) {
     signals: ["stars:9000", "actively maintained"],
     suggestedVerdict: "keep", suggestedReason: "widely used", confidence: 0.9,
     verdict: "keep", verdictBy: "human",
-    usage: "integrate", playbook: { kind: "integrate", install: ["npm i gsap"], repo: null, prompt_text: null },
+    usage: "integrate", playbook: { kind: "integrate", install: ["npm i gsap"], repo: null },
     tags: ["animation"], sourceUrl: null,
     serial: 31, scenarios: ["web-dev"],
     score: 4, scoreReason: "solid", sourceFacts: {},

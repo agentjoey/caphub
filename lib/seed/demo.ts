@@ -45,6 +45,7 @@ export interface DemoCapabilityRow {
   card: Card;
   verdict: "keep" | "discard" | "pending";
   verdictBy: "human" | null;
+  prompts?: string[];
 }
 
 export interface DemoData {
@@ -63,6 +64,7 @@ interface DemoSpec {
   verdict: "keep" | "discard" | "pending";
   verdictBy: "human" | null;
   searchSources: DemoSource[];
+  prompts?: string[];
 }
 
 const SPECS: DemoSpec[] = [
@@ -94,8 +96,9 @@ const SPECS: DemoSpec[] = [
       source_facts: {},
       overlap: { relation: "none", target: null, reason: "" },
       open_questions: [],
+      prompt_locators: [],
       usage: "integrate",
-      playbook: { kind: "integrate", install: ["pip install scrapling"], repo: "https://github.com/D4Vinci/Scrapling", prompt_text: null },
+      playbook: { kind: "integrate", install: ["pip install scrapling"], repo: "https://github.com/D4Vinci/Scrapling" },
       tags: ["web-scraping", "python", "anti-bot"],
       source_url: "https://github.com/D4Vinci/Scrapling",
       scenarios: ["coding", "data"]
@@ -126,6 +129,7 @@ const SPECS: DemoSpec[] = [
       source_facts: {},
       overlap: { relation: "none", target: null, reason: "" },
       open_questions: [],
+      prompt_locators: [],
       usage: "reference",
       playbook: {
         kind: "experience",
@@ -162,8 +166,9 @@ const SPECS: DemoSpec[] = [
       source_facts: {},
       overlap: { relation: "none", target: null, reason: "" },
       open_questions: [],
+      prompt_locators: [],
       usage: "integrate",
-      playbook: { kind: "integrate", install: ["npm install -g tavily-mcp"], repo: "https://github.com/tavily-ai/tavily-mcp", prompt_text: null },
+      playbook: { kind: "integrate", install: ["npm install -g tavily-mcp"], repo: "https://github.com/tavily-ai/tavily-mcp" },
       tags: ["mcp", "search", "tavily"],
       source_url: "https://github.com/tavily-ai/tavily-mcp",
       scenarios: ["coding", "research", "automation"]
@@ -176,6 +181,7 @@ const SPECS: DemoSpec[] = [
     verdict: "pending",
     verdictBy: null,
     searchSources: [],
+    prompts: ["你是一个信息整理助手。给定多篇来源文本，输出：1) 一句话标题；2) 3-5 条要点，每条标注对应来源编号；3) 若来源之间有冲突，单独列出。不要编造来源中没有的信息。"],
     card: {
       title: "多来源摘要 Prompt 模板",
       type: "prompt",
@@ -194,12 +200,12 @@ const SPECS: DemoSpec[] = [
       source_facts: {},
       overlap: { relation: "none", target: null, reason: "" },
       open_questions: [],
+      prompt_locators: [],
       usage: "integrate",
       playbook: {
         kind: "integrate",
         install: [],
-        repo: null,
-        prompt_text: "你是一个信息整理助手。给定多篇来源文本，输出：1) 一句话标题；2) 3-5 条要点，每条标注对应来源编号；3) 若来源之间有冲突，单独列出。不要编造来源中没有的信息。"
+        repo: null
       },
       tags: ["prompt-engineering", "summarization"],
       source_url: null,
@@ -231,6 +237,7 @@ const SPECS: DemoSpec[] = [
       source_facts: {},
       overlap: { relation: "none", target: null, reason: "" },
       open_questions: [],
+      prompt_locators: [],
       usage: "reference",
       playbook: {
         kind: "reference",
@@ -270,6 +277,7 @@ const SPECS: DemoSpec[] = [
       source_facts: {},
       overlap: { relation: "none", target: null, reason: "" },
       open_questions: [],
+      prompt_locators: [],
       usage: "reference",
       playbook: { kind: "reference", points: ["javascript: 书签脚本原理简单，靠 html2canvas 截图", "已被 scripts/shot.mjs 取代，无需保留"] },
       tags: ["screenshot", "legacy"],
@@ -302,8 +310,9 @@ const SPECS: DemoSpec[] = [
       source_facts: {},
       overlap: { relation: "none", target: null, reason: "" },
       open_questions: [],
+      prompt_locators: [],
       usage: "integrate",
-      playbook: { kind: "integrate", install: ["brew install example/tap/local-dev-tool"], repo: "https://github.com/example/local-dev-tool", prompt_text: null },
+      playbook: { kind: "integrate", install: ["brew install example/tap/local-dev-tool"], repo: "https://github.com/example/local-dev-tool" },
       tags: ["cli", "developer-tools"],
       source_url: "https://github.com/example/local-dev-tool",
       scenarios: ["coding"]
@@ -334,8 +343,9 @@ const SPECS: DemoSpec[] = [
       source_facts: {},
       overlap: { relation: "none", target: null, reason: "" },
       open_questions: [],
+      prompt_locators: [],
       usage: "integrate",
-      playbook: { kind: "integrate", install: ["pip install example-tsfm"], repo: "https://huggingface.co/example/timeseries-foundation-model", prompt_text: null },
+      playbook: { kind: "integrate", install: ["pip install example-tsfm"], repo: "https://huggingface.co/example/timeseries-foundation-model" },
       tags: ["library", "time-series"],
       source_url: "https://huggingface.co/example/timeseries-foundation-model",
       scenarios: ["coding"]
@@ -377,7 +387,7 @@ export function buildDemoRows(): DemoData {
       { runId, step: "reason", provider: "minimax", model: "MiniMax-Reason-2026", inputTokens: 1024, outputTokens: 256, durationMs: 2100, output: { card } }
     );
 
-    capabilities.push({ id: capabilityId, captureId, runId, card, verdict: spec.verdict, verdictBy: spec.verdictBy });
+    capabilities.push({ id: capabilityId, captureId, runId, card, verdict: spec.verdict, verdictBy: spec.verdictBy, prompts: spec.prompts });
   }
 
   return { captures, runs, steps, capabilities };
@@ -435,13 +445,14 @@ export async function runSeedDemo(pool: Pick<Pool, "connect">, env: Readonly<Rec
       const r = await client.query<{ id: string }>(
         `INSERT INTO caphub_v2.capabilities
            (id, capture_id, run_id, title, type, summary, summary_points, signals, suggested_verdict, suggested_reason, confidence,
-            verdict, verdict_by, verdict_at, usage, playbook, tags, source_url)
-         VALUES ($1,$2,$3,$4,$5,$6,$17::jsonb,$7,$8,$9,$10,$11,$12, CASE WHEN $12::text IS NULL THEN NULL ELSE now() END, $13,$14,$15,$16)
+            verdict, verdict_by, verdict_at, usage, playbook, tags, source_url, prompts)
+         VALUES ($1,$2,$3,$4,$5,$6,$17::jsonb,$7,$8,$9,$10,$11,$12, CASE WHEN $12::text IS NULL THEN NULL ELSE now() END, $13,$14,$15,$16,$18::jsonb)
          ON CONFLICT (id) DO NOTHING
          RETURNING id`,
         [cap.id, cap.captureId, cap.runId, c.title, c.type, c.summary, jsonStringifyStripNul(c.signals),
           c.suggested_verdict, c.suggested_reason, c.confidence, cap.verdict, cap.verdictBy, c.usage,
-          jsonStringifyStripNul(c.playbook), c.tags, c.source_url, jsonStringifyStripNul(c.summary_points)]
+          jsonStringifyStripNul(c.playbook), c.tags, c.source_url, jsonStringifyStripNul(c.summary_points),
+          jsonStringifyStripNul((cap.prompts ?? []).map((text) => ({ text })))]
       );
       if (r.rows.length) {
         createdCapabilityIds.push(r.rows[0].id);

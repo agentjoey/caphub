@@ -28,12 +28,6 @@ export function PlaybookView({ playbook, type, locale = "zh" }: { playbook: Play
             <a href={repoUrl(playbook.repo)} target="_blank" rel="noreferrer">{playbook.repo}</a>
           </p>
         )}
-        {playbook.prompt_text && (
-          <div className="prompt-block">
-            <div className="code-block__copy"><CopyButton text={playbook.prompt_text} label={dict.copyAll} locale={locale} /></div>
-            <pre>{playbook.prompt_text}</pre>
-          </div>
-        )}
       </div>
     );
   }

@@ -11,7 +11,8 @@ export const extractionSchema = z.object({
   what: z.string().min(1).max(400),
   visible_text: z.string().max(8000),
   commands: z.array(z.string().max(500)).max(20),
-  prompt_text: z.string().max(8000).nullable(),
+  /** Every complete prompt visible in the image, transcribed verbatim, one entry each (spec 2026-09-22). */
+  prompts: z.array(z.string().max(MAX_PROMPT_CHARS)).max(MAX_PROMPTS),
   source_hints: z.array(z.string().max(200)).max(10),
   questions: z.array(z.string().max(200)).max(5)
 });
@@ -29,7 +30,7 @@ export const searchResultSchema = z.object({
 export type SearchResult = z.infer<typeof searchResultSchema>;
 
 export const playbookSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("integrate"), install: z.array(z.string().max(500)).max(10), repo: z.string().min(1).max(300).nullable(), prompt_text: z.string().max(8000).nullable() }),
+  z.object({ kind: z.literal("integrate"), install: z.array(z.string().max(500)).max(10), repo: z.string().min(1).max(300).nullable() }),
   z.object({ kind: z.literal("reference"), points: z.array(z.string().max(300)).min(1).max(10) }),
   z.object({ kind: z.literal("experience"), content: z.string().min(1).max(8000), when_to_use: z.string().max(300) })
 ]);
@@ -211,7 +212,14 @@ export const cardObjectSchema = z.object({
    * list rather than being folded into `summary` (design decision 5 keeps process narration
    * out of the summary entirely).
    */
-  open_questions: z.array(z.string().max(45)).max(3).default([])
+  open_questions: z.array(z.string().max(45)).max(3).default([]),
+  /**
+   * Where each prompt sits in the text/url input -- the first and last ~20 characters, copied
+   * from the source. Never stored: pipeline.ts resolves them with collectPrompts and stores the
+   * source's own span in `capabilities.prompts` (spec 2026-09-22). Empty for images, whose
+   * prompts come from the vision transcription instead.
+   */
+  prompt_locators: z.array(z.object({ start: z.string().min(1).max(80), end: z.string().min(1).max(80) })).max(MAX_PROMPTS).default([])
 });
 
 export function refineCard<T extends {
