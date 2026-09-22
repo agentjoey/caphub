@@ -12,6 +12,7 @@ import { fetchCanonical, type CanonicalResult } from "./canonical";
 import {
   cardObjectSchema, finalizeSourceFacts, type CapabilityType, type Playbook, type SearchResult, type SourceFacts, type SummaryPoint
 } from "./card";
+import { parseYouTubeUrl } from "./material/youtube";
 import { enrichPrompt, type EnrichSubject } from "./prompts";
 import { recordStep } from "./steps";
 import { runStructured, withTimeout, type StructuredCall } from "./structured";
@@ -234,6 +235,12 @@ export async function runEnrichment(deps: EnrichDeps, lease: Lease, signal: Abor
   try {
     const capability = await loadCapability(deps.pool, lease.captureId);
     if (!capability) throw Object.assign(new Error("CAPABILITY_NOT_FOUND"), { code: "CAPABILITY_NOT_FOUND" });
+    // A video card summarises the video itself (Joey, 2026-09-22); this pass rewrites a card from
+    // web sources, which is exactly what a video card must not become. Finish as done without
+    // stamping enriched_at. Deep analysis (explicitly requested topic research) is unaffected.
+    const capture = (await deps.pool.query<{ url: string | null }>(
+      "SELECT url FROM caphub_v2.captures WHERE id = $1", [lease.captureId])).rows[0];
+    if (capture?.url && parseYouTubeUrl(capture.url)) return { capabilityId: capability.id };
     const budget = new RunBudget(ENRICH_BUDGET_LIMITS);
 
     const canonical = capability.source_url ? await runFetch(deps, lease.runId, capability.source_url, t.signal) : null;

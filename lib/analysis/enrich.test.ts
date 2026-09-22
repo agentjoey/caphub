@@ -45,6 +45,8 @@ function deps(opts: {
   searchUsage?: { inputTokens: number; outputTokens: number };
   /** rowCount the fake write-back UPDATE resolves with; 1 (a match) unless overridden. */
   writeBackRowCount?: number;
+  /** The capture's URL, returned for the YouTube check; null (not a link capture) unless overridden. */
+  captureUrl?: string | null;
 } = {}) {
   const calls: string[] = [];
   const steps: Array<{ step: string; ok: boolean; error: string | null; output: string | null }> = [];
@@ -57,6 +59,9 @@ function deps(opts: {
 
   const pool = {
     query: async (text: string, values: unknown[] = []) => {
+      if (text.startsWith("SELECT url FROM caphub_v2.captures")) {
+        return { rows: [{ url: opts.captureUrl ?? null }] };
+      }
       if (text.includes("FROM caphub_v2.capabilities WHERE capture_id")) {
         return { rows: capability ? [capability] : [] };
       }
@@ -103,6 +108,20 @@ function deps(opts: {
 }
 
 describe("runEnrichment", () => {
+  it("skips a YouTube video card entirely: no fetch, no search, no rewrite", async () => {
+    const { d, calls, updates } = deps({ captureUrl: "https://youtu.be/tYvu6IpSfiM?si=x" });
+    const out = await runEnrichment(d, lease, new AbortController().signal);
+    expect(out).toEqual({ capabilityId: capabilityRow.id });
+    expect(calls).toEqual([]);
+    expect(updates).toEqual([]);
+  });
+
+  it("still enriches a non-YouTube link capture", async () => {
+    const { d, calls } = deps({ captureUrl: "https://github.com/a/b" });
+    await runEnrichment(d, lease, new AbortController().signal);
+    expect(calls).toContain("reason");
+  });
+
   it("fetches the canonical source, searches up to 2 open_questions, rewrites the card, and writes it back", async () => {
     const { d, calls, steps, updates, reasonPrompt } = deps();
     const out = await runEnrichment(d, lease, new AbortController().signal);

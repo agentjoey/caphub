@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { INTERFACE_TAGS, RESERVED_TAGS } from "./card";
-import { CAPABILITY_TYPE_DEFINITIONS, PROMPTS_STORED_SEPARATELY, backfillScorePrompt, deepFactsPrompt, deepPlanPrompt, deepSynthesizePrompt, enrichPrompt, reasonPrompt, searchQuery, videoPrompt, visionPrompt, type EnrichSubject } from "./prompts";
+import { CAPABILITY_TYPE_DEFINITIONS, PROMPTS_STORED_SEPARATELY, backfillScorePrompt, deepFactsPrompt, deepPlanPrompt, deepSynthesizePrompt, enrichPrompt, reasonPrompt, searchQuery, VIDEO_CONTENT_ONLY, videoPrompt, visionPrompt, type EnrichSubject } from "./prompts";
 
 const material = { kind: "text" as const, text: "hello" };
 const scenarios = [
@@ -333,6 +333,22 @@ describe("video prompts", () => {
   const meta = { title: "Jev 实测", channel: "01Coder", publishedAt: "2026-09-20T00:00:00Z", durationSec: 1015, description: "repo https://github.com/typesafe-ai/skills" };
   const video = { kind: "video", platform: "youtube", url: "https://www.youtube.com/watch?v=tYvu6IpSfiM", videoId: "tYvu6IpSfiM", meta } as const;
   const common = { sources: [], similar: [], existingTags: [], scenarios: [{ slug: "coding", labelZh: "编程", labelEn: "Coding", keywords: [] }] };
+
+  it("videoPrompt asks for content_points describing what the video itself says and shows", () => {
+    expect(videoPrompt(meta, false)).toContain("content_points");
+    expect(videoPrompt(meta, false)).toContain("只写视频里实际出现的内容");
+  });
+
+  it("reasonPrompt pins a video card's content to the video and limits web sources to source facts", () => {
+    const sources = [{ title: "Doc", url: "https://a.example/1", content: "benchmark 32.8ms" }];
+    const extraction = { what: "w", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [] };
+    const v = reasonPrompt({ ...common, sources, material: video, extraction } as never);
+    expect(v).toContain(VIDEO_CONTENT_ONLY);
+    expect(v).toContain("视频投递：只能用于 source_facts 和那条来源可信度 signal");
+    const text = reasonPrompt({ ...common, sources, material: { kind: "text", text: "hi" }, extraction: null } as never);
+    expect(text).not.toContain(VIDEO_CONTENT_ONLY);
+    expect(text).toContain("联网来源（已截断）");
+  });
 
   it("videoPrompt carries metadata, asks for verbatim prompts and key moments, notes clipping", () => {
     const p = videoPrompt(meta, false);

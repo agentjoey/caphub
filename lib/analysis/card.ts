@@ -30,6 +30,15 @@ export type Extraction = z.infer<typeof extractionSchema>;
 
 /** Video transcription (lib/providers/gemini-video.ts): the image extraction plus timestamped key moments. */
 export const videoExtractionSchema = extractionSchema.extend({
+  /**
+   * What the video itself says and shows, point by point -- the material a video card's summary
+   * is written from (Joey, 2026-09-22: a video card summarises the video, not the topic; web
+   * search only fills source facts). `t` is where the point is made, or null when it spans the video.
+   */
+  content_points: z.array(z.object({
+    t: z.string().regex(/^\d{1,2}:\d{2}(?::\d{2})?$/).nullable(),
+    point: z.string().min(1).max(200)
+  })).max(12).default([]),
   key_moments: z.array(z.object({
     t: z.string().regex(/^\d{1,2}:\d{2}(?::\d{2})?$/),
     note: z.string().min(1).max(120)

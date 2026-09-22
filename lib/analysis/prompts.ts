@@ -50,10 +50,18 @@ function videoMetaText(meta: YouTubeMeta | null): string {
 }
 
 /** Prompt for the video understanding call (lib/providers/gemini-video.ts): carries YouTube metadata and asks for the same shape as visionPrompt, plus key_moments. */
+/**
+ * A video card summarises the video itself, not its topic (Joey, 2026-09-22 -- "如果只是对话题
+ * 感兴趣，我会用截图来输入"). Web search still runs, but may only fill source facts and the one
+ * source-credibility signal; everything describing the capability comes from the video.
+ */
+export const VIDEO_CONTENT_ONLY =
+  "这是一条视频投递：卡片记录的是这个视频本身讲了什么、演示了什么，而不是视频话题的通用介绍。title、summary、summary_points、playbook 以及除来源可信度那一条之外的 signals，只能依据「视频内容提取结果」（尤其是 content_points）与视频简介来写；不得引入视频里没有出现的功能、数据、基准、版本或观点，即使联网来源里有也不行。视频没讲到的方面就不写，不要用联网来源补全。open_questions 写视频里没说清、但对复用这个能力重要的问题。";
+
 export function videoPrompt(meta: YouTubeMeta | null, clipped: boolean): string {
   return [
     "你在整理一个个人 agent 能力库。请看这个 YouTube 视频（画面 + 语音），提取其中关于「能力」（skill、工具、plugin、prompt、模型、经验做法）的信息。",
-    "要求：what 用一两句话说明视频展示/讲解的是什么能力；visible_text 抄录画面中出现的关键文字（仓库名、网址、命令、界面文字）；commands 列出画面或语音中出现的安装/运行命令；prompts 列出视频中完整出现（画面展示或口述）的每一条提示词原文，每条单独一项、逐字抄录，不翻译、不润色、不补全、不合并，最多 20 条、按出现顺序，没有就给空数组；source_hints 列出作者、仓库、网址、产品名（简介里的链接也算）；questions 列出看完仍无法确定、需要联网核实的问题（最多 5 条）；key_moments 给 3–8 个关键片段，t 为 mm:ss（超过 1 小时用 h:mm:ss），note 一句话说明该片段的内容。",
+    "要求：what 用一两句话说明视频展示/讲解的是什么能力；visible_text 抄录画面中出现的关键文字（仓库名、网址、命令、界面文字）；commands 列出画面或语音中出现的安装/运行命令；prompts 列出视频中完整出现（画面展示或口述）的每一条提示词原文，每条单独一项、逐字抄录，不翻译、不润色、不补全、不合并，最多 20 条、按出现顺序，没有就给空数组；source_hints 列出作者、仓库、网址、产品名（简介里的链接也算）；questions 列出看完仍无法确定、需要联网核实的问题（最多 5 条）；content_points 给 5–10 条视频本身讲了什么、演示了什么（观点、做法、演示步骤、结论、数据），每条一句话、只写视频里实际出现的内容，t 为该内容出现的时间点（mm:ss）或 null；key_moments 给 3–8 个关键片段，t 为 mm:ss（超过 1 小时用 h:mm:ss），note 一句话说明该片段的内容。",
     clipped ? "注意：视频超过 90 分钟，这里只提供了前 90 分钟的内容。" : "",
     `视频元数据（来自 YouTube Data API）：\n${videoMetaText(meta)}`
   ].filter(Boolean).join("\n\n");
@@ -95,7 +103,10 @@ export function reasonPrompt(input: {
     `原始输入：\n${materialText}`,
     extractionText,
     videoClipped ? "视频超过 90 分钟，只分析了前 90 分钟，必须在 signals 里写明这一点。" : "",
-    input.sources.length ? `联网来源（已截断）：\n${input.sources.map((s, i) => `[${i + 1}] ${s.title} ${s.url}\n${s.content}`).join("\n\n")}` : "联网来源：无",
+    input.material.kind === "video" ? VIDEO_CONTENT_ONLY : "",
+    input.sources.length
+      ? `联网来源（已截断${input.material.kind === "video" ? "；视频投递：只能用于 source_facts 和那条来源可信度 signal" : ""}）：\n${input.sources.map((s, i) => `[${i + 1}] ${s.title} ${s.url}\n${s.content}`).join("\n\n")}`
+      : "联网来源：无",
     input.similar.length
       ? `库里已有的相似能力（候选相似卡，编号 · 标题 · 类型 · 一句话，用于判断是否重叠）：\n${input.similar.map((s) => `${s.code ?? "（无编号）"} · ${s.title} · ${s.type} · ${s.summary}`).join("\n")}`
       : "库里没有相似能力。",

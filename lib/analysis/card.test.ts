@@ -473,6 +473,12 @@ describe("verbatim prompt fields", () => {
 
 describe("videoExtractionSchema", () => {
   const base = { what: "w", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [] };
+  it("accepts content points with a timestamp or null, defaulting to []", () => {
+    expect(videoExtractionSchema.parse(base).content_points).toEqual([]);
+    expect(videoExtractionSchema.parse({ ...base, content_points: [{ t: "04:08", point: "p" }, { t: null, point: "q" }] }).content_points).toHaveLength(2);
+    expect(() => videoExtractionSchema.parse({ ...base, content_points: [{ t: "4m", point: "p" }] })).toThrow();
+  });
+
   it("accepts key moments with mm:ss or h:mm:ss and defaults to []", () => {
     expect(videoExtractionSchema.parse(base).key_moments).toEqual([]);
     expect(videoExtractionSchema.parse({ ...base, key_moments: [{ t: "01:57", note: "n" }, { t: "1:02:03", note: "m" }] }).key_moments).toHaveLength(2);
