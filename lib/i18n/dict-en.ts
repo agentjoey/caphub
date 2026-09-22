@@ -136,7 +136,13 @@ export const dictEn: Dict = {
     enrichedBadge: "Enriched · {date}",
     enrichedBadgeAria: "Second-pass enrichment completed {date}",
     sourcePrompts: "Source prompts",
-    promptIndex: "#{n}"
+    promptIndex: "#{n}",
+    video: "Video",
+    videoMeta: "{channel} · {duration}",
+    videoUnknownDuration: "unknown",
+    videoClipped: "Longer than 90 minutes — only the first 90 were analysed",
+    videoFailed: "The video could not be read; based on title and description only",
+    videoMoments: "Key moments"
   },
   scoreBadge: {
     label: "★ {score}/5",

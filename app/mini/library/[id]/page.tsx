@@ -13,6 +13,7 @@ import { SourcePrompts } from "../../../../components/capability/source-prompts"
 import { StatusControl } from "../../../../components/capability/status-control";
 import { SummaryBody } from "../../../../components/capability/summary-points";
 import { VerdictBadge } from "../../../../components/capability/verdict-badge";
+import { VideoSummary } from "../../../../components/capability/video-summary";
 import { MiniActions } from "../../../../components/mini/mini-actions";
 import { RouterBackButton } from "../../../../components/mini/router-back-button";
 import { formatDateTime } from "../../../../lib/library/format";
@@ -95,6 +96,8 @@ export default async function MiniDetailPage({ params }: { params: Promise<{ id:
         <SummaryBody summary={detail.summary} points={detail.summaryPoints} className="card-summary detail-summary" />
         <span className="badge badge--usage">{usageLabel(detail.usage, locale)}</span>
       </section>
+
+      <VideoSummary video={detail.video} locale={locale} />
 
       {detail.signals.length > 0 && (
         <section className="panel">

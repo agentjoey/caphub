@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { formatDateTime } from "../../lib/library/format";
 import { format, getDict, type Locale } from "../../lib/i18n";
+import { parseYouTubeUrl } from "../../lib/analysis/material/youtube";
 
 const TEXT_PREVIEW_LIMIT = 140;
 const TEXT_TRUNCATE_LIMIT = 280;
@@ -68,10 +69,15 @@ export function CapturePreview({ capture, size = "thumb", locale = "zh" }: { cap
     );
   }
   if (capture.kind === "url") {
-    if (size === "thumb") return <span className="thumb">{dict.linkThumb}</span>;
-    return capture.url
-      ? <a className="capture-url" href={capture.url} target="_blank" rel="noreferrer">{capture.url}</a>
-      : <span className="capture-url">{dict.noLink}</span>;
+    const videoId = capture.url ? parseYouTubeUrl(capture.url) : null;
+    const thumbImg = videoId && (
+      // eslint-disable-next-line @next/next/no-img-element -- external YouTube thumbnail, not a local asset
+      <img className="thumb" src={`https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`} alt={dict.linkThumb} loading="lazy" referrerPolicy="no-referrer" />
+    );
+    if (size === "thumb") return thumbImg ?? <span className="thumb">{dict.linkThumb}</span>;
+    if (!capture.url) return <span className="capture-url">{dict.noLink}</span>;
+    const link = <a className="capture-url" href={capture.url} target="_blank" rel="noreferrer">{capture.url}</a>;
+    return thumbImg ? <div>{thumbImg}{link}</div> : link;
   }
   if (size === "thumb") return <span className="thumb">{dict.textThumb}</span>;
   const text = capture.text ?? "";

@@ -5,6 +5,7 @@ import type { YouTubeMeta } from "./material/youtube";
 import type { Scenario } from "./scenarios";
 import { scenariosPromptList } from "./scenarios";
 import type { SimilarCandidate } from "./similar";
+import { formatDuration } from "../text/duration";
 
 /**
  * Shared scoring rubric wording, used both in the pipeline's `reasonPrompt` (score assigned
@@ -40,12 +41,6 @@ export function visionPrompt(ocrText: string): string {
     "要求：what 用一两句话说明图里展示的是什么能力；visible_text 抄录图中可见的关键文字；commands 抄录可见的安装/运行命令；prompts 列出图中每一条完整的提示词原文，每条单独一项、逐字抄录（包括标点、换行、参数如 --s 250），不翻译、不润色、不补全、不合并，中英对照的两个版本算两条，图中没有完整提示词就给空数组，最多列出 20 条、按图中出现顺序排列；source_hints 列出可见的作者、仓库、网址、产品名；questions 列出看图无法确定、需要联网核实的问题（最多 5 条）。",
     ocrText ? `OCR 参考文本（可能有错）：\n${ocrText}` : ""
   ].filter(Boolean).join("\n\n");
-}
-
-function formatDuration(sec: number | null): string {
-  if (sec === null) return "未知";
-  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
-  return h ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
 }
 
 function videoMetaText(meta: YouTubeMeta | null): string {

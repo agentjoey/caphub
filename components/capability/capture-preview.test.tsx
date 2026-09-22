@@ -58,6 +58,38 @@ describe("CapturePreview (full size)", () => {
   });
 });
 
+const baseUrl: CapturePreviewData = { kind: "url", objectKey: null, thumbKey: null, text: null, url: "https://example.com/some-article" };
+const youtubeUrl: CapturePreviewData = { kind: "url", objectKey: null, thumbKey: null, text: null, url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" };
+
+describe("CapturePreview (url kind)", () => {
+  it("renders the plain link placeholder for a non-YouTube link (thumb)", () => {
+    render(<CapturePreview capture={baseUrl} size="thumb" />);
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.getByText("链接")).toBeTruthy();
+  });
+
+  it("renders the original link unchanged for a non-YouTube link (full)", () => {
+    render(<CapturePreview capture={baseUrl} size="full" />);
+    expect(screen.queryByRole("img")).toBeNull();
+    const link = screen.getByRole("link", { name: baseUrl.url! });
+    expect(link.getAttribute("href")).toBe(baseUrl.url);
+  });
+
+  it("renders the i.ytimg thumbnail for a YouTube link (thumb)", () => {
+    render(<CapturePreview capture={youtubeUrl} size="thumb" />);
+    const img = screen.getByRole("img");
+    expect(img.getAttribute("src")).toBe("https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg");
+  });
+
+  it("renders the thumbnail plus the original link for a YouTube link (full)", () => {
+    render(<CapturePreview capture={youtubeUrl} size="full" />);
+    const img = screen.getByRole("img");
+    expect(img.getAttribute("src")).toBe("https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg");
+    const link = screen.getByRole("link", { name: youtubeUrl.url! });
+    expect(link.getAttribute("href")).toBe(youtubeUrl.url);
+  });
+});
+
 describe("CollapsedCapturePreview", () => {
   it("renders a <details> titled 原始投递, closed by default", () => {
     const { container } = render(<CollapsedCapturePreview capture={baseImage} />);

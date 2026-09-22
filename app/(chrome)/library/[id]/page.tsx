@@ -16,6 +16,7 @@ import { SourcePrompts } from "../../../../components/capability/source-prompts"
 import { StatusControl } from "../../../../components/capability/status-control";
 import { SummaryBody } from "../../../../components/capability/summary-points";
 import { VerdictBadge } from "../../../../components/capability/verdict-badge";
+import { VideoSummary } from "../../../../components/capability/video-summary";
 import { formatDateTime } from "../../../../lib/library/format";
 import { errorLabel, typeLabel, usageLabel } from "../../../../lib/library/labels";
 import { getCapabilityDetail } from "../../../../lib/library/queries";
@@ -129,6 +130,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
               <span className="badge badge--usage">{usageLabel(detail.usage, locale)}</span>
             </div>
           </section>
+          <VideoSummary video={detail.video} locale={locale} />
           {detail.signals.length > 0 && (
             <section className="panel">
               <h2 className="panel-title">{dict.detail.signals}</h2>

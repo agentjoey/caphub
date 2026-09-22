@@ -141,7 +141,13 @@ export const dictZh = {
     enrichedBadge: "已补充调研 · {date}",
     enrichedBadgeAria: "第二轮补充调研于 {date} 完成",
     sourcePrompts: "Prompt 原文",
-    promptIndex: "第 {n} 条"
+    promptIndex: "第 {n} 条",
+    video: "视频",
+    videoMeta: "{channel} · {duration}",
+    videoUnknownDuration: "未知",
+    videoClipped: "视频超过 90 分钟，只分析了前 90 分钟",
+    videoFailed: "视频未能读取，仅依据标题与简介",
+    videoMoments: "关键片段"
   },
   scoreBadge: {
     label: "★ {score}/5",
