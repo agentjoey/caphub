@@ -108,4 +108,11 @@ describe("collectPrompts", () => {
     const out = collectPrompts({ material: { kind: "url", url: "https://a.b", text: null }, extraction: null, locators: [{ start: "a", end: "b" }] });
     expect(out).toEqual({ prompts: [], unresolved: 1 });
   });
+
+  it("uses the video transcription for a video, like an image", () => {
+    const video = { kind: "video", platform: "youtube", url: "u", videoId: "tYvu6IpSfiM", meta: null } as const;
+    const extraction = { what: "w", visible_text: "", commands: [], prompts: ["口述的 prompt"], source_hints: [], questions: [] };
+    expect(collectPrompts({ material: video, extraction, locators: [{ start: "x", end: "y" }] })).toEqual({ prompts: ["口述的 prompt"], unresolved: 0 });
+    expect(collectPrompts({ material: video, extraction: null, locators: [] })).toEqual({ prompts: [], unresolved: 0 });
+  });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { cardObjectSchema, cardSchema, deepAnalysisSchema, deepFactsSchema, deepPlanSchema, extractionSchema, finalizeSourceFacts, isValidTag, MAX_PROMPT_ITEMS_ACCEPTED, playbookSchema, scoreResultSchema } from "./card";
+import { cardObjectSchema, cardSchema, deepAnalysisSchema, deepFactsSchema, deepPlanSchema, extractionSchema, finalizeSourceFacts, isValidTag, MAX_PROMPT_ITEMS_ACCEPTED, playbookSchema, scoreResultSchema, videoExtractionSchema } from "./card";
 
 const valid = {
   title: "用 Playwright 生成 axe 可访问性报告", type: "skill", summary: "一段摘要",
@@ -468,5 +468,14 @@ describe("verbatim prompt fields", () => {
       expect(shape.parse(Array(n).fill(locator))).toHaveLength(n);
     }
     expect(() => shape.parse(Array(MAX_PROMPT_ITEMS_ACCEPTED + 1).fill(locator))).toThrow();
+  });
+});
+
+describe("videoExtractionSchema", () => {
+  const base = { what: "w", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [] };
+  it("accepts key moments with mm:ss or h:mm:ss and defaults to []", () => {
+    expect(videoExtractionSchema.parse(base).key_moments).toEqual([]);
+    expect(videoExtractionSchema.parse({ ...base, key_moments: [{ t: "01:57", note: "n" }, { t: "1:02:03", note: "m" }] }).key_moments).toHaveLength(2);
+    expect(() => videoExtractionSchema.parse({ ...base, key_moments: [{ t: "1m", note: "n" }] })).toThrow();
   });
 });

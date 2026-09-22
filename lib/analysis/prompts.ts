@@ -1,6 +1,7 @@
 import type { CanonicalResult } from "./canonical";
-import { INTERFACE_TAGS, RESERVED_TAGS, type Card, type CapabilityType, type DeepSource, type Extraction, type SearchResult } from "./card";
+import { INTERFACE_TAGS, RESERVED_TAGS, VIDEO_CLIP_SEC, type Card, type CapabilityType, type DeepSource, type Extraction, type SearchResult } from "./card";
 import type { Material } from "./material";
+import type { YouTubeMeta } from "./material/youtube";
 import type { Scenario } from "./scenarios";
 import { scenariosPromptList } from "./scenarios";
 import type { SimilarCandidate } from "./similar";
@@ -41,9 +42,32 @@ export function visionPrompt(ocrText: string): string {
   ].filter(Boolean).join("\n\n");
 }
 
+function formatDuration(sec: number | null): string {
+  if (sec === null) return "未知";
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function videoMetaText(meta: YouTubeMeta | null): string {
+  return meta
+    ? `标题：${meta.title}\n频道：${meta.channel}\n发布：${meta.publishedAt}\n时长：${formatDuration(meta.durationSec)}\n简介：\n${meta.description.slice(0, 4000)}`
+    : "（无元数据）";
+}
+
+/** Prompt for the video understanding call (lib/providers/gemini-video.ts): carries YouTube metadata and asks for the same shape as visionPrompt, plus key_moments. */
+export function videoPrompt(meta: YouTubeMeta | null, clipped: boolean): string {
+  return [
+    "你在整理一个个人 agent 能力库。请看这个 YouTube 视频（画面 + 语音），提取其中关于「能力」（skill、工具、plugin、prompt、模型、经验做法）的信息。",
+    "要求：what 用一两句话说明视频展示/讲解的是什么能力；visible_text 抄录画面中出现的关键文字（仓库名、网址、命令、界面文字）；commands 列出画面或语音中出现的安装/运行命令；prompts 列出视频中完整出现（画面展示或口述）的每一条提示词原文，每条单独一项、逐字抄录，不翻译、不润色、不补全、不合并，最多 20 条、按出现顺序，没有就给空数组；source_hints 列出作者、仓库、网址、产品名（简介里的链接也算）；questions 列出看完仍无法确定、需要联网核实的问题（最多 5 条）；key_moments 给 3–8 个关键片段，t 为 mm:ss（超过 1 小时用 h:mm:ss），note 一句话说明该片段的内容。",
+    clipped ? "注意：视频超过 90 分钟，这里只提供了前 90 分钟的内容。" : "",
+    `视频元数据（来自 YouTube Data API）：\n${videoMetaText(meta)}`
+  ].filter(Boolean).join("\n\n");
+}
+
 export function searchQuery(extraction: Extraction | null, material: Material): string {
   if (extraction) return [extraction.what, ...extraction.source_hints, ...extraction.questions.slice(0, 2)].join(" ").slice(0, 400);
-  if (material.kind === "url" || material.kind === "video") return material.url;
+  if (material.kind === "video") return (material.meta?.title ?? material.url).slice(0, 400);
+  if (material.kind === "url") return material.url;
   return material.kind === "text" ? material.text.slice(0, 400) : "";
 }
 
@@ -59,21 +83,25 @@ export function reasonPrompt(input: {
    * a backstop against a disobedient model.
    */
   pinnedType?: CapabilityType | null;
+  /** True when the video-understanding call itself failed (never mistaken for "no prompts found"); video materials only. */
+  videoFailed?: boolean;
 }): string {
-  // Placeholder for the "video" kind: real video-aware prompting (title/channel/description,
-  // Gemini video understanding) is Task 3/4's job, this just keeps the reason step compiling
-  // and pointed at the URL in the meantime.
   const materialText = input.material.kind === "text" ? input.material.text
     : input.material.kind === "url" ? `URL: ${input.material.url}\n页面正文：${input.material.text ?? "（抓取失败）"}`
-    : input.material.kind === "video" ? `YouTube URL: ${input.material.url}`
+    : input.material.kind === "video" ? `YouTube 视频：${input.material.url}\n${videoMetaText(input.material.meta)}`
     : `（图片，见视觉提取结果）`;
+  const videoClipped = input.material.kind === "video" && (input.material.meta?.durationSec ?? 0) > VIDEO_CLIP_SEC;
+  const extractionText = input.material.kind === "video"
+    ? (input.extraction ? `视频内容提取结果：\n${JSON.stringify(input.extraction)}` : `视频内容未能读取：只能依据标题与简介判断，必须在 signals 里写一条「视频未能读取，仅依据标题与简介」。`)
+    : input.extraction ? `视觉提取结果：\n${JSON.stringify(input.extraction)}` : "";
   return [
     `你在为一个个人 agent 能力库做评估与建档。${CAPABILITY_TYPE_DEFINITIONS}`,
     input.pinnedType
       ? `硬性约束：这张卡片的 type 已由人工确定为「${input.pinnedType}」，本次重跑必须原样使用这个 type，不得改判为其他类型；playbook 必须按这个 type 的形状组织内容（例如 type 为 experience 时，必须把核心内容本身写进 playbook.content）。`
       : "",
     `原始输入：\n${materialText}`,
-    input.extraction ? `视觉提取结果：\n${JSON.stringify(input.extraction)}` : "",
+    extractionText,
+    videoClipped ? "视频超过 90 分钟，只分析了前 90 分钟，必须在 signals 里写明这一点。" : "",
     input.sources.length ? `联网来源（已截断）：\n${input.sources.map((s, i) => `[${i + 1}] ${s.title} ${s.url}\n${s.content}`).join("\n\n")}` : "联网来源：无",
     input.similar.length
       ? `库里已有的相似能力（候选相似卡，编号 · 标题 · 类型 · 一句话，用于判断是否重叠）：\n${input.similar.map((s) => `${s.code ?? "（无编号）"} · ${s.title} · ${s.type} · ${s.summary}`).join("\n")}`
@@ -88,7 +116,9 @@ export function reasonPrompt(input: {
       "source_url 给最可信的来源链接或 null。",
     input.material.kind === "image"
       ? "prompt_locators 给空数组：截图里的提示词原文已由视觉提取单独保存。"
-      : "prompt_locators 标出「原始输入」里每一条完整提示词原文的位置，每条一项、按出现顺序，最多列出 20 条：start 是这条提示词开头约 20 个字，end 是结尾约 20 个字，二者都必须从原始输入里逐字照抄（包括标点与空格，不翻译、不改写）；原始输入里没有提示词就给空数组。",
+      : input.material.kind === "video"
+        ? "prompt_locators 给空数组：视频里的提示词原文已由视频提取单独保存。"
+        : "prompt_locators 标出「原始输入」里每一条完整提示词原文的位置，每条一项、按出现顺序，最多列出 20 条：start 是这条提示词开头约 20 个字，end 是结尾约 20 个字，二者都必须从原始输入里逐字照抄（包括标点与空格，不翻译、不改写）；原始输入里没有提示词就给空数组。",
     input.similar.length
       ? `overlap 判断本卡与上面「候选相似卡」列表中最相关的一张的关系：relation 在 none（无关）、duplicate（与对方重复）、upgrade（本卡是对方的升级版）、superseded（本卡已被对方取代）、complement（与对方互补）之间选；target 必须原样填写候选列表里给出的编号（如 TOL-0009），relation 为 none 时 target 必须为 null；严禁引用候选列表以外的编号；reason 用一句不超过 80 字的中文说明判断依据。`
       : "候选相似卡列表为空，overlap.relation 必须填 none，overlap.target 必须为 null，reason 说明库里暂无相似能力。",

@@ -28,6 +28,16 @@ export const extractionSchema = z.object({
 });
 export type Extraction = z.infer<typeof extractionSchema>;
 
+/** Video transcription (lib/providers/gemini-video.ts): the image extraction plus timestamped key moments. */
+export const videoExtractionSchema = extractionSchema.extend({
+  key_moments: z.array(z.object({
+    t: z.string().regex(/^\d{1,2}:\d{2}(?::\d{2})?$/),
+    note: z.string().min(1).max(120)
+  })).max(8).default([])
+});
+export type VideoExtraction = z.infer<typeof videoExtractionSchema>;
+export const VIDEO_CLIP_SEC = 5400;
+
 export const MAX_SOURCE_CONTENT = 2048;
 export const MAX_SOURCES = 6;
 export const searchResultSchema = z.object({

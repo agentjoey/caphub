@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { INTERFACE_TAGS, RESERVED_TAGS } from "./card";
-import { CAPABILITY_TYPE_DEFINITIONS, PROMPTS_STORED_SEPARATELY, backfillScorePrompt, deepFactsPrompt, deepPlanPrompt, deepSynthesizePrompt, enrichPrompt, reasonPrompt, visionPrompt, type EnrichSubject } from "./prompts";
+import { CAPABILITY_TYPE_DEFINITIONS, PROMPTS_STORED_SEPARATELY, backfillScorePrompt, deepFactsPrompt, deepPlanPrompt, deepSynthesizePrompt, enrichPrompt, reasonPrompt, searchQuery, videoPrompt, visionPrompt, type EnrichSubject } from "./prompts";
 
 const material = { kind: "text" as const, text: "hello" };
 const scenarios = [
@@ -327,4 +327,38 @@ it("caps vision prompt transcription and reason locators at 20 items, in order",
   const common = { extraction: null, sources: [], similar: [], existingTags: [], scenarios: [{ slug: "coding", labelZh: "编程", labelEn: "Coding", keywords: [] }] };
   const text = reasonPrompt({ ...common, material: { kind: "text", text: "hi" } } as never);
   expect(text).toMatch(/按出现顺序，最多列出 20 条/);
+});
+
+describe("video prompts", () => {
+  const meta = { title: "Jev 实测", channel: "01Coder", publishedAt: "2026-09-20T00:00:00Z", durationSec: 1015, description: "repo https://github.com/typesafe-ai/skills" };
+  const video = { kind: "video", platform: "youtube", url: "https://www.youtube.com/watch?v=tYvu6IpSfiM", videoId: "tYvu6IpSfiM", meta } as const;
+  const common = { sources: [], similar: [], existingTags: [], scenarios: [{ slug: "coding", labelZh: "编程", labelEn: "Coding", keywords: [] }] };
+
+  it("videoPrompt carries metadata, asks for verbatim prompts and key moments, notes clipping", () => {
+    const p = videoPrompt(meta, false);
+    expect(p).toContain("Jev 实测");
+    expect(p).toContain("https://github.com/typesafe-ai/skills");
+    expect(p).toContain("逐字");
+    expect(p).toContain("key_moments");
+    expect(p).not.toContain("前 90 分钟");
+    expect(videoPrompt(meta, true)).toContain("前 90 分钟");
+    expect(videoPrompt(null, false)).toContain("无元数据");
+  });
+
+  it("reasonPrompt shows video metadata + extraction, and the failure/clip notes", () => {
+    const ok = reasonPrompt({ ...common, material: video, extraction: { what: "w", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [] } } as never);
+    expect(ok).toContain("YouTube 视频");
+    expect(ok).toContain("Jev 实测");
+    expect(ok).toContain("视频内容提取结果");
+    expect(ok).toContain("prompt_locators 给空数组");
+    const failed = reasonPrompt({ ...common, material: video, extraction: null, videoFailed: true } as never);
+    expect(failed).toContain("视频内容未能读取");
+    const long = reasonPrompt({ ...common, material: { ...video, meta: { ...meta, durationSec: 7200 } }, extraction: null } as never);
+    expect(long).toContain("只分析了前 90 分钟");
+  });
+
+  it("searchQuery falls back to the video title without an extraction", () => {
+    expect(searchQuery(null, video as never)).toBe("Jev 实测");
+    expect(searchQuery(null, { ...video, meta: null } as never)).toBe(video.url);
+  });
 });

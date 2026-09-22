@@ -66,7 +66,7 @@ export function locatePrompts(source: string, locators: PromptLocator[]): { prom
  */
 export function collectPrompts(input: { material: Material; extraction: Extraction | null; locators: PromptLocator[] }): { prompts: string[]; unresolved: number } {
   const { material, extraction, locators } = input;
-  if (material.kind === "image") {
+  if (material.kind === "image" || material.kind === "video") {
     // Mirrors locatePrompts' own capping: a blank transcription is simply dropped (never
     // counted), but a non-blank item past MAX_PROMPTS, or one over MAX_PROMPT_CHARS, is
     // dropped *and* counted in `unresolved` so a 21+-prompt screenshot lands in Review instead
@@ -81,9 +81,7 @@ export function collectPrompts(input: { material: Material; extraction: Extracti
     unresolved += Math.max(0, valid.length - MAX_PROMPTS);
     return { prompts: valid.slice(0, MAX_PROMPTS), unresolved };
   }
-  // Placeholder for the "video" kind: video prompt locating is real work for a later task
-  // (Task 3/4), so for now there's simply no text to locate prompts in.
-  const source = material.kind === "video" ? null : material.text;
+  const source = material.text;
   if (source === null) return { prompts: [], unresolved: locators.length };
   return locatePrompts(source, locators);
 }
