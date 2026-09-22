@@ -30,6 +30,26 @@ describe("pickBackfill", () => {
     const visionNull = { ...base, vision_output: { prompts: null as never, prompt_text: "also fallback" } };
     expect(pickBackfill(visionNull)).toEqual({ prompts: ["also fallback"] });
   });
+
+  it("flags maybeMultiple when the old single-string prompt_text contains a blank line", () => {
+    const row = { ...base, vision_output: { prompt_text: "第一条提示词\n\n第二条提示词" } };
+    expect(pickBackfill(row)).toEqual({ prompts: ["第一条提示词\n\n第二条提示词"], maybeMultiple: true });
+  });
+
+  it("does not flag maybeMultiple when the old prompt_text has no blank line", () => {
+    const row = { ...base, vision_output: { prompt_text: "一条完整的提示词，没有空行" } };
+    expect(pickBackfill(row)).toEqual({ prompts: ["一条完整的提示词，没有空行"] });
+  });
+
+  it("does not flag maybeMultiple for the new-format prompts array, even with a blank line inside an item", () => {
+    const row = { ...base, vision_output: { prompts: ["第一条\n\n仍是第一条的一部分"] } };
+    expect(pickBackfill(row)).toEqual({ prompts: ["第一条\n\n仍是第一条的一部分"] });
+  });
+
+  it("does not flag maybeMultiple for a legacy text-capture playbook prompt", () => {
+    const row = { ...base, capture_kind: "text" as const, capture_text: "前言 你好\n\n世界 后记", playbook: { kind: "integrate", install: [], repo: null, prompt_text: "你好\n\n世界" } };
+    expect(pickBackfill(row)).toEqual({ prompts: ["你好\n\n世界"] });
+  });
 });
 
 describe("runPromptBackfill", () => {
@@ -71,6 +91,46 @@ describe("runPromptBackfill", () => {
     const out = await runPromptBackfill(pool as never, true, () => {});
     expect(out).toEqual({ candidates: 1, filled: 0, unresolved: 0, skipped: 1 });
     expect(writes).toHaveLength(1);
+  });
+
+  it("logs the legacy playbook.prompt_text and capture_kind for an unresolved row", async () => {
+    const row: BackfillRow = { ...base, capture_kind: "text", capture_text: "unrelated text", playbook: { kind: "integrate", install: [], repo: null, prompt_text: "not verbatim in capture" }, vision_output: null };
+    const { pool } = fakePool([row]);
+    const logs: Array<Record<string, unknown>> = [];
+    await runPromptBackfill(pool as never, false, (o) => logs.push(o));
+    const entry = logs.find((l) => l.capabilityId === "cab_1");
+    expect(entry).toMatchObject({
+      unresolved: "text capture, playbook prompt not verbatim in source",
+      legacyPromptText: "not verbatim in capture",
+      captureKind: "text"
+    });
+  });
+
+  it("logs legacyPromptText: null when the row has no legacy playbook prompt at all", async () => {
+    const row: BackfillRow = { ...base, capture_kind: "image", playbook: { kind: "reference", points: ["p"] }, vision_output: null };
+    const { pool } = fakePool([row]);
+    const logs: Array<Record<string, unknown>> = [];
+    await runPromptBackfill(pool as never, false, (o) => logs.push(o));
+    const entry = logs.find((l) => l.capabilityId === "cab_1");
+    expect(entry).toMatchObject({ legacyPromptText: null, captureKind: "image" });
+  });
+
+  it("logs maybeMultiple: true for a filled row picked from an old prompt_text with a blank line", async () => {
+    const row: BackfillRow = { ...base, vision_output: { prompt_text: "第一条\n\n第二条" } };
+    const { pool } = fakePool([row]);
+    const logs: Array<Record<string, unknown>> = [];
+    await runPromptBackfill(pool as never, false, (o) => logs.push(o));
+    const entry = logs.find((l) => l.capabilityId === "cab_1");
+    expect(entry).toMatchObject({ maybeMultiple: true, prompts: ["第一条\n\n第二条"] });
+  });
+
+  it("omits maybeMultiple for a filled row with no blank-line heuristic hit", async () => {
+    const row: BackfillRow = { ...base, vision_output: { prompt_text: "一条完整提示词" } };
+    const { pool } = fakePool([row]);
+    const logs: Array<Record<string, unknown>> = [];
+    await runPromptBackfill(pool as never, false, (o) => logs.push(o));
+    const entry = logs.find((l) => l.capabilityId === "cab_1");
+    expect(entry).not.toHaveProperty("maybeMultiple");
   });
 
   it("candidate SQL filters to only cards with non-empty legacy prompt_text or type=prompt", async () => {

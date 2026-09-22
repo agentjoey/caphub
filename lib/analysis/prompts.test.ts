@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { INTERFACE_TAGS, RESERVED_TAGS } from "./card";
-import { CAPABILITY_TYPE_DEFINITIONS, backfillScorePrompt, deepSynthesizePrompt, enrichPrompt, reasonPrompt, visionPrompt, type EnrichSubject } from "./prompts";
+import { CAPABILITY_TYPE_DEFINITIONS, PROMPTS_STORED_SEPARATELY, backfillScorePrompt, deepFactsPrompt, deepPlanPrompt, deepSynthesizePrompt, enrichPrompt, reasonPrompt, visionPrompt, type EnrichSubject } from "./prompts";
 
 const material = { kind: "text" as const, text: "hello" };
 const scenarios = [
@@ -269,6 +269,31 @@ describe("enrichPrompt", () => {
     expect(prompt).toMatch(/text 是不超过 60 字的一句说明句/);
     expect(prompt).toMatch(/绝不能把一整段话塞进一条 point，也不能让多条 point 重复同一件事/);
   });
+
+  it("tells the model prompts are stored separately, so a missing playbook prompt doesn't get marked down or asked about", () => {
+    const prompt = enrichPrompt(subject, null, []);
+    expect(prompt).toContain(PROMPTS_STORED_SEPARATELY);
+  });
+});
+
+describe("deep prompts carry the shared verbatim-prompts instruction", () => {
+  const subject = {
+    title: "Scrapling", type: "tool" as const, summary: "抓取框架",
+    tags: ["web-scraping"], source_url: "https://example.com", playbook: { kind: "reference" as const, points: ["p"] }
+  };
+  const sources = [{ title: "Docs", url: "https://a.example/1" }];
+
+  it("includes PROMPTS_STORED_SEPARATELY in deepPlanPrompt", () => {
+    expect(deepPlanPrompt(subject)).toContain(PROMPTS_STORED_SEPARATELY);
+  });
+
+  it("includes PROMPTS_STORED_SEPARATELY in deepFactsPrompt", () => {
+    expect(deepFactsPrompt(subject, sources)).toContain(PROMPTS_STORED_SEPARATELY);
+  });
+
+  it("includes PROMPTS_STORED_SEPARATELY in deepSynthesizePrompt", () => {
+    expect(deepSynthesizePrompt(subject, sources, ["fact"])).toContain(PROMPTS_STORED_SEPARATELY);
+  });
 });
 
 it("asks vision for verbatim prompts and reason for locators on text, never for prompt 全文", () => {
@@ -279,4 +304,11 @@ it("asks vision for verbatim prompts and reason for locators on text, never for 
   expect(text).not.toContain("prompt 全文");
   const image = reasonPrompt({ ...common, material: { kind: "image", png: new Uint8Array(), ocrText: "", width: 1, height: 1 } } as never);
   expect(image).toContain("prompt_locators 给空数组");
+});
+
+it("caps vision prompt transcription and reason locators at 20 items, in order", () => {
+  expect(visionPrompt("")).toContain("最多列出 20 条");
+  const common = { extraction: null, sources: [], similar: [], existingTags: [], scenarios: [{ slug: "coding", labelZh: "编程", labelEn: "Coding", keywords: [] }] };
+  const text = reasonPrompt({ ...common, material: { kind: "text", text: "hi" } } as never);
+  expect(text).toMatch(/按出现顺序，最多列出 20 条/);
 });

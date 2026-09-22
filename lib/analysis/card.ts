@@ -7,12 +7,22 @@ export type CapabilityType = z.infer<typeof capabilityTypeSchema>;
 export const MAX_PROMPTS = 20;
 export const MAX_PROMPT_CHARS = 20_000;
 
+/**
+ * Schema-level cap on how many `prompts`/`prompt_locators` items a single model output may
+ * contain, kept deliberately looser than the `MAX_PROMPTS` storage cap: a collection
+ * page/screenshot with 21-50 prompts must still validate successfully so the run can reach
+ * `collectPrompts`/`locatePrompts`, which drop everything past `MAX_PROMPTS` and count it in
+ * `unresolved` (sending the card to Review) instead of the whole analysis run dying with
+ * `INVALID_OUTPUT` at schema validation.
+ */
+export const MAX_PROMPT_ITEMS_ACCEPTED = 50;
+
 export const extractionSchema = z.object({
   what: z.string().min(1).max(400),
   visible_text: z.string().max(8000),
   commands: z.array(z.string().max(500)).max(20),
   /** Every complete prompt visible in the image, transcribed verbatim, one entry each (spec 2026-09-22). */
-  prompts: z.array(z.string().max(MAX_PROMPT_CHARS)).max(MAX_PROMPTS),
+  prompts: z.array(z.string().max(MAX_PROMPT_CHARS)).max(MAX_PROMPT_ITEMS_ACCEPTED),
   source_hints: z.array(z.string().max(200)).max(10),
   questions: z.array(z.string().max(200)).max(5)
 });
@@ -219,7 +229,7 @@ export const cardObjectSchema = z.object({
    * source's own span in `capabilities.prompts` (spec 2026-09-22). Empty for images, whose
    * prompts come from the vision transcription instead.
    */
-  prompt_locators: z.array(z.object({ start: z.string().min(1).max(80), end: z.string().min(1).max(80) })).max(MAX_PROMPTS).default([])
+  prompt_locators: z.array(z.object({ start: z.string().min(1).max(80), end: z.string().min(1).max(80) })).max(MAX_PROMPT_ITEMS_ACCEPTED).default([])
 });
 
 export function refineCard<T extends {

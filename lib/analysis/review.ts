@@ -3,6 +3,7 @@ import { jsonStringifyStripNul } from "../text/sanitize";
 import { RunBudget } from "./budget";
 import { reviewNoteSchema, type ReviewNote } from "./card";
 import { TIMEOUTS } from "./pipeline";
+import { PROMPTS_STORED_SEPARATELY } from "./prompts";
 import { runStructured, type StructuredCall } from "./structured";
 
 export async function reviewCapability(deps: { pool: Pool; call: StructuredCall }, capabilityId: string, signal: AbortSignal): Promise<ReviewNote> {
@@ -22,6 +23,7 @@ export async function reviewCapability(deps: { pool: Pool; call: StructuredCall 
     "你是第二意见评审。下面是一张由另一个模型生成的能力卡片及其完整推理产物。请独立判断：建议的保留/丢弃、类型、integrate/reference、标签是否合理；摘要有没有夸大或遗漏。",
     `卡片：\n${JSON.stringify(row.card)}`,
     `推理产物：\n${JSON.stringify(row.reason_output)}`,
+    PROMPTS_STORED_SEPARATELY,
     "输出 agrees（整体是否同意）和 points（不同意或需要修正的具体点，最多 8 条；同意则给 1–2 条确认理由）。"
   ].join("\n\n");
   const note = await runStructured({

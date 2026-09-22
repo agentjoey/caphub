@@ -84,6 +84,16 @@ describe("buildDemoRows", () => {
     expect(withTwoSources).toHaveLength(1);
   });
 
+  it("every stored prompt appears verbatim in its own text capture (spec 2026-09-22: prompts are never edited/extended beyond the source)", () => {
+    const data = buildDemoRows();
+    for (const cap of data.capabilities) {
+      if (!cap.prompts?.length) continue;
+      const capture = data.captures.find((c) => c.id === cap.captureId);
+      if (capture?.kind !== "text") continue;
+      for (const prompt of cap.prompts) expect(capture.text).toContain(prompt);
+    }
+  });
+
   it("each run has one vision, one search and one reason step", () => {
     const data = buildDemoRows();
     for (const run of data.runs) {

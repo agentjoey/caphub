@@ -14,6 +14,16 @@ import type { SimilarCandidate } from "./similar";
 export const SCORE_RUBRIC = "评分标准：成熟度（是否稳定可用）、可复现性（是否有仓库 / 安装路径 / 提示词原文，能不能照着做出来）、对 Joey 的适用度（是否匹配他的实际场景）、与库内已有能力的互补性（是否重复造轮子）。4–5 分表示建议直接整合，1–2 分表示通常该丢弃，3 分是中间地带。";
 
 /**
+ * One coherent instruction about verbatim prompts, shared by every prompt that reads/rewrites
+ * an already-analyzed card (enrich, review, deep analysis): `capabilities.prompts` is stored by
+ * code (spec 2026-09-22), never written into `playbook`, so a model looking only at the card's
+ * own fields must not mistake a missing `playbook.prompt_text` for a missing prompt -- it should
+ * neither mark down SCORE_RUBRIC's 可复现性 for that nor raise "提示词原文是什么" as an open
+ * question.
+ */
+export const PROMPTS_STORED_SEPARATELY = "提示词原文由系统单独保存（不在 playbook 中），不要因 playbook 里没有原文而降低可复现性评分，也不要把「提示词原文是什么」列为待核实问题。";
+
+/**
  * Shared capability-type definitions, used both in the pipeline's `reasonPrompt` (assigns
  * `type` alongside the rest of the card) and in the one-off `scripts/reclassify-types.ts`
  * (re-asks `type` alone for existing cards). Kept as one string, and compact, since it's sent
@@ -26,7 +36,7 @@ export const CAPABILITY_TYPE_DEFINITIONS =
 export function visionPrompt(ocrText: string): string {
   return [
     "你在整理一个个人 agent 能力库。请仔细看这张图片，提取其中关于「能力」（skill、经验、plugin、prompt 等）的信息。",
-    "要求：what 用一两句话说明图里展示的是什么能力；visible_text 抄录图中可见的关键文字；commands 抄录可见的安装/运行命令；prompts 列出图中每一条完整的提示词原文，每条单独一项、逐字抄录（包括标点、换行、参数如 --s 250），不翻译、不润色、不补全、不合并，中英对照的两个版本算两条，图中没有完整提示词就给空数组；source_hints 列出可见的作者、仓库、网址、产品名；questions 列出看图无法确定、需要联网核实的问题（最多 5 条）。",
+    "要求：what 用一两句话说明图里展示的是什么能力；visible_text 抄录图中可见的关键文字；commands 抄录可见的安装/运行命令；prompts 列出图中每一条完整的提示词原文，每条单独一项、逐字抄录（包括标点、换行、参数如 --s 250），不翻译、不润色、不补全、不合并，中英对照的两个版本算两条，图中没有完整提示词就给空数组，最多列出 20 条、按图中出现顺序排列；source_hints 列出可见的作者、仓库、网址、产品名；questions 列出看图无法确定、需要联网核实的问题（最多 5 条）。",
     ocrText ? `OCR 参考文本（可能有错）：\n${ocrText}` : ""
   ].filter(Boolean).join("\n\n");
 }
@@ -74,7 +84,7 @@ export function reasonPrompt(input: {
       "source_url 给最可信的来源链接或 null。",
     input.material.kind === "image"
       ? "prompt_locators 给空数组：截图里的提示词原文已由视觉提取单独保存。"
-      : "prompt_locators 标出「原始输入」里每一条完整提示词原文的位置，每条一项、按出现顺序：start 是这条提示词开头约 20 个字，end 是结尾约 20 个字，二者都必须从原始输入里逐字照抄（包括标点与空格，不翻译、不改写）；原始输入里没有提示词就给空数组。",
+      : "prompt_locators 标出「原始输入」里每一条完整提示词原文的位置，每条一项、按出现顺序，最多列出 20 条：start 是这条提示词开头约 20 个字，end 是结尾约 20 个字，二者都必须从原始输入里逐字照抄（包括标点与空格，不翻译、不改写）；原始输入里没有提示词就给空数组。",
     input.similar.length
       ? `overlap 判断本卡与上面「候选相似卡」列表中最相关的一张的关系：relation 在 none（无关）、duplicate（与对方重复）、upgrade（本卡是对方的升级版）、superseded（本卡已被对方取代）、complement（与对方互补）之间选；target 必须原样填写候选列表里给出的编号（如 TOL-0009），relation 为 none 时 target 必须为 null；严禁引用候选列表以外的编号；reason 用一句不超过 80 字的中文说明判断依据。`
       : "候选相似卡列表为空，overlap.relation 必须填 none，overlap.target 必须为 null，reason 说明库里暂无相似能力。",
@@ -132,7 +142,8 @@ function deepSubjectText(subject: DeepSubject): string {
     `摘要要点：${(subject.summary_points ?? []).length ? (subject.summary_points ?? []).map((p) => `**${p.label}。** ${p.text}`).join(" ") : "（无）"}`,
     `标签：${subject.tags.join(", ") || "（无）"}`,
     `已有来源链接：${subject.source_url ?? "（无）"}`,
-    `Playbook：${JSON.stringify(subject.playbook)}`
+    `Playbook：${JSON.stringify(subject.playbook)}`,
+    PROMPTS_STORED_SEPARATELY
   ].join("\n");
 }
 
@@ -237,7 +248,7 @@ export function enrichPrompt(subject: EnrichSubject, canonical: CanonicalResult,
       "summary 是引子：一句话（≤ 120 字）说明这个能力是什么，不展开细节，细节交给 summary_points；只写关于能力的事实性描述，绝不能复述你是怎么核实/抓取/搜索的，禁止出现「经核实」「未直接证实」「抓取失败」这类过程叙述占据正文；来源是否可信、有没有核实到，只放进 signals 里恰好一条，不得写进 summary；",
       "summary_points 给 3–5 条 `{ label, text }`：label 是不超过 8 字的短标签（如「定位」「适用场景」「限制」「用法」），text 是不超过 60 字的一句说明句，呈现为 `**label。** text` 的效果；每条只讲一件事——它解决什么问题、怎么用、适合谁、边界/局限在哪等，绝不能把一整段话塞进一条 point，也不能让多条 point 重复同一件事；这部分承接 summary 留白的细节，合起来才是完整的能力说明；",
       "signals 给 2–3 条价值信号，其中恰好一条专门讲来源可信度/是否已核实，其余讲解决什么场景、适用边界等；",
-      "prompt 原文由系统单独保存，不要在 summary、summary_points、playbook 里复述提示词原文；playbook 按 usage/type 给可执行内容：integrate 给 install 命令、repo；reference 给借鉴要点；experience 类型必须把核心内容本身写进 content；",
+      `${PROMPTS_STORED_SEPARATELY}也不要在 summary、summary_points、playbook 里复述提示词原文；playbook 按 usage/type 给可执行内容：integrate 给 install 命令、repo；reference 给借鉴要点；experience 类型必须把核心内容本身写进 content；`,
       subject.pinned ? "" : `tags 给 1–6 个标签，规则同第一轮：必须是英文小写单词或用连字符连接的短语，不能是中文，不能是 ${RESERVED_TAGS.join("、")} 这类类型/用途词；接入方式明确时使用 ${INTERFACE_TAGS.join("、")} 中的固定标签；已有贴切的标签要复用；`
     ].filter(Boolean).join(""),
     `score 给这个能力对 Joey 的 AI 价值打 1–5 分整数，${SCORE_RUBRIC}score_reason 用一句不超过 80 字的中文说明打分依据。`,

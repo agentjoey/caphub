@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { PROMPTS_STORED_SEPARATELY } from "./prompts";
 import { reviewCapability } from "./review";
 
 function makePool(rows: { run_id?: string; card?: unknown; reason_output?: unknown } | null) {
@@ -57,5 +58,16 @@ describe("reviewCapability", () => {
     await reviewCapability({ pool, call }, "cab_1", new AbortController().signal);
     expect(seenPrompt).not.toMatch(/verdict_by/);
     expect(seenPrompt).not.toMatch(/notified_at/);
+  });
+
+  it("tells the reviewer prompts are stored separately, so a missing playbook prompt isn't marked down or raised as an open question", async () => {
+    const { pool } = makePool({ run_id: "run_1", card: { title: "t" }, reason_output: { title: "t" } });
+    let seenPrompt = "";
+    const call = { provider: "deepseek", model: "d", invoke: async (input: { prompt: string }) => {
+      seenPrompt = input.prompt;
+      return { value: { agrees: true, points: [] }, usage: { inputTokens: 1, outputTokens: 1 } };
+    } };
+    await reviewCapability({ pool, call }, "cab_1", new AbortController().signal);
+    expect(seenPrompt).toContain(PROMPTS_STORED_SEPARATELY);
   });
 });

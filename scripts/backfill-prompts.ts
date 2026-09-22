@@ -17,12 +17,23 @@ export interface BackfillRow {
  * vision transcription was made from the original image at analysis time; a text capture's old
  * playbook prompt is only trusted if it appears verbatim in the capture. Tolerates non-array
  * vision_output.prompts (treats as absent, falls back to prompt_text).
+ *
+ * `maybeMultiple: true` flags a filled row picked from the old single-string
+ * `vision_output.prompt_text` (pre-dates the new `prompts` array) whose text contains a blank
+ * line ("\n\n") -- a heuristic hint that this one old transcription probably ran several
+ * separate prompts together, for the human to split by hand from the dry-run log. It never
+ * changes what gets stored.
  */
-export function pickBackfill(row: BackfillRow): { prompts: string[] } | { unresolved: string } {
+export function pickBackfill(row: BackfillRow): { prompts: string[]; maybeMultiple?: boolean } | { unresolved: string } {
   const visionPrompts = Array.isArray(row.vision_output?.prompts) ? row.vision_output.prompts : [];
-  const fromVision = (visionPrompts.length > 0 ? visionPrompts : (row.vision_output?.prompt_text ? [row.vision_output.prompt_text] : []))
+  const oldPromptText = row.vision_output?.prompt_text ?? null;
+  const fromVision = (visionPrompts.length > 0 ? visionPrompts : (oldPromptText ? [oldPromptText] : []))
     .filter((p) => p.trim() !== "" && p.length <= MAX_PROMPT_CHARS);
-  if (fromVision.length > 0) return { prompts: fromVision };
+  if (fromVision.length > 0) {
+    const usedOldPromptText = visionPrompts.length === 0 && !!oldPromptText;
+    if (usedOldPromptText && oldPromptText.includes("\n\n")) return { prompts: fromVision, maybeMultiple: true };
+    return { prompts: fromVision };
+  }
   const legacy = row.playbook.prompt_text;
   if (row.capture_kind === "text" && legacy) {
     return row.capture_text?.includes(legacy) ? { prompts: [legacy] } : { unresolved: "text capture, playbook prompt not verbatim in source" };
@@ -59,9 +70,15 @@ export async function runPromptBackfill(
     const pick = pickBackfill(row);
     if ("unresolved" in pick) {
       unresolved += 1;
-      log({ capabilityId: row.id, serial: row.serial, type: row.type, unresolved: pick.unresolved });
+      // Legacy prompt_text and capture_kind are logged in full so Joey can decide by hand from
+      // the dry-run log which of these should be filled manually.
+      log({
+        capabilityId: row.id, serial: row.serial, type: row.type, unresolved: pick.unresolved,
+        legacyPromptText: row.playbook.prompt_text ?? null, captureKind: row.capture_kind
+      });
       continue;
     }
+    const maybeMultipleField = pick.maybeMultiple ? { maybeMultiple: true as const } : {};
     if (apply) {
       const { rowCount } = await pool.query(
         `UPDATE caphub_v2.capabilities SET prompts = $2::jsonb, playbook = playbook - 'prompt_text'
@@ -73,11 +90,11 @@ export async function runPromptBackfill(
         log({ capabilityId: row.id, skipped: "prompts already set" });
       } else {
         filled += 1;
-        log({ capabilityId: row.id, serial: row.serial, type: row.type, prompts: pick.prompts, applied: true });
+        log({ capabilityId: row.id, serial: row.serial, type: row.type, prompts: pick.prompts, applied: true, ...maybeMultipleField });
       }
     } else {
       filled += 1;
-      log({ capabilityId: row.id, serial: row.serial, type: row.type, prompts: pick.prompts, applied: false });
+      log({ capabilityId: row.id, serial: row.serial, type: row.type, prompts: pick.prompts, applied: false, ...maybeMultipleField });
     }
   }
   log({ filled, unresolved, skipped, mode: apply ? "apply" : "dry-run" });

@@ -8,16 +8,23 @@ function escapeRegExp(s: string): string {
 }
 
 /**
- * Finds `anchor` in `source` at or after `from`: exact first, then whitespace-insensitive
- * (each whitespace run in the anchor matches any whitespace run in the source). Returns the
- * source span, so whatever is sliced later is the source's own characters.
+ * Finds `anchor` in `source` at or after `from`: exact first, then whitespace-insensitive.
+ * The fallback strips all whitespace from the anchor and allows optional whitespace (`\s*`)
+ * between every pair of adjacent non-whitespace characters -- not just where the anchor still
+ * has a whitespace run. A CJK anchor that spans a source line break often comes back from the
+ * model with the line break dropped entirely (no space at all, e.g. "行结尾第二行" for source
+ * "...行结尾\n第二行..."), so anchoring only on the anchor's own whitespace runs would miss it;
+ * allowing whitespace between every character catches that case too. Returns the source span,
+ * so whatever is sliced later is the source's own characters.
  */
 function findAnchor(source: string, anchor: string, from: number): { index: number; end: number } | null {
   const needle = anchor.trim();
   if (!needle) return null;
   const exact = source.indexOf(needle, from);
   if (exact !== -1) return { index: exact, end: exact + needle.length };
-  const pattern = new RegExp(needle.split(/\s+/).map(escapeRegExp).join("\\s+"), "g");
+  const chars = [...needle].filter((c) => !/\s/.test(c));
+  if (chars.length === 0) return null;
+  const pattern = new RegExp(chars.map(escapeRegExp).join("\\s*"), "g");
   pattern.lastIndex = from;
   const m = pattern.exec(source);
   return m ? { index: m.index, end: m.index + m[0].length } : null;
@@ -28,6 +35,11 @@ function findAnchor(source: string, anchor: string, from: number): { index: numb
  * searched from where the previous one ended; a locator whose anchors aren't both found, or
  * whose span exceeds MAX_PROMPT_CHARS, or that falls past MAX_PROMPTS, is dropped and counted
  * in `unresolved` -- never truncated or repaired.
+ *
+ * Known limitation: the end anchor is matched as the *first* occurrence at or after the start
+ * anchor, so if the end phrase also appears earlier inside the prompt's own body (a repeated
+ * phrase), the slice ends at that first occurrence instead of the model's intended end -- the
+ * located prompt then comes out shorter than the real one.
  */
 export function locatePrompts(source: string, locators: PromptLocator[]): { prompts: string[]; unresolved: number } {
   const prompts: string[] = [];
@@ -55,8 +67,19 @@ export function locatePrompts(source: string, locators: PromptLocator[]): { prom
 export function collectPrompts(input: { material: Material; extraction: Extraction | null; locators: PromptLocator[] }): { prompts: string[]; unresolved: number } {
   const { material, extraction, locators } = input;
   if (material.kind === "image") {
-    const kept = (extraction?.prompts ?? []).filter((p) => p.trim() !== "" && p.length <= MAX_PROMPT_CHARS);
-    return { prompts: kept.slice(0, MAX_PROMPTS), unresolved: 0 };
+    // Mirrors locatePrompts' own capping: a blank transcription is simply dropped (never
+    // counted), but a non-blank item past MAX_PROMPTS, or one over MAX_PROMPT_CHARS, is
+    // dropped *and* counted in `unresolved` so a 21+-prompt screenshot lands in Review instead
+    // of silently losing items.
+    let unresolved = 0;
+    const valid: string[] = [];
+    for (const p of extraction?.prompts ?? []) {
+      if (p.trim() === "") continue;
+      if (p.length > MAX_PROMPT_CHARS) { unresolved += 1; continue; }
+      valid.push(p);
+    }
+    unresolved += Math.max(0, valid.length - MAX_PROMPTS);
+    return { prompts: valid.slice(0, MAX_PROMPTS), unresolved };
   }
   const source = material.text;
   if (source === null) return { prompts: [], unresolved: locators.length };

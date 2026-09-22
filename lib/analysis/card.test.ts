@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { cardObjectSchema, cardSchema, deepAnalysisSchema, deepFactsSchema, deepPlanSchema, extractionSchema, finalizeSourceFacts, isValidTag, playbookSchema, scoreResultSchema } from "./card";
+import { cardObjectSchema, cardSchema, deepAnalysisSchema, deepFactsSchema, deepPlanSchema, extractionSchema, finalizeSourceFacts, isValidTag, MAX_PROMPT_ITEMS_ACCEPTED, playbookSchema, scoreResultSchema } from "./card";
 
 const valid = {
   title: "用 Playwright 生成 axe 可访问性报告", type: "skill", summary: "一段摘要",
@@ -435,10 +435,14 @@ describe("deepAnalysisSchema grounding", () => {
 });
 
 describe("verbatim prompt fields", () => {
-  it("extraction carries a list of transcribed prompts, capped at MAX_PROMPTS", () => {
+  it("extraction carries a list of transcribed prompts, schema-capped at MAX_PROMPT_ITEMS_ACCEPTED (looser than the MAX_PROMPTS storage cap, so a 21+-item card can still validate and go to Review instead of dying at schema validation)", () => {
     const base = { what: "w", visible_text: "", commands: [], source_hints: [], questions: [] };
     expect(extractionSchema.parse({ ...base, prompts: ["a", "b"] }).prompts).toEqual(["a", "b"]);
-    expect(() => extractionSchema.parse({ ...base, prompts: Array(21).fill("x") })).toThrow();
+    // 21..50 must validate (this used to reject at 21, the old MAX_PROMPTS cap).
+    for (const n of [21, 35, MAX_PROMPT_ITEMS_ACCEPTED]) {
+      expect(extractionSchema.parse({ ...base, prompts: Array(n).fill("x") }).prompts).toHaveLength(n);
+    }
+    expect(() => extractionSchema.parse({ ...base, prompts: Array(MAX_PROMPT_ITEMS_ACCEPTED + 1).fill("x") })).toThrow();
   });
 
   it("integrate playbooks no longer carry prompt text", () => {
@@ -450,5 +454,14 @@ describe("verbatim prompt fields", () => {
     const shape = cardObjectSchema.shape.prompt_locators;
     expect(shape.parse(undefined)).toEqual([]);
     expect(() => shape.parse([{ start: "x".repeat(81), end: "y" }])).toThrow();
+  });
+
+  it("cards accept 21..50 prompt_locators (schema cap), not just up to the 20-item storage cap", () => {
+    const shape = cardObjectSchema.shape.prompt_locators;
+    const locator = { start: "s", end: "e" };
+    for (const n of [21, 35, MAX_PROMPT_ITEMS_ACCEPTED]) {
+      expect(shape.parse(Array(n).fill(locator))).toHaveLength(n);
+    }
+    expect(() => shape.parse(Array(MAX_PROMPT_ITEMS_ACCEPTED + 1).fill(locator))).toThrow();
   });
 });

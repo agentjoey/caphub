@@ -61,6 +61,13 @@ describe("locatePrompts", () => {
     expect(out.prompts).toHaveLength(20);
     expect(out.unresolved).toBe(2);
   });
+
+  it("falls back to per-character whitespace matching when a CJK anchor spanning a line break loses its space entirely", () => {
+    const source = "第一行结尾\n第二行开头";
+    const out = locatePrompts(source, [{ start: "行结尾第二行", end: "行开头" }]);
+    expect(out.unresolved).toBe(0);
+    expect(out.prompts).toEqual(["行结尾\n第二行开头"]);
+  });
 });
 
 describe("collectPrompts", () => {
@@ -74,6 +81,22 @@ describe("collectPrompts", () => {
   it("drops blank transcriptions for an image", () => {
     const out = collectPrompts({ material: { kind: "image", png: new Uint8Array(), ocrText: "", width: 1, height: 1 }, extraction: { ...extraction, prompts: ["  ", "ok"] }, locators: [] });
     expect(out.prompts).toEqual(["ok"]);
+    expect(out.unresolved).toBe(0);
+  });
+
+  it("caps an image's transcribed prompts at MAX_PROMPTS and counts the rest unresolved, instead of failing the whole run", () => {
+    const prompts = Array.from({ length: 22 }, (_, i) => `prompt ${i}`);
+    const out = collectPrompts({ material: { kind: "image", png: new Uint8Array(), ocrText: "", width: 1, height: 1 }, extraction: { ...extraction, prompts }, locators: [] });
+    expect(out.prompts).toHaveLength(20);
+    expect(out.prompts).toEqual(prompts.slice(0, 20));
+    expect(out.unresolved).toBe(2);
+  });
+
+  it("blank items are dropped without being counted, while over-length items count as unresolved", () => {
+    const over = "字".repeat(20_001);
+    const out = collectPrompts({ material: { kind: "image", png: new Uint8Array(), ocrText: "", width: 1, height: 1 }, extraction: { ...extraction, prompts: ["  ", over, "ok"] }, locators: [] });
+    expect(out.prompts).toEqual(["ok"]);
+    expect(out.unresolved).toBe(1);
   });
 
   it("locates against the text capture", () => {
