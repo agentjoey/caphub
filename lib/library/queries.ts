@@ -1,8 +1,10 @@
 import type { Pool } from "pg";
 import type { CapabilityType, DeepAnalysis, Overlap, Playbook, ReviewNote, SourceFacts } from "../analysis/card";
+import { videoExtractionSchema, VIDEO_CLIP_SEC } from "../analysis/card";
 import { type Progress } from "./labels";
 import { toVectorLiteral } from "../analysis/embedding";
 import { formatSerial, parseSerialQuery } from "./serial";
+import { parseYouTubeUrl } from "../analysis/material/youtube";
 import type { BuildNote } from "./build-notes";
 
 export const PAGE_SIZE = 20;
@@ -258,6 +260,17 @@ export async function allTags(pool: Q): Promise<Array<{ name: string; count: num
 }
 
 export interface StepSummary { step: string; provider: string; model: string; attempt: number; ok: boolean; error: string | null; durationMs: number; inputTokens: number | null; outputTokens: number | null }
+
+export interface VideoDetail {
+  videoId: string;
+  title: string | null;
+  channel: string | null;
+  durationSec: number | null;
+  clipped: boolean;
+  failed: boolean;
+  moments: Array<{ t: string; note: string }>;
+}
+
 export interface CapabilityDetail extends CapabilityRow {
   steps: StepSummary[]; sources: Array<{ title: string; url: string }>; runPipeline: string; runState: string; runId: string;
   /** The original image's retention window, so a purged original's card can point at its thumbnail with an honest date. Null for non-image captures or ones never tracked for retention. */
@@ -277,6 +290,69 @@ export interface CapabilityDetail extends CapabilityRow {
   enrichedAt: string | null;
   /** Append-only agent self-build progress notes (M4), oldest first; `[]` for a card never written to since migration 013. */
   buildNotes: BuildNote[];
+  /** YouTube video details extracted from analysis steps; null for non-YouTube captures or when extraction failed. */
+  video: VideoDetail | null;
+}
+
+/**
+ * Pure function to assemble VideoDetail from a capture URL and analysis steps.
+ * Returns null if the URL is not a YouTube URL or if no metadata fetch succeeded.
+ * - Extracts videoId from the URL
+ * - Finds the last successful fetch/youtube step for metadata (required)
+ * - Finds the last successful vision/gemini step for key moments
+ * - Sets clipped=true if durationSec > VIDEO_CLIP_SEC
+ * - Sets failed=true if no successful vision extraction exists
+ */
+export function buildVideoDetail(
+  captureUrl: string | null,
+  steps: Array<{ step: string; provider: string; ok: boolean; output: unknown }>
+): VideoDetail | null {
+  if (!captureUrl) return null;
+
+  const videoId = parseYouTubeUrl(captureUrl);
+  if (!videoId) return null;
+
+  // Find last successful fetch/youtube step — required for metadata
+  const fetchStep = steps.findLast(
+    (s) => s.step === "fetch" && s.provider === "youtube" && s.ok
+  );
+  if (!fetchStep) return null;
+
+  const meta = fetchStep.output as { title?: string | null; channel?: string | null; durationSec?: number | null } | null;
+
+  // Find last successful vision/gemini step
+  const visionStep = steps.findLast(
+    (s) => s.step === "vision" && s.provider === "gemini" && s.ok
+  );
+  const visionOutput = visionStep?.output;
+
+  // Validate key_moments from vision output
+  let moments: Array<{ t: string; note: string }> = [];
+  let failed = !visionStep;
+
+  if (visionOutput) {
+    const momentsValidation = videoExtractionSchema.shape.key_moments.safeParse(
+      (visionOutput as Record<string, unknown>).key_moments
+    );
+    if (momentsValidation.success) {
+      moments = momentsValidation.data;
+    } else {
+      failed = true;
+    }
+  }
+
+  const durationSec = meta?.durationSec ?? null;
+  const clipped = (durationSec ?? 0) > VIDEO_CLIP_SEC;
+
+  return {
+    videoId,
+    title: meta?.title ?? null,
+    channel: meta?.channel ?? null,
+    durationSec,
+    clipped,
+    failed,
+    moments
+  };
 }
 
 export async function getCapabilityDetail(pool: Q, id: string): Promise<CapabilityDetail | null> {
@@ -301,15 +377,17 @@ export async function getCapabilityDetail(pool: Q, id: string): Promise<Capabili
   const supersededBySerial = supersededByType ? formatSerial(supersededByType, supersededBySerialNum) : null;
   const steps = (await pool.query<StepSummary & { output: unknown }>(
     `SELECT step, provider, model, attempt, ok, error, duration_ms AS "durationMs", input_tokens AS "inputTokens",
-            output_tokens AS "outputTokens", CASE WHEN step = 'search' AND ok THEN output ELSE NULL END AS output
+            output_tokens AS "outputTokens", CASE WHEN (step = 'search' AND ok) OR (step = 'fetch' AND provider = 'youtube') OR (step = 'vision' AND provider = 'gemini') THEN output ELSE NULL END AS output
      FROM caphub_v2.analysis_steps WHERE run_id = $1 ORDER BY id`, [row.runId])).rows;
   const search = steps.find((s) => s.step === "search" && s.ok)?.output as { sources?: Array<{ title: string; url: string }> } | undefined;
+  const video = buildVideoDetail(row.capture.url, steps.map((s) => ({ step: s.step, provider: s.provider, ok: s.ok, output: s.output })));
   const rest = toIso(rowRest);
   return {
     ...rest,
     buildNotes: rest.buildNotes ?? [],
     supersededBySerial,
     steps: steps.map(({ output: _o, ...s }) => { void _o; return s; }),
-    sources: (search?.sources ?? []).map((s) => ({ title: s.title, url: s.url }))
+    sources: (search?.sources ?? []).map((s) => ({ title: s.title, url: s.url })),
+    video
   };
 }

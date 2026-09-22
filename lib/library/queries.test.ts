@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { listLibrary, listPending, listTodoCapabilities, libraryStats, scenarioStats, allTags, getCapabilityDetail, PAGE_SIZE, SEMANTIC_MIN, TO_BUILD_PROGRESS, TODO_PROGRESS } from "./queries";
+import { listLibrary, listPending, listTodoCapabilities, libraryStats, scenarioStats, allTags, getCapabilityDetail, buildVideoDetail, PAGE_SIZE, SEMANTIC_MIN, TO_BUILD_PROGRESS, TODO_PROGRESS } from "./queries";
 
 function recorder(rows: unknown[][]) {
   const calls: Array<{ text: string; values: unknown[] }> = [];
@@ -259,5 +259,177 @@ describe("library queries", () => {
     ]);
     const detail = await getCapabilityDetail(pool, "cab_1");
     expect(detail?.supersededBySerial).toBeNull();
+  });
+
+  describe("buildVideoDetail", () => {
+    it("returns null when captureUrl is null or empty", () => {
+      const steps: Array<{ step: string; provider: string; ok: boolean; output: unknown }> = [];
+      expect(buildVideoDetail(null, steps)).toBeNull();
+      expect(buildVideoDetail("", steps)).toBeNull();
+    });
+
+    it("returns null when URL is not a YouTube URL", () => {
+      const steps: Array<{ step: string; provider: string; ok: boolean; output: unknown }> = [];
+      expect(buildVideoDetail("https://example.com", steps)).toBeNull();
+      expect(buildVideoDetail("https://vimeo.com/123", steps)).toBeNull();
+      expect(buildVideoDetail("not-a-url", steps)).toBeNull();
+    });
+
+    it("returns null when YouTube URL is valid but has no fetch or vision steps", () => {
+      const steps: Array<{ step: string; provider: string; ok: boolean; output: unknown }> = [
+        { step: "search", provider: "tavily", ok: true, output: { sources: [] } }
+      ];
+      expect(buildVideoDetail("https://www.youtube.com/watch?v=dQw4w9WgXcQ", steps)).toBeNull();
+    });
+
+    it("extracts videoId from standard YouTube URL", () => {
+      const videoId = "dQw4w9WgXcQ";
+      const steps: Array<{ step: string; provider: string; ok: boolean; output: unknown }> = [
+        { step: "fetch", provider: "youtube", ok: true, output: { title: "Test", channel: "User", publishedAt: "2026-01-01", durationSec: 180, description: "" } },
+        { step: "vision", provider: "gemini", ok: true, output: { what: "test", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [], key_moments: [] } }
+      ];
+      const result = buildVideoDetail(`https://www.youtube.com/watch?v=${videoId}`, steps);
+      expect(result?.videoId).toBe(videoId);
+    });
+
+    it("extracts videoId from youtu.be shortlink", () => {
+      const videoId = "dQw4w9WgXcQ";
+      const steps: Array<{ step: string; provider: string; ok: boolean; output: unknown }> = [
+        { step: "fetch", provider: "youtube", ok: true, output: { title: "Test", channel: "User", publishedAt: "2026-01-01", durationSec: 180, description: "" } },
+        { step: "vision", provider: "gemini", ok: true, output: { what: "test", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [], key_moments: [] } }
+      ];
+      const result = buildVideoDetail(`https://youtu.be/${videoId}`, steps);
+      expect(result?.videoId).toBe(videoId);
+    });
+
+    it("extracts YouTube metadata from last successful fetch/youtube step", () => {
+      const steps: Array<{ step: string; provider: string; ok: boolean; output: unknown }> = [
+        { step: "fetch", provider: "youtube", ok: false, output: null },
+        { step: "fetch", provider: "youtube", ok: true, output: { title: "Old", channel: "OldUser", publishedAt: "2026-01-01", durationSec: 100, description: "old" } },
+        { step: "fetch", provider: "youtube", ok: true, output: { title: "New", channel: "NewUser", publishedAt: "2026-02-01", durationSec: 200, description: "new" } },
+        { step: "vision", provider: "gemini", ok: true, output: { what: "test", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [], key_moments: [] } }
+      ];
+      const result = buildVideoDetail("https://www.youtube.com/watch?v=dQw4w9WgXcQ", steps);
+      expect(result?.title).toBe("New");
+      expect(result?.channel).toBe("NewUser");
+      expect(result?.durationSec).toBe(200);
+    });
+
+    it("sets clipped=true when durationSec > VIDEO_CLIP_SEC", () => {
+      const steps: Array<{ step: string; provider: string; ok: boolean; output: unknown }> = [
+        { step: "fetch", provider: "youtube", ok: true, output: { title: "Long", channel: "User", publishedAt: "2026-01-01", durationSec: 6000, description: "" } },
+        { step: "vision", provider: "gemini", ok: true, output: { what: "test", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [], key_moments: [] } }
+      ];
+      const result = buildVideoDetail("https://www.youtube.com/watch?v=dQw4w9WgXcQ", steps);
+      expect(result?.clipped).toBe(true);
+    });
+
+    it("sets clipped=false when durationSec <= VIDEO_CLIP_SEC", () => {
+      const steps: Array<{ step: string; provider: string; ok: boolean; output: unknown }> = [
+        { step: "fetch", provider: "youtube", ok: true, output: { title: "Short", channel: "User", publishedAt: "2026-01-01", durationSec: 600, description: "" } },
+        { step: "vision", provider: "gemini", ok: true, output: { what: "test", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [], key_moments: [] } }
+      ];
+      const result = buildVideoDetail("https://www.youtube.com/watch?v=dQw4w9WgXcQ", steps);
+      expect(result?.clipped).toBe(false);
+    });
+
+    it("sets clipped=false when durationSec is null", () => {
+      const steps: Array<{ step: string; provider: string; ok: boolean; output: unknown }> = [
+        { step: "fetch", provider: "youtube", ok: true, output: { title: "Unknown", channel: "User", publishedAt: "2026-01-01", durationSec: null, description: "" } },
+        { step: "vision", provider: "gemini", ok: true, output: { what: "test", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [], key_moments: [] } }
+      ];
+      const result = buildVideoDetail("https://www.youtube.com/watch?v=dQw4w9WgXcQ", steps);
+      expect(result?.clipped).toBe(false);
+    });
+
+    it("sets failed=true when no successful vision/gemini step exists", () => {
+      const steps: Array<{ step: string; provider: string; ok: boolean; output: unknown }> = [
+        { step: "fetch", provider: "youtube", ok: true, output: { title: "Test", channel: "User", publishedAt: "2026-01-01", durationSec: 180, description: "" } },
+        { step: "vision", provider: "gemini", ok: false, output: null }
+      ];
+      const result = buildVideoDetail("https://www.youtube.com/watch?v=dQw4w9WgXcQ", steps);
+      expect(result?.failed).toBe(true);
+      expect(result?.moments).toEqual([]);
+    });
+
+    it("sets failed=false when successful vision/gemini step exists", () => {
+      const steps: Array<{ step: string; provider: string; ok: boolean; output: unknown }> = [
+        { step: "fetch", provider: "youtube", ok: true, output: { title: "Test", channel: "User", publishedAt: "2026-01-01", durationSec: 180, description: "" } },
+        { step: "vision", provider: "gemini", ok: true, output: { what: "test", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [], key_moments: [{ t: "1:30", note: "Key point" }] } }
+      ];
+      const result = buildVideoDetail("https://www.youtube.com/watch?v=dQw4w9WgXcQ", steps);
+      expect(result?.failed).toBe(false);
+    });
+
+    it("extracts key_moments from last successful vision/gemini step", () => {
+      const steps: Array<{ step: string; provider: string; ok: boolean; output: unknown }> = [
+        { step: "fetch", provider: "youtube", ok: true, output: { title: "Test", channel: "User", publishedAt: "2026-01-01", durationSec: 180, description: "" } },
+        { step: "vision", provider: "gemini", ok: true, output: { what: "old", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [], key_moments: [{ t: "0:30", note: "Old" }] } },
+        { step: "vision", provider: "gemini", ok: true, output: { what: "new", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [], key_moments: [{ t: "1:30", note: "New" }, { t: "2:00", note: "Another" }] } }
+      ];
+      const result = buildVideoDetail("https://www.youtube.com/watch?v=dQw4w9WgXcQ", steps);
+      expect(result?.moments).toEqual([{ t: "1:30", note: "New" }, { t: "2:00", note: "Another" }]);
+    });
+
+    it("returns empty moments array when key_moments is undefined in output", () => {
+      const steps: Array<{ step: string; provider: string; ok: boolean; output: unknown }> = [
+        { step: "fetch", provider: "youtube", ok: true, output: { title: "Test", channel: "User", publishedAt: "2026-01-01", durationSec: 180, description: "" } },
+        { step: "vision", provider: "gemini", ok: true, output: { what: "test", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [] } }
+      ];
+      const result = buildVideoDetail("https://www.youtube.com/watch?v=dQw4w9WgXcQ", steps);
+      expect(result?.moments).toEqual([]);
+    });
+
+    it("returns empty moments and failed=true when vision output has invalid key_moments structure", () => {
+      const steps: Array<{ step: string; provider: string; ok: boolean; output: unknown }> = [
+        { step: "fetch", provider: "youtube", ok: true, output: { title: "Test", channel: "User", publishedAt: "2026-01-01", durationSec: 180, description: "" } },
+        { step: "vision", provider: "gemini", ok: true, output: { what: "test", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [], key_moments: "invalid" } }
+      ];
+      const result = buildVideoDetail("https://www.youtube.com/watch?v=dQw4w9WgXcQ", steps);
+      expect(result?.moments).toEqual([]);
+      expect(result?.failed).toBe(true);
+    });
+
+    it("handles mixed valid and invalid key_moments by validating the array", () => {
+      const steps: Array<{ step: string; provider: string; ok: boolean; output: unknown }> = [
+        { step: "fetch", provider: "youtube", ok: true, output: { title: "Test", channel: "User", publishedAt: "2026-01-01", durationSec: 180, description: "" } },
+        { step: "vision", provider: "gemini", ok: true, output: { what: "test", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [], key_moments: [{ t: "1:30", note: "Valid" }, { t: "invalid", note: "Invalid" }] } }
+      ];
+      const result = buildVideoDetail("https://www.youtube.com/watch?v=dQw4w9WgXcQ", steps);
+      // Invalid structure means failed=true and moments=[]
+      expect(result?.moments).toEqual([]);
+      expect(result?.failed).toBe(true);
+    });
+
+    it("returns all metadata fields null when fetch step has null/missing fields", () => {
+      const steps: Array<{ step: string; provider: string; ok: boolean; output: unknown }> = [
+        { step: "fetch", provider: "youtube", ok: true, output: { title: null, channel: null, publishedAt: null, durationSec: null, description: null } },
+        { step: "vision", provider: "gemini", ok: true, output: { what: "test", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [], key_moments: [] } }
+      ];
+      const result = buildVideoDetail("https://www.youtube.com/watch?v=dQw4w9WgXcQ", steps);
+      expect(result?.title).toBeNull();
+      expect(result?.channel).toBeNull();
+      expect(result?.durationSec).toBeNull();
+    });
+
+    it("ignores fetch steps with other providers", () => {
+      const steps: Array<{ step: string; provider: string; ok: boolean; output: unknown }> = [
+        { step: "fetch", provider: "other", ok: true, output: { title: "Other", channel: "Other", publishedAt: "2026-01-01", durationSec: 100, description: "" } },
+        { step: "fetch", provider: "youtube", ok: true, output: { title: "YouTube", channel: "YouTube", publishedAt: "2026-01-01", durationSec: 200, description: "" } },
+        { step: "vision", provider: "gemini", ok: true, output: { what: "test", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [], key_moments: [] } }
+      ];
+      const result = buildVideoDetail("https://www.youtube.com/watch?v=dQw4w9WgXcQ", steps);
+      expect(result?.title).toBe("YouTube");
+    });
+
+    it("ignores vision steps with other providers", () => {
+      const steps: Array<{ step: string; provider: string; ok: boolean; output: unknown }> = [
+        { step: "fetch", provider: "youtube", ok: true, output: { title: "Test", channel: "User", publishedAt: "2026-01-01", durationSec: 180, description: "" } },
+        { step: "vision", provider: "other", ok: true, output: { key_moments: [{ t: "0:30", note: "Other" }] } },
+        { step: "vision", provider: "gemini", ok: true, output: { what: "test", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [], key_moments: [{ t: "1:30", note: "Gemini" }] } }
+      ];
+      const result = buildVideoDetail("https://www.youtube.com/watch?v=dQw4w9WgXcQ", steps);
+      expect(result?.moments).toEqual([{ t: "1:30", note: "Gemini" }]);
+    });
   });
 });

@@ -44,6 +44,7 @@ function detailRow(overrides: Partial<CapabilityDetail> = {}) {
     deepRunState: null, deepRunErrorCode: null,
     openQuestions: ["需要付费吗"], enrichedAt: null,
     steps: [], sources: [],
+    video: null,
     ...overrides
   } as unknown as CapabilityDetail;
 }
