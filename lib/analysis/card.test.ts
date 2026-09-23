@@ -481,7 +481,10 @@ describe("videoExtractionSchema", () => {
 
   it("accepts key moments with mm:ss or h:mm:ss and defaults to []", () => {
     expect(videoExtractionSchema.parse(base).key_moments).toEqual([]);
-    expect(videoExtractionSchema.parse({ ...base, key_moments: [{ t: "01:57", note: "n" }, { t: "1:02:03", note: "m" }] }).key_moments).toHaveLength(2);
-    expect(() => videoExtractionSchema.parse({ ...base, key_moments: [{ t: "1m", note: "n" }] })).toThrow();
+    // Same field name as content_points: Gemini kept writing "point" here (2026-09-23), so the
+    // schema follows it rather than failing whole video runs over a field name.
+    expect(() => videoExtractionSchema.parse({ ...base, key_moments: [{ t: "01:57", note: "old name" }] })).toThrow();
+    expect(videoExtractionSchema.parse({ ...base, key_moments: [{ t: "01:57", point: "n" }, { t: "1:02:03", point: "m" }] }).key_moments).toHaveLength(2);
+    expect(() => videoExtractionSchema.parse({ ...base, key_moments: [{ t: "1m", point: "n" }] })).toThrow();
   });
 });

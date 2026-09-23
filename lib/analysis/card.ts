@@ -39,9 +39,14 @@ export const videoExtractionSchema = extractionSchema.extend({
     t: z.string().regex(/^\d{1,2}:\d{2}(?::\d{2})?$/).nullable(),
     point: z.string().min(1).max(200)
   })).max(12).default([]),
+  /**
+   * Same `{ t, point }` field names as content_points: with a separate `note` field Gemini kept
+   * writing `point` here, failing the video step twice in a row (2026-09-23). Cards stored before
+   * the rename carry `note`; lib/library/queries.ts's buildVideoDetail reads both.
+   */
   key_moments: z.array(z.object({
     t: z.string().regex(/^\d{1,2}:\d{2}(?::\d{2})?$/),
-    note: z.string().min(1).max(120)
+    point: z.string().min(1).max(120)
   })).max(8).default([])
 });
 export type VideoExtraction = z.infer<typeof videoExtractionSchema>;

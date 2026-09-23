@@ -577,7 +577,7 @@ describe("runPipeline", () => {
       // Production 2026-09-22 (run_eebbd3d1e7caa01e): video attempt 1 invalid (key_moments without
       // note), attempt 2 fine, then reason attempt 1 invalid -- the 4-call cap left no room for the
       // reason retry and the whole run failed with BUDGET.
-      const badVideo = { ...extraction, key_moments: [{ t: "00:10", point: "wrong field name" }] };
+      const badVideo = { ...extraction, key_moments: [{ t: "10 sec", point: "unparseable timestamp" }] };
       const badCard = { ...card, playbook: { kind: "experience", content: "x", when_to_use: "y" } };
       const { d, calls } = deps("video", { videoSequence: [badVideo], reasonSequence: [badCard] });
       const out = await runPipeline(d, { runId: "run_video_retry", captureId: "cap_video_retry", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);

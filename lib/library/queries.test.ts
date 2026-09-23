@@ -399,6 +399,14 @@ describe("library queries", () => {
       expect(result?.moments).toEqual([{ t: "1:30", note: "New" }, { t: "2:00", note: "Another" }]);
     });
 
+    it("reads key_moments in both the current (point) and the older (note) field name", () => {
+      const fetch = { step: "fetch", provider: "youtube", ok: true, output: { title: "T", channel: "C", durationSec: 100 } };
+      const current = buildVideoDetail("https://youtu.be/C-RdbraCrew", [fetch, { step: "vision", provider: "gemini", ok: true, output: { key_moments: [{ t: "00:57", point: "new" }] } }] as never);
+      expect(current!.moments).toEqual([{ t: "00:57", note: "new" }]);
+      const older = buildVideoDetail("https://youtu.be/C-RdbraCrew", [fetch, { step: "vision", provider: "gemini", ok: true, output: { key_moments: [{ t: "00:57", note: "old" }] } }] as never);
+      expect(older!.moments).toEqual([{ t: "00:57", note: "old" }]);
+    });
+
     it("returns empty moments array when key_moments is undefined in output", () => {
       const steps: Array<{ step: string; provider: string; ok: boolean; output: unknown }> = [
         { step: "fetch", provider: "youtube", ok: true, output: { title: "Test", channel: "User", publishedAt: "2026-01-01", durationSec: 180, description: "" } },

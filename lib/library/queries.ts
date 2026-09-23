@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { Pool } from "pg";
 import type { CapabilityType, DeepAnalysis, Overlap, Playbook, ReviewNote, SourceFacts } from "../analysis/card";
 import { videoExtractionSchema, VIDEO_CLIP_SEC } from "../analysis/card";
@@ -333,11 +334,9 @@ export function buildVideoDetail(
   // Validate key_moments from vision output
   let moments: Array<{ t: string; note: string }> = [];
   if (visionOutput) {
-    const momentsValidation = videoExtractionSchema.shape.key_moments.safeParse(
-      (visionOutput as Record<string, unknown>).key_moments
-    );
+    const momentsValidation = storedKeyMomentsSchema.safeParse((visionOutput as Record<string, unknown>).key_moments);
     if (momentsValidation.success) {
-      moments = momentsValidation.data;
+      moments = momentsValidation.data.map((m) => ({ t: m.t, note: "point" in m ? m.point : m.note }));
     }
     // If invalid key_moments, moments stays [] but extraction still happened
   }
@@ -366,6 +365,15 @@ export function buildVideoDetail(
     points
   };
 }
+
+/**
+ * key_moments as stored: `{ t, point }` since 2026-09-23 (videoExtractionSchema), `{ t, note }`
+ * before that. Both render the same; the current shape is tried first.
+ */
+const storedKeyMomentsSchema = z.array(z.union([
+  videoExtractionSchema.shape.key_moments.unwrap().element,
+  z.object({ t: z.string().regex(/^\d{1,2}:\d{2}(?::\d{2})?$/), note: z.string().min(1).max(120) })
+]));
 
 export async function getCapabilityDetail(pool: Q, id: string): Promise<CapabilityDetail | null> {
   const row = (await pool.query<CapabilityRow & { runPipeline: string; runState: string; runId: string; retentionEligibleAt: string | null; retentionPurgedAt: string | null; supersededByType: CapabilityType | null; supersededBySerialNum: number | null; deepAnalysis: DeepAnalysis | null; deepAnalysisOf: string | null; deepRunState: string | null; deepRunErrorCode: string | null; openQuestions: string[]; enrichedAt: string | null; buildNotes: BuildNote[] | null }>(
