@@ -340,6 +340,10 @@ describe("video prompts", () => {
     // The two timestamped lists use different field names; the prompt spells both out
     // (a key_moments list written with content_points' "point" once failed validation).
     expect(videoPrompt(meta, false)).toContain("content_points（每项字段为 t 与 point）");
+    // Only reusable prompts: a demo's test inputs to the model under evaluation are sample data
+    // (MDL-0078 once stored 11 Jev Playground state strings as prompts).
+    expect(videoPrompt(meta, false)).toContain("不收喂给被测模型的测试输入、样例数据或示例用户消息");
+    expect(videoPrompt(meta, false)).toContain("同一条提示词只收一次");
     expect(videoPrompt(meta, false)).toContain("key_moments（每项字段为 t 与 note");
   });
 
