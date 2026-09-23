@@ -13,8 +13,27 @@ const baseVideo: VideoDetail = {
   durationSec: 754,
   clipped: false,
   failed: false,
-  moments: []
+  moments: [],
+  points: []
 };
+
+describe("VideoSummary content points", () => {
+  it("lists what the video covers, deep-linking timestamps and allowing a null one", () => {
+    render(<VideoSummary video={{ ...baseVideo, points: [
+      { t: "02:15", point: "各档位额度消耗：Terra 3%、Astra Ultra 49%" },
+      { t: null, point: "全片对比同一 Prompt 的成稿质量" }
+    ] }} />);
+    expect(screen.getByRole("heading", { name: "视频要点" })).toBeTruthy();
+    expect(screen.getByText(/Astra Ultra 49%/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "02:15" }).getAttribute("href")).toBe("https://www.youtube.com/watch?v=abc123XYZ_9&t=135s");
+    expect(screen.getByText(/全片对比同一 Prompt/)).toBeTruthy();
+  });
+
+  it("renders no 视频要点 heading when there are none", () => {
+    render(<VideoSummary video={baseVideo} />);
+    expect(screen.queryByRole("heading", { name: "视频要点" })).toBeNull();
+  });
+});
 
 describe("momentSeconds", () => {
   it("parses mm:ss", () => {

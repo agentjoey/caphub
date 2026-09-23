@@ -147,6 +147,7 @@ export const dictZh = {
     videoUnknownDuration: "未知",
     videoClipped: "视频超过 90 分钟，只分析了前 90 分钟",
     videoFailed: "视频未能读取，仅依据标题与简介",
+    videoPoints: "视频要点",
     videoMoments: "关键片段"
   },
   scoreBadge: {

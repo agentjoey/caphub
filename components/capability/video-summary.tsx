@@ -12,6 +12,32 @@ export function momentSeconds(t: string): number | null {
   return parts.reduce((acc, n) => acc * 60 + n, 0);
 }
 
+/** One timestamped list (视频要点 / 关键片段): the timestamp deep-links into the video when it
+ * parses, and renders as plain text when it doesn't (or when the point spans the whole video). */
+function TimedList({ title, items, watch }: {
+  title: string; items: Array<{ t: string | null; text: string }>; watch: (sec?: number) => string;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <>
+      <h3 className="video-summary__subtitle">{title}</h3>
+      <ul className="video-moments">
+        {items.map((item, i) => {
+          const sec = item.t === null ? null : momentSeconds(item.t);
+          return (
+            <li key={i}>
+              {item.t !== null && (sec === null
+                ? <span className="video-moments__t">{item.t}</span>
+                : <a className="video-moments__t" href={watch(sec)} target="_blank" rel="noreferrer">{item.t}</a>)}
+              {item.t !== null && " "}{item.text}
+            </li>
+          );
+        })}
+      </ul>
+    </>
+  );
+}
+
 /**
  * Server Component (no interaction of its own): the capability detail page's video panel,
  * assembled from `CapabilityDetail.video` (Task 5's `buildVideoDetail`). Renders nothing for a
@@ -39,24 +65,8 @@ export function VideoSummary({ video, locale = "zh" }: { video: VideoDetail | nu
       )}
       {video.clipped && <p className="prompt-notice">{dict.videoClipped}</p>}
       {video.failed && <p className="prompt-notice">{dict.videoFailed}</p>}
-      {video.moments.length > 0 && (
-        <>
-          <h3 className="video-summary__subtitle">{dict.videoMoments}</h3>
-          <ul className="video-moments">
-            {video.moments.map((m, i) => {
-              const sec = momentSeconds(m.t);
-              return (
-                <li key={i}>
-                  {sec === null
-                    ? <span className="video-moments__t">{m.t}</span>
-                    : <a className="video-moments__t" href={watch(sec)} target="_blank" rel="noreferrer">{m.t}</a>}
-                  {" "}{m.note}
-                </li>
-              );
-            })}
-          </ul>
-        </>
-      )}
+      <TimedList title={dict.videoPoints} items={video.points.map((p) => ({ t: p.t, text: p.point }))} watch={watch} />
+      <TimedList title={dict.videoMoments} items={video.moments.map((m) => ({ t: m.t, text: m.note }))} watch={watch} />
     </section>
   );
 }

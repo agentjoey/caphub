@@ -262,6 +262,18 @@ describe("library queries", () => {
   });
 
   describe("buildVideoDetail", () => {
+
+  it("carries the video's content points, dropping malformed ones", () => {
+    const steps = [
+      { step: "fetch", provider: "youtube", ok: true, output: { title: "T", channel: "C", durationSec: 321 } },
+      { step: "vision", provider: "gemini", ok: true, output: { content_points: [{ t: "02:15", point: "p1" }, { t: null, point: "p2" }] } }
+    ];
+    const good = buildVideoDetail("https://youtu.be/C-RdbraCrew", steps as never);
+    expect(good!.points).toEqual([{ t: "02:15", point: "p1" }, { t: null, point: "p2" }]);
+    const bad = buildVideoDetail("https://youtu.be/C-RdbraCrew", [steps[0], { step: "vision", provider: "gemini", ok: true, output: { content_points: "nope" } }] as never);
+    expect(bad!.points).toEqual([]);
+    expect(bad!.failed).toBe(false);
+  });
     it("returns null when captureUrl is null or empty", () => {
       const steps: Array<{ step: string; provider: string; ok: boolean; output: unknown }> = [];
       expect(buildVideoDetail(null, steps)).toBeNull();

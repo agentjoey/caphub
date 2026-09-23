@@ -142,6 +142,7 @@ export const dictEn: Dict = {
     videoUnknownDuration: "unknown",
     videoClipped: "Longer than 90 minutes — only the first 90 were analysed",
     videoFailed: "The video could not be read; based on title and description only",
+    videoPoints: "What the video covers",
     videoMoments: "Key moments"
   },
   scoreBadge: {

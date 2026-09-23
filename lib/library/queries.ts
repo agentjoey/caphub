@@ -269,6 +269,8 @@ export interface VideoDetail {
   clipped: boolean;
   failed: boolean;
   moments: Array<{ t: string; note: string }>;
+  /** What the video itself covers, point by point (videoExtractionSchema's content_points); `t` is null when the point spans the video. */
+  points: Array<{ t: string | null; point: string }>;
 }
 
 export interface CapabilityDetail extends CapabilityRow {
@@ -340,6 +342,15 @@ export function buildVideoDetail(
     // If invalid key_moments, moments stays [] but extraction still happened
   }
 
+  // The video's own content, point by point -- the richest thing the extraction holds, and what
+  // a reader wants before deciding (Joey, 2026-09-23). Same defensive parse as key_moments:
+  // a card analysed before content_points existed simply has none.
+  let points: Array<{ t: string | null; point: string }> = [];
+  if (visionOutput) {
+    const parsed = videoExtractionSchema.shape.content_points.safeParse((visionOutput as Record<string, unknown>).content_points);
+    if (parsed.success) points = parsed.data;
+  }
+
   const durationSec = meta?.durationSec ?? null;
   const clipped = (durationSec ?? 0) > VIDEO_CLIP_SEC;
   const failed = !visionStep; // failed only when no successful vision extraction
@@ -351,7 +362,8 @@ export function buildVideoDetail(
     durationSec,
     clipped,
     failed,
-    moments
+    moments,
+    points
   };
 }
 
