@@ -76,15 +76,19 @@ describe("CapturePreview (url kind)", () => {
   });
 
   it("renders the i.ytimg thumbnail for a YouTube link (thumb)", () => {
-    render(<CapturePreview capture={youtubeUrl} size="thumb" />);
-    const img = screen.getByRole("img");
-    expect(img.getAttribute("src")).toBe("https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg");
+    const { container } = render(<CapturePreview capture={youtubeUrl} size="thumb" />);
+    const img = container.querySelector("img")!;
+    expect(img.getAttribute("src")).toBe("https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg");
+    // Decorative (always beside the title or link): hidden from assistive tech.
+    expect(img.getAttribute("alt")).toBe("");
+    expect(screen.queryByRole("img")).toBeNull();
   });
 
   it("renders the thumbnail plus the original link for a YouTube link (full)", () => {
-    render(<CapturePreview capture={youtubeUrl} size="full" />);
-    const img = screen.getByRole("img");
-    expect(img.getAttribute("src")).toBe("https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg");
+    const { container } = render(<CapturePreview capture={youtubeUrl} size="full" />);
+    const img = container.querySelector("img")!;
+    expect(img.getAttribute("src")).toBe("https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg");
+    expect(img.getAttribute("alt")).toBe("");
     const link = screen.getByRole("link", { name: youtubeUrl.url! });
     expect(link.getAttribute("href")).toBe(youtubeUrl.url);
   });

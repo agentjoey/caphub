@@ -67,3 +67,35 @@
 .mini-session-error {
   margin-bottom: var(--space-4);
 }
+
+/*
+ * Touch targets (audit 2026-09-24): the Mini App is touch-only, and the desktop density put
+ * buttons at ~37px, chips at ~28px and the inline copy buttons / timestamp links at ~24px —
+ * under the 44px Apple HIG target. Primary controls get a real 44px height; controls that sit
+ * inside a text block (copy, timestamps) keep their visual size and grow only their hit area,
+ * so the prose around them doesn't reflow.
+ */
+#mini-shell .btn,
+#mini-shell .chip {
+  min-height: 44px;
+}
+#mini-shell .code-block__copy .btn,
+#mini-shell a.video-moments__t {
+  position: relative;
+}
+#mini-shell .code-block__copy .btn::after,
+#mini-shell a.video-moments__t::after {
+  content: "";
+  position: absolute;
+  inset: -11px -8px; /* ~24px copy button → ~46px tall hit area */
+}
+#mini-shell a.video-moments__t::after {
+  inset: -14px -8px; /* ~17px timestamp text → ~45px tall hit area */
+}
+/* Timestamp rows are ~21px lines; a wider gap keeps neighbouring hit areas from overlapping much. */
+#mini-shell .video-moments {
+  gap: var(--space-4);
+}
+#mini-shell .code-block__copy .btn {
+  min-height: 0; /* visually compact; the ::after above carries the 44px hit area */
+}

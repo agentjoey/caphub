@@ -22,7 +22,7 @@ const CARD_COLUMNS = `
   cb.progress, cb.progress_link AS "progressLink", cb.progress_at AS "progressAt",
   cb.review_note AS "reviewNote", cb.review_requested_at AS "reviewRequestedAt", cb.review_error AS "reviewError",
   cb.status, cb.superseded_by AS "supersededBy", cb.status_at AS "statusAt", cb.status_note AS "statusNote", cb.overlap,
-  cb.build_notes AS "buildNotes", cb.prompts, cb.prompt_unresolved AS "promptUnresolved",
+  cb.build_notes AS "buildNotes", jsonb_array_length(cb.prompts) AS "promptCount", cb.prompt_unresolved AS "promptUnresolved",
   (cb.deep_analysis IS NOT NULL) AS "hasDeepAnalysis",
   cb.synced_at AS "syncedAt", cb.deleted_at AS "deletedAt", cb.created_at AS "createdAt", cb.updated_at AS "updatedAt",
   json_build_object('kind', c.kind, 'objectKey', c.object_key, 'thumbKey', c.thumb_key, 'text', c.text, 'url', c.url) AS capture`;
@@ -46,8 +46,8 @@ export interface CapabilityRow {
   status: CapabilityStatus; supersededBy: string | null; statusAt: string | null; statusNote: string | null;
   /** Library-overlap finding written by the analysis reason step; `target` is a serial code (e.g. "TOL-0009") or null. */
   overlap: Overlap;
-  /** Verbatim prompts taken from the input source (spec 2026-09-22); `[]` when none. Never model-written. */
-  prompts: Array<{ text: string }>;
+  /** How many verbatim prompts the card stores (spec 2026-09-22); the text itself is only loaded on the detail page (see CapabilityDetail.prompts). */
+  promptCount: number;
   /** How many prompts the last analysis could not locate verbatim in the source; > 0 sends the card to Review. */
   promptUnresolved: number;
   /** Whether this card has a stored deep analysis (M3.6 Task 4) — the 🔬 已深挖 badge and the 已深度分析 filter. The blob itself is only loaded on the detail page (see {@link CapabilityDetail}). */
@@ -275,6 +275,8 @@ export interface VideoDetail {
 }
 
 export interface CapabilityDetail extends CapabilityRow {
+  /** Verbatim prompts taken from the input source (spec 2026-09-22); `[]` when none. Never model-written. Detail-only: list rows carry just `promptCount`. */
+  prompts: Array<{ text: string }>;
   steps: StepSummary[]; sources: Array<{ title: string; url: string }>; runPipeline: string; runState: string; runId: string;
   /** The original image's retention window, so a purged original's card can point at its thumbnail with an honest date. Null for non-image captures or ones never tracked for retention. */
   retentionEligibleAt: string | null; retentionPurgedAt: string | null;
@@ -376,13 +378,13 @@ const storedKeyMomentsSchema = z.array(z.union([
 ]));
 
 export async function getCapabilityDetail(pool: Q, id: string): Promise<CapabilityDetail | null> {
-  const row = (await pool.query<CapabilityRow & { runPipeline: string; runState: string; runId: string; retentionEligibleAt: string | null; retentionPurgedAt: string | null; supersededByType: CapabilityType | null; supersededBySerialNum: number | null; deepAnalysis: DeepAnalysis | null; deepAnalysisOf: string | null; deepRunState: string | null; deepRunErrorCode: string | null; openQuestions: string[]; enrichedAt: string | null; buildNotes: BuildNote[] | null }>(
+  const row = (await pool.query<CapabilityRow & { runPipeline: string; runState: string; runId: string; retentionEligibleAt: string | null; retentionPurgedAt: string | null; supersededByType: CapabilityType | null; supersededBySerialNum: number | null; deepAnalysis: DeepAnalysis | null; deepAnalysisOf: string | null; deepRunState: string | null; deepRunErrorCode: string | null; openQuestions: string[]; enrichedAt: string | null; buildNotes: BuildNote[] | null; prompts: Array<{ text: string }> }>(
     `SELECT ${CARD_COLUMNS}, r.pipeline AS "runPipeline", r.state AS "runState", r.id AS "runId",
             ret.eligible_at AS "retentionEligibleAt", ret.purged_at AS "retentionPurgedAt",
             sup.type AS "supersededByType", sup.serial AS "supersededBySerialNum",
             cb.deep_analysis AS "deepAnalysis", cb.deep_analysis_of AS "deepAnalysisOf",
             dr.state AS "deepRunState", dr.error_code AS "deepRunErrorCode",
-            cb.open_questions AS "openQuestions", cb.enriched_at AS "enrichedAt"
+            cb.open_questions AS "openQuestions", cb.enriched_at AS "enrichedAt", cb.prompts AS "prompts"
      FROM caphub_v2.capabilities cb JOIN caphub_v2.captures c ON c.id = cb.capture_id
      JOIN caphub_v2.analysis_runs r ON r.id = cb.run_id
      LEFT JOIN caphub_v2.retention ret ON ret.object_key = c.object_key

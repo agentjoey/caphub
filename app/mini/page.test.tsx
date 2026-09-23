@@ -59,7 +59,7 @@ const baseRow: CapabilityRow = {
   progress: "todo", progressLink: null, progressAt: null,
   reviewNote: null, reviewRequestedAt: null, reviewError: null,
   status: "active", supersededBy: null, statusAt: null, statusNote: null, overlap: NO_OVERLAP,
-  prompts: [], promptUnresolved: 0,
+  promptCount: 0, promptUnresolved: 0,
   hasDeepAnalysis: false,
   syncedAt: null, deletedAt: null, createdAt: "2026-09-19T00:00:00.000Z", updatedAt: "2026-09-19T00:00:00.000Z",
   capture: { kind: "text", objectKey: null, thumbKey: null, text: "hi", url: null }

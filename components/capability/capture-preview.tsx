@@ -5,7 +5,6 @@ import { formatDateTime } from "../../lib/library/format";
 import { format, getDict, type Locale } from "../../lib/i18n";
 import { parseYouTubeUrl } from "../../lib/analysis/material/youtube";
 
-const TEXT_PREVIEW_LIMIT = 140;
 const TEXT_TRUNCATE_LIMIT = 280;
 
 export interface CapturePreviewData {
@@ -71,8 +70,10 @@ export function CapturePreview({ capture, size = "thumb", locale = "zh" }: { cap
   if (capture.kind === "url") {
     const videoId = capture.url ? parseYouTubeUrl(capture.url) : null;
     const thumbImg = videoId && (
+      // Decorative: it always sits beside the card title or the video link, so a screen reader
+      // gains nothing from it (alt=""). mqdefault (320px) is ample for a 56px thumbnail.
       // eslint-disable-next-line @next/next/no-img-element -- external YouTube thumbnail, not a local asset
-      <img className="thumb" src={`https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`} alt={dict.linkThumb} loading="lazy" referrerPolicy="no-referrer" />
+      <img className="thumb" src={`https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`} alt="" loading="lazy" referrerPolicy="no-referrer" />
     );
     if (size === "thumb") return thumbImg ?? <span className="thumb">{dict.linkThumb}</span>;
     if (!capture.url) return <span className="capture-url">{dict.noLink}</span>;
@@ -98,9 +99,4 @@ export function CollapsedCapturePreview({ capture, locale = "zh" }: { capture: C
       <CapturePreview capture={capture} size="full" locale={locale} />
     </details>
   );
-}
-
-/** Excerpt (≤140 chars) of a text capture, for inline display alongside a card's title. */
-export function captureTextExcerpt(text: string): string {
-  return text.length > TEXT_PREVIEW_LIMIT ? `${text.slice(0, TEXT_PREVIEW_LIMIT)}…` : text;
 }

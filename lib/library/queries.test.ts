@@ -177,6 +177,22 @@ describe("library queries", () => {
     expect(calls[1].text).toMatch(/status = 'active'/);
     expect(toBuildCall.text).toMatch(/status = 'active'/);
   });
+  it("list queries fetch only the prompt count, never the verbatim prompt text", async () => {
+    // Up to 20 prompts x 20k chars per card: the list/Review rows only need the count
+    // (PromptNotice); the detail page fetches the full text.
+    const { pool, calls } = recorder([[], [{ total: "0" }]]);
+    await listLibrary(pool, { page: 1 });
+    expect(calls[0].text).toMatch(/jsonb_array_length\(cb\.prompts\) AS "promptCount"/);
+    expect(calls[0].text).not.toMatch(/cb\.prompts,/);
+    const pending = recorder([[], [{ total: "0" }]]);
+    await listPending(pending.pool, { page: 1 });
+    expect(pending.calls[0].text).not.toMatch(/cb\.prompts,/);
+  });
+  it("getCapabilityDetail selects the full verbatim prompts", async () => {
+    const { pool, calls } = recorder([[]]);
+    await getCapabilityDetail(pool, "cab_x");
+    expect(calls[0].text).toMatch(/cb\.prompts AS "prompts"/);
+  });
   it("getCapabilityDetail returns null when missing", async () => {
     const { pool } = recorder([[]]);
     expect(await getCapabilityDetail(pool, "cab_x")).toBeNull();

@@ -23,7 +23,10 @@ export const metadata = { title: "Caphub" };
 export default async function MiniLayout({ children }: { children: ReactNode }) {
   const locale = await getLocale();
   return (
-    <html lang={locale === "en" ? "en" : "zh-CN"} className={fontVariables}>
+    // telegram-web-app.js (loaded before hydration) writes --tg-viewport-* custom properties onto
+    // <html>'s style attribute, which the server never renders; this silences only that one
+    // element's attribute mismatch, not its children's.
+    <html lang={locale === "en" ? "en" : "zh-CN"} className={fontVariables} suppressHydrationWarning>
       <body>
         <Script src={TELEGRAM_SDK_SRC} strategy="beforeInteractive" />
         <div id="mini-shell">
