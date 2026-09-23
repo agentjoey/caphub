@@ -25,8 +25,14 @@ import { decideVerdict } from "./verdict";
 
 export const TIMEOUTS = { vision: 60_000, search: 60_000, reason: 120_000, review: 120_000, video: 300_000 } as const;
 
-/** Budget for a video analysis run: the video call itself is far larger than an image/text one, so it gets its own, roomier cap (Task 4). */
-export const VIDEO_BUDGET = { maxCalls: 4, maxTokens: 600_000 } as const;
+/**
+ * Budget for a video analysis run: the video call itself is far larger than an image/text one,
+ * so it gets its own, roomier token cap. 5 calls: video + search + reason, plus one correction
+ * retry for BOTH the video step and the reason step -- with 4, a run whose video and reason
+ * attempts each needed a retry failed with BUDGET (production, 2026-09-22). The token cap still stops a long video's second full pass
+ * (runStructured skips a retry that can't fit).
+ */
+export const VIDEO_BUDGET = { maxCalls: 5, maxTokens: 600_000 } as const;
 
 export interface PipelineDeps {
   pool: Pool; objects: ObjectStore; vision: StructuredCall; search: SearchCall; reason: StructuredCall;

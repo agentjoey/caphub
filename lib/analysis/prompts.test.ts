@@ -337,6 +337,10 @@ describe("video prompts", () => {
   it("videoPrompt asks for content_points describing what the video itself says and shows", () => {
     expect(videoPrompt(meta, false)).toContain("content_points");
     expect(videoPrompt(meta, false)).toContain("只写视频里实际出现的内容");
+    // The two timestamped lists use different field names; the prompt spells both out
+    // (a key_moments list written with content_points' "point" once failed validation).
+    expect(videoPrompt(meta, false)).toContain("content_points（每项字段为 t 与 point）");
+    expect(videoPrompt(meta, false)).toContain("key_moments（每项字段为 t 与 note");
   });
 
   it("reasonPrompt pins a video card's content to the video and limits web sources to source facts", () => {

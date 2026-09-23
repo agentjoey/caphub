@@ -39,6 +39,10 @@ function deps(kind: Kind, opts: {
   extractionValue?: unknown;
   /** What the video fake resolves to; defaults to the shared `extraction` fixture. */
   videoValue?: unknown;
+  /** Successive video results, one per attempt (overrides videoValue while it lasts). */
+  videoSequence?: unknown[];
+  /** Successive reason results, one per attempt (overrides reasonValue while it lasts). */
+  reasonSequence?: unknown[];
   /** Makes the video fake throw a ProviderError of this code instead of resolving. */
   videoThrows?: ProviderErrorCode;
   /** No `deps.video` at all (as if no Gemini key were configured). */
@@ -112,7 +116,7 @@ function deps(kind: Kind, opts: {
     search: { provider: "tavily", model: "s", search: async () => { calls.push("search"); return { value: { sources: [] }, usage: { inputTokens: 0, outputTokens: 0 } }; } },
     reason: {
       provider: "deepseek", model: "d",
-      invoke: async (input: { prompt: string }) => { calls.push("reason"); reasonPromptSeen = input.prompt; return { value: opts.reasonValue ?? card, usage: { inputTokens: 1, outputTokens: 1 } }; }
+      invoke: async (input: { prompt: string }) => { calls.push("reason"); reasonPromptSeen = input.prompt; const next = opts.reasonSequence?.length ? opts.reasonSequence.shift() : undefined; return { value: next ?? opts.reasonValue ?? card, usage: { inputTokens: 1, outputTokens: 1 } }; }
     },
     material: {
       ocr: async () => "",
@@ -140,7 +144,8 @@ function deps(kind: Kind, opts: {
         videoInputSeen = input.video;
         videoPromptSeen = input.prompt;
         if (opts.videoThrows) throw new ProviderError(opts.videoThrows);
-        return { value: opts.videoValue ?? extraction, usage: { inputTokens: 1, outputTokens: 1 } };
+        const next = opts.videoSequence?.length ? opts.videoSequence.shift() : undefined;
+        return { value: next ?? opts.videoValue ?? extraction, usage: { inputTokens: 1, outputTokens: 1 } };
       }
     }
   };
@@ -566,6 +571,19 @@ describe("runPipeline", () => {
       const { d, videoInput } = deps("video", { durationIso: "PT10M" });
       await runPipeline(d, { runId: "run_video_short", captureId: "cap_video_short", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
       expect(videoInput()).toEqual({ url: "https://www.youtube.com/watch?v=tYvu6IpSfiM" });
+    });
+
+    it("has room for one retry of both the video step and the reason step (5 calls)", async () => {
+      // Production 2026-09-22 (run_eebbd3d1e7caa01e): video attempt 1 invalid (key_moments without
+      // note), attempt 2 fine, then reason attempt 1 invalid -- the 4-call cap left no room for the
+      // reason retry and the whole run failed with BUDGET.
+      const badVideo = { ...extraction, key_moments: [{ t: "00:10", point: "wrong field name" }] };
+      const badCard = { ...card, playbook: { kind: "experience", content: "x", when_to_use: "y" } };
+      const { d, calls } = deps("video", { videoSequence: [badVideo], reasonSequence: [badCard] });
+      const out = await runPipeline(d, { runId: "run_video_retry", captureId: "cap_video_retry", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
+      expect(calls.filter((c) => c === "video")).toHaveLength(2);
+      expect(calls.filter((c) => c === "reason")).toHaveLength(2);
+      expect(out.verdict).toBe("keep");
     });
 
     it("falls back to a metadata-only, forced-pending analysis when the video call fails with INVALID_OUTPUT", async () => {
