@@ -93,14 +93,14 @@ describe("CopyButton", () => {
     Object.assign(navigator, { clipboard: { writeText: vi.fn().mockRejectedValue(new Error("denied")) } });
     render(<CopyButton text="hello" />);
     fireEvent.click(screen.getByRole("button", { name: "复制" }));
-    await waitFor(() => expect(screen.getByText("复制失败")).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("button", { name: "复制失败" })).toBeTruthy());
   });
 
   it("shows the English label and status text under the en locale", async () => {
     Object.assign(navigator, { clipboard: { writeText: vi.fn().mockRejectedValue(new Error("denied")) } });
     render(<CopyButton text="hello" locale="en" />);
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
-    await waitFor(() => expect(screen.getByText("Copy failed")).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Copy failed" })).toBeTruthy());
   });
 });
 

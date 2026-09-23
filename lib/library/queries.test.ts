@@ -188,6 +188,14 @@ describe("library queries", () => {
     await listPending(pending.pool, { page: 1 });
     expect(pending.calls[0].text).not.toMatch(/cb\.prompts,/);
   });
+  it("list queries leave out the append-only build notes; only the detail page loads them", async () => {
+    const { pool, calls } = recorder([[], [{ total: "0" }]]);
+    await listLibrary(pool, { page: 1 });
+    expect(calls[0].text).not.toMatch(/cb\.build_notes AS "buildNotes"/);
+    const detail = recorder([[]]);
+    await getCapabilityDetail(detail.pool, "cab_x");
+    expect(detail.calls[0].text).toMatch(/cb\.build_notes AS "buildNotes"/);
+  });
   it("getCapabilityDetail selects the full verbatim prompts", async () => {
     const { pool, calls } = recorder([[]]);
     await getCapabilityDetail(pool, "cab_x");

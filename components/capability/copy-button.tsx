@@ -26,9 +26,16 @@ export function CopyButton({ text, label, locale = "zh" }: { text: string; label
     timeoutRef.current = setTimeout(() => setStatus("idle"), 1500);
   }
 
+  const message = status === "copied" ? dict.copied : status === "failed" ? dict.failed : "";
+  // The visible label swap alone isn't announced by screen readers (WCAG 4.1.3). The live region
+  // is always rendered -- one that appears only after the click isn't reliably announced -- and
+  // only its text changes.
   return (
-    <button type="button" className="btn" onClick={copy}>
-      {status === "copied" ? dict.copied : status === "failed" ? dict.failed : resolvedLabel}
-    </button>
+    <>
+      <button type="button" className="btn" onClick={copy}>
+        {message || resolvedLabel}
+      </button>
+      <span className="sr-only" role="status" aria-live="polite">{message}</span>
+    </>
   );
 }

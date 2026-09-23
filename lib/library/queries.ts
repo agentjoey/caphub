@@ -22,7 +22,7 @@ const CARD_COLUMNS = `
   cb.progress, cb.progress_link AS "progressLink", cb.progress_at AS "progressAt",
   cb.review_note AS "reviewNote", cb.review_requested_at AS "reviewRequestedAt", cb.review_error AS "reviewError",
   cb.status, cb.superseded_by AS "supersededBy", cb.status_at AS "statusAt", cb.status_note AS "statusNote", cb.overlap,
-  cb.build_notes AS "buildNotes", jsonb_array_length(cb.prompts) AS "promptCount", cb.prompt_unresolved AS "promptUnresolved",
+  jsonb_array_length(cb.prompts) AS "promptCount", cb.prompt_unresolved AS "promptUnresolved",
   (cb.deep_analysis IS NOT NULL) AS "hasDeepAnalysis",
   cb.synced_at AS "syncedAt", cb.deleted_at AS "deletedAt", cb.created_at AS "createdAt", cb.updated_at AS "updatedAt",
   json_build_object('kind', c.kind, 'objectKey', c.object_key, 'thumbKey', c.thumb_key, 'text', c.text, 'url', c.url) AS capture`;
@@ -384,7 +384,7 @@ export async function getCapabilityDetail(pool: Q, id: string): Promise<Capabili
             sup.type AS "supersededByType", sup.serial AS "supersededBySerialNum",
             cb.deep_analysis AS "deepAnalysis", cb.deep_analysis_of AS "deepAnalysisOf",
             dr.state AS "deepRunState", dr.error_code AS "deepRunErrorCode",
-            cb.open_questions AS "openQuestions", cb.enriched_at AS "enrichedAt", cb.prompts AS "prompts"
+            cb.open_questions AS "openQuestions", cb.enriched_at AS "enrichedAt", cb.prompts AS "prompts", cb.build_notes AS "buildNotes"
      FROM caphub_v2.capabilities cb JOIN caphub_v2.captures c ON c.id = cb.capture_id
      JOIN caphub_v2.analysis_runs r ON r.id = cb.run_id
      LEFT JOIN caphub_v2.retention ret ON ret.object_key = c.object_key

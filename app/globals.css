@@ -782,3 +782,39 @@ a.video-moments__t:hover { color: var(--ink); }
 .build-notes__list li + li { padding-top: var(--space-4); border-top: 1px solid var(--hairline); }
 .build-notes__meta { margin-bottom: 4px; color: var(--ink-faint); font-size: var(--text-xs); }
 .build-notes__text { max-width: var(--measure); font-size: var(--text-sm); line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/*
+ * Touch targets (audits 2026-09-24): on a coarse pointer — the Mini App, and the web app opened
+ * in a phone browser — the desktop density put buttons at ~37px, chips at ~28px and the inline
+ * copy buttons, language switch and timestamp links at ~17–24px, under the 44px Apple HIG target.
+ * Primary controls get a real 44px height; controls sitting inside text or a tight header keep
+ * their visual size and grow only their hit area, so nothing around them reflows. Keyed on the
+ * pointer, not the viewport width, so a narrow desktop window keeps its mouse-sized density.
+ */
+@media (pointer: coarse) {
+  .btn,
+  .chip {
+    min-height: 44px;
+  }
+  .code-block__copy .btn,
+  .lang-switch button,
+  a.video-moments__t {
+    position: relative;
+  }
+  .code-block__copy .btn {
+    min-height: 0; /* visually compact; the ::after below carries the hit area */
+  }
+  .code-block__copy .btn::after,
+  .lang-switch button::after,
+  a.video-moments__t::after {
+    content: "";
+    position: absolute;
+  }
+  .code-block__copy .btn::after { inset: -11px -8px; }  /* ~25px → ~47px tall */
+  .lang-switch button::after { inset: -12px 0; }        /* ~24px → ~48px; no sideways growth, the two buttons touch */
+  a.video-moments__t::after { inset: -14px -8px; }      /* ~17px text → ~45px */
+  /* ~21px timestamp rows: a wider gap keeps neighbouring hit areas from overlapping much. */
+  .video-moments {
+    gap: var(--space-4);
+  }
+}
