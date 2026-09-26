@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { submitCapture, listRecentCaptures } from "./captures";
+import { collectPrompts } from "../analysis/prompt-locate";
 
 function fakePool(existing: { id: string } | null) {
   const queries: Array<{ text: string; values: unknown[] }> = [];
@@ -27,6 +28,32 @@ describe("submitCapture", () => {
     expect(out.runId).toMatch(/^run_/);
     expect(queries.some((q) => q.text.startsWith("INSERT INTO caphub_v2.captures"))).toBe(true);
     expect(queries.some((q) => q.text.startsWith("INSERT INTO caphub_v2.analysis_runs"))).toBe(true);
+  });
+  it("preserves multiline prompt text from capture persistence through prompt extraction", async () => {
+    const { pool, queries } = fakePool(null);
+    const original = "Follow this configuration:\n  model:\n    name: example\n\n  output:\n    format: yaml\nKeep the indentation exactly.";
+
+    await submitCapture({ pool, objects, pipeline: "minimax" }, { source: "web", kind: "text", text: original });
+
+    const insert = queries.find((q) => q.text.startsWith("INSERT INTO caphub_v2.captures"))!;
+    const persistedText = String(insert.values[5]);
+    const result = collectPrompts({
+      material: { kind: "text", text: persistedText },
+      extraction: null,
+      locators: [{ start: "Follow this configuration:", end: "Keep the indentation exactly." }]
+    });
+
+    expect(persistedText).toBe(original);
+    expect(result.prompts).toEqual([original]);
+  });
+  it("strips NUL from persisted capture text while preserving surrounding whitespace", async () => {
+    const { pool, queries } = fakePool(null);
+    const original = "  first line\n\tsecond\u0000 line  ";
+
+    await submitCapture({ pool, objects, pipeline: "minimax" }, { source: "web", kind: "text", text: original });
+
+    const insert = queries.find((q) => q.text.startsWith("INSERT INTO caphub_v2.captures"))!;
+    expect(insert.values[5]).toBe("  first line\n\tsecond line  ");
   });
   it("returns existing capture on duplicate without enqueuing", async () => {
     const { pool, queries } = fakePool({ id: "cap_existing" });

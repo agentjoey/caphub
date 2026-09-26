@@ -104,8 +104,43 @@ describe("upsertCapability", () => {
       }
     };
     await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_2", card, verdict: "keep", verdictBy: "auto", ...noPrompts });
-    expect(sql).toMatch(/type = CASE WHEN caphub_v2\.capabilities\.type_by = 'human' THEN caphub_v2\.capabilities\.type ELSE excluded\.type END/);
+    expect(sql).toMatch(/type = CASE WHEN caphub_v2\.capabilities\.suggestion_by = 'human' THEN caphub_v2\.capabilities\.type\s+WHEN caphub_v2\.capabilities\.type_by = 'human' THEN caphub_v2\.capabilities\.type ELSE excluded\.type END/);
     expect(sql).toMatch(/type_by = CASE WHEN caphub_v2\.capabilities\.type_by = 'human' THEN 'human' ELSE excluded\.type_by END/);
+  });
+
+  it("preserves human suggestion type, usage and tags, and rejects stale playbooks after a mid-run type or usage edit", async () => {
+    let sql = "";
+    const pool = {
+      query: async (text: string) => {
+        if (sql === "") sql = text;
+        return { rows: [{ id: "cab_1", verdict: "keep", previous_verdict: "keep", deleted: false }] };
+      }
+    };
+
+    await upsertCapability(pool as never, { captureId: "cap_1", runId: "run_2", card, verdict: "keep", verdictBy: "auto", ...noPrompts });
+
+    expect(sql).toMatch(/type = CASE WHEN caphub_v2\.capabilities\.suggestion_by = 'human' THEN caphub_v2\.capabilities\.type\s+WHEN caphub_v2\.capabilities\.type_by = 'human' THEN caphub_v2\.capabilities\.type ELSE excluded\.type END/);
+    expect(sql).toMatch(/usage = CASE WHEN caphub_v2\.capabilities\.suggestion_by = 'human' THEN caphub_v2\.capabilities\.usage ELSE excluded\.usage END/);
+    expect(sql).toMatch(/tags = CASE WHEN caphub_v2\.capabilities\.suggestion_by = 'human' THEN caphub_v2\.capabilities\.tags ELSE excluded\.tags END/);
+    // The playbook may refresh when the pinned type/usage still match the model snapshot;
+    // the conflict predicate below rejects the whole write if either pin changed mid-flight.
+    expect(sql).toContain("playbook = excluded.playbook");
+    expect(sql).toMatch(/WHERE \(caphub_v2\.capabilities\.suggestion_by <> 'human'\s+OR \(caphub_v2\.capabilities\.type = excluded\.type AND caphub_v2\.capabilities\.usage = excluded\.usage\)\)/);
+    expect(sql).toContain("AND (caphub_v2.capabilities.type_by <> 'human' OR caphub_v2.capabilities.type = excluded.type)");
+  });
+
+  it("reports an explicit conflict when a human suggestion changed during the model call", async () => {
+    const calls: string[] = [];
+    const pool = {
+      query: async (text: string) => {
+        calls.push(text);
+        return { rows: [] };
+      }
+    };
+    await expect(upsertCapability(pool as never, {
+      captureId: "cap_1", runId: "run_2", card, verdict: "keep", verdictBy: "auto", ...noPrompts
+    })).rejects.toMatchObject({ code: "SUGGESTION_CHANGED" });
+    expect(calls).toHaveLength(1);
   });
 
   it("inserts open_questions and overwrites it on rerun", async () => {

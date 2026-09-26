@@ -96,14 +96,18 @@ describe("RunQueue.heartbeat", () => {
 describe("enqueueEnrichRun", () => {
   it("inserts a queued enrich run with the given capture and pipeline, reporting true", async () => {
     const params: unknown[][] = [];
-    const pool = { query: async (_t: string, v: unknown[] = []) => { params.push(v); return { rows: [] }; } };
+    let sql = "";
+    const pool = { query: async (text: string, v: unknown[] = []) => { sql = text; params.push(v); return { rows: [{ id: "run_new" }] }; } };
     await expect(enqueueEnrichRun(pool as never, "cap_1", "mixed")).resolves.toBe(true);
+    expect(sql).toContain("ON CONFLICT (capture_id)");
+    expect(sql).toContain("WHERE kind = 'enrich' AND state IN ('queued','running') DO NOTHING");
+    expect(sql).toContain("RETURNING id");
     expect(params[0][1]).toBe("cap_1");
     expect(params[0][2]).toBe("mixed");
   });
 
-  it("swallows a unique_violation (23505) as an already-queued run instead of throwing, reporting false", async () => {
-    const pool = { query: async () => { throw Object.assign(new Error("duplicate"), { code: "23505" }); } };
+  it("reports an existing active enrich run without aborting a surrounding transaction", async () => {
+    const pool = { query: async () => ({ rows: [] }) };
     await expect(enqueueEnrichRun(pool as never, "cap_1", "mixed")).resolves.toBe(false);
   });
 

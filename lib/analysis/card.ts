@@ -354,6 +354,18 @@ export const deepFactsSchema = z.object({
 });
 export type DeepFacts = z.infer<typeof deepFactsSchema>;
 
+/** Keeps fact citations within the retrieved search results while allowing honest null citations. */
+export function deepFactsSchemaFor(sourceCount: number) {
+  return deepFactsSchema
+    .transform((value) => ({
+      facts: value.facts.map((fact) => ({
+        ...fact,
+        source: fact.source !== null && fact.source >= sourceCount ? null : fact.source
+      }))
+    }))
+    .pipe(deepFactsSchema);
+}
+
 const deepBullet = (max: number) => z.string().min(1).max(max);
 
 /**
@@ -421,18 +433,41 @@ const deepAnalysisObjectSchema = z.object({
  * transform that isn't piped back into a representable schema -- that would kill every deep
  * analysis at the provider call, before the model ever answers.
  */
+type DeepAnalysisValue = z.infer<typeof deepAnalysisObjectSchema>;
+
+function clampDeepAnalysisCitationFields(
+  cases: DeepAnalysisValue["cases"],
+  feedback: DeepAnalysisValue["feedback"],
+  sourceCount: number
+): Pick<DeepAnalysisValue, "cases" | "feedback"> {
+  const clampSource = (source: number | null): number | null =>
+    source !== null && source >= sourceCount ? null : source;
+  return {
+    cases: cases.map((c) => ({ ...c, source: clampSource(c.source) })),
+    feedback: {
+      positive: feedback.positive.map((p) => ({ ...p, source: clampSource(p.source) })),
+      negative: feedback.negative.map((p) => ({ ...p, source: clampSource(p.source) }))
+    }
+  };
+}
+
 export const deepAnalysisSchema = deepAnalysisObjectSchema
-  .transform((value) => {
-    const clampSource = (source: number | null): number | null =>
-      source !== null && source >= value.sources.length ? null : source;
-    return {
-      ...value,
-      cases: value.cases.map((c) => ({ ...c, source: clampSource(c.source) })),
-      feedback: {
-        positive: value.feedback.positive.map((p) => ({ ...p, source: clampSource(p.source) })),
-        negative: value.feedback.negative.map((p) => ({ ...p, source: clampSource(p.source) }))
-      }
-    };
-  })
+  .transform((value) => ({ ...value, ...clampDeepAnalysisCitationFields(value.cases, value.feedback, value.sources.length) }))
   .pipe(deepAnalysisObjectSchema);
+
+/**
+ * Builds the same public DeepAnalysis shape while constraining final source URLs to the set
+ * actually retrieved for this run. The displayed citations still index the model's output
+ * `sources` array; the transform maps out-of-range case/feedback citations to null as before.
+ */
+export function deepAnalysisSchemaFor(retrieved: DeepSource[]) {
+  const urls = Array.from(new Set(retrieved.map((source) => source.url)));
+  const outputSources = urls.length
+    ? z.array(z.object({ title: z.string().max(300), url: z.enum(urls as [string, ...string[]]) })).max(urls.length)
+    : z.array(deepSourceSchema).max(0);
+  const schema = deepAnalysisObjectSchema.extend({ sources: outputSources });
+  return schema
+    .transform((value) => ({ ...value, ...clampDeepAnalysisCitationFields(value.cases, value.feedback, value.sources.length) }))
+    .pipe(schema);
+}
 export type DeepAnalysis = z.infer<typeof deepAnalysisSchema>;

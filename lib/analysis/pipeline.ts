@@ -5,7 +5,7 @@ import { ProviderError } from "../providers/errors";
 import { createMiniMaxCall } from "../providers/minimax";
 import { createMiniMaxSearch, type SearchCall } from "../providers/minimax-search";
 import { createTavilySearch } from "../providers/tavily";
-import { enqueueEnrichRun, type Lease } from "../queue/runs";
+import { assertRunNotAborted, enqueueEnrichRun, withLeaseTransaction, type Lease } from "../queue/runs";
 import type { ObjectStore } from "../storage/s3";
 import { createGeminiVideoCall } from "../providers/gemini-video";
 import { RunBudget } from "./budget";
@@ -86,11 +86,13 @@ export function createPipelineDeps(config: Config, pool: Pool, objects: ObjectSt
  * (see lib/library/actions.ts's editSuggestion). Null for a capture with no capability row yet,
  * or one whose type is still `auto`, in which case a rerun is free to re-derive `type` as usual.
  */
-async function loadPinnedType(pool: Pick<Pool, "query">, captureId: string): Promise<CapabilityType | null> {
-  const row = (await pool.query<{ type: CapabilityType }>(
-    "SELECT type FROM caphub_v2.capabilities WHERE capture_id = $1 AND type_by = 'human'", [captureId]
+async function loadPinnedSuggestion(pool: Pick<Pool, "query">, captureId: string): Promise<{ type: CapabilityType; usage?: "integrate" | "reference" } | null> {
+  const row = (await pool.query<{ type: CapabilityType; usage: "integrate" | "reference"; suggestion_by: "auto" | "human" }>(
+    `SELECT type, usage, suggestion_by FROM caphub_v2.capabilities
+     WHERE capture_id = $1 AND (type_by = 'human' OR suggestion_by = 'human')`, [captureId]
   )).rows[0];
-  return row?.type ?? null;
+  if (!row) return null;
+  return { type: row.type, ...(row.suggestion_by === "human" ? { usage: row.usage } : {}) };
 }
 
 /**
@@ -241,8 +243,8 @@ export async function runPipeline(deps: PipelineDeps, lease: Lease, signal: Abor
   const similarSeed = extraction?.what ?? (material.kind === "text" ? material.text
     : material.kind === "url" ? material.text ?? material.url
     : material.kind === "video" ? material.meta?.title ?? material.url : "");
-  const [existing, existingTags, scenarios, pinnedType] = await Promise.all([
-    loadExistingCapability(deps.pool, lease.captureId), topTags(deps.pool), loadScenarios(deps.pool), loadPinnedType(deps.pool, lease.captureId)
+  const [existing, existingTags, scenarios, pinnedSuggestion] = await Promise.all([
+    loadExistingCapability(deps.pool, lease.captureId), topTags(deps.pool), loadScenarios(deps.pool), loadPinnedSuggestion(deps.pool, lease.captureId)
   ]);
   const similar = await loadSimilar(deps.pool, existing, similarSeed, lease.captureId, deps.embedQuery, signal, lease.runId);
   if (!scenarios.length) throw new Error("no scenarios configured in caphub_v2.scenarios; cannot run reason step");
@@ -258,10 +260,11 @@ export async function runPipeline(deps: PipelineDeps, lease: Lease, signal: Abor
   // playbook), so narrowing here makes a disobedient model's mismatched playbook fail
   // validation and retry via the existing invalid-output retry path, instead of silently
   // storing a card whose type and playbook shape disagree.
+  const pinnedType = pinnedSuggestion?.type;
   const card = await runStructured({
     pool: deps.pool, runId: lease.runId, step: "reason", call: deps.reason,
-    prompt: reasonPrompt({ material, extraction, sources: search.sources, similar, existingTags, scenarios, pinnedType }),
-    schemaName: "capability_card", schema: cardSchemaFor(scenarios.map((s) => s.slug), pinnedType ?? undefined, overlapCandidates),
+    prompt: reasonPrompt({ material, extraction, sources: search.sources, similar, existingTags, scenarios, pinnedType, pinnedUsage: pinnedSuggestion?.usage }),
+    schemaName: "capability_card", schema: cardSchemaFor(scenarios.map((s) => s.slug), pinnedSuggestion ?? undefined, overlapCandidates),
     budget, timeoutMs: TIMEOUTS.reason, signal
   });
   // Belt-and-braces only: validation above already guarantees card.type === pinnedType when
@@ -275,43 +278,33 @@ export async function runPipeline(deps: PipelineDeps, lease: Lease, signal: Abor
     ? { verdict: "pending" as const, by: null }
     : decideVerdict(card, deps.threshold, { count: found.prompts.length, unresolved: found.unresolved });
   // The card and its tag counts are saved atomically: a failing tag bump must not leave a kept card behind.
-  const db = await deps.pool.connect();
-  try {
-    await db.query("BEGIN");
-    const stored = await upsertCapability(db, {
+  const stored = await withLeaseTransaction(deps.pool, lease, signal, async (db) => {
+    const row = await upsertCapability(db, {
       captureId: lease.captureId, runId: lease.runId, card, verdict: decision.verdict, verdictBy: decision.by,
-      prompts: found.prompts, promptUnresolved: found.unresolved
+      prompts: found.prompts, promptUnresolved: found.unresolved, signal
     });
-    const enteringKeep = stored.verdict === "keep" && stored.previousVerdict !== "keep" && !stored.deleted;
-    if (enteringKeep) await bumpTags(db, card.tags);
-    await db.query("COMMIT");
-    // Ruling (M3.7 review, fix round 1): a rerun must re-enrich even when enriched_at is
-    // already set. upsertCapability's ON CONFLICT branch overwrites summary/signals/playbook/
-    // open_questions on every rerun (it has no idea whether this card was ever enriched), so
-    // gating the enqueue on enrichedAt === null would let a rerun permanently strand a card back
-    // on the pre-enrichment, process-narrating summary with no way to re-enrich it. The only
-    // gates left are verdict = keep and not soft-deleted (`!stored.deleted`, already computed
-    // above for enteringKeep) -- migration 011's analysis_runs_one_active_enrich unique index is
-    // what stops a duplicate enqueue while one is already queued or running for this capture.
-    if (stored.verdict === "keep" && !stored.deleted) {
-      // Deliberately its own try/catch, not the one below: this runs *after* COMMIT, so a
-      // non-23505 failure here (pool exhaustion, connection drop -- 23505 itself is already
-      // swallowed inside enqueueEnrichRun) must never be treated as this analysis run's own
-      // failure. Falling through to the catch below would ROLLBACK an already-committed
-      // connection and report a false "分析失败" for a card that was in fact stored -- a missed
-      // enrich enqueue is recoverable (the next decide/rerun re-enqueues it), a falsely reported
-      // analysis failure is not.
-      try {
-        await enqueueEnrichRun(deps.pool, lease.captureId, lease.pipeline);
-      } catch (error) {
-        console.warn(JSON.stringify({ runId: lease.runId, enrichEnqueueError: error instanceof Error ? error.message : String(error) }));
-      }
+    assertRunNotAborted(signal);
+    const enteringKeep = row.verdict === "keep" && row.previousVerdict !== "keep" && !row.deleted;
+    if (enteringKeep) {
+      await bumpTags(db, card.tags);
+      assertRunNotAborted(signal);
     }
-    return { capabilityId: stored.id, verdict: stored.verdict };
-  } catch (error) {
-    await db.query("ROLLBACK");
-    throw error;
-  } finally {
-    db.release();
+    return row;
+  });
+  // Ruling (M3.7 review, fix round 1): a rerun must re-enrich even when enriched_at is already
+  // set, because the first-pass upsert can replace the enriched summary. Keep enqueue separate
+  // from the committed card write so recoverable queue failures don't report a false analysis
+  // failure. The partial unique index makes an active duplicate a no-op.
+  if (stored.verdict === "keep" && !stored.deleted) {
+    try {
+      await withLeaseTransaction(deps.pool, lease, signal, (db) => enqueueEnrichRun(db, lease.captureId, lease.pipeline).then(() => undefined));
+    } catch (error) {
+      const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : undefined;
+      // The main card commit already happened, but a stale/aborted owner still must not return
+      // success or finish the run; only ordinary enqueue failures are recoverable here.
+      if (code === "LEASE_LOST" || code === "ABORTED") throw error;
+      console.warn(JSON.stringify({ runId: lease.runId, enrichEnqueueError: error instanceof Error ? error.message : String(error) }));
+    }
   }
+  return { capabilityId: stored.id, verdict: stored.verdict };
 }

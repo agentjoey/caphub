@@ -1,5 +1,6 @@
 import { isIP } from "node:net";
 import { lookup as defaultDnsLookup } from "node:dns/promises";
+import { fetchPinnedHttp, type PinnedAddress, type PinnedHttpTransport } from "./safe-http";
 
 export { defaultDnsLookup };
 import { stripNul } from "../../text/sanitize";
@@ -60,10 +61,6 @@ export function htmlToText(html: string): string {
   return tidyLines(text).replace(/\n{2,}/g, "\n");
 }
 
-function isIPv4(address: string): boolean {
-  return /^\d{1,3}(\.\d{1,3}){3}$/.test(address);
-}
-
 function ipv4ToInt(address: string): number {
   return address.split(".").reduce((acc, part) => (acc << 8) + Number(part), 0) >>> 0;
 }
@@ -82,7 +79,15 @@ function isNonPublicIPv4(address: string): boolean {
     ipv4InRange(address, "192.168.0.0", 16) ||
     ipv4InRange(address, "169.254.0.0", 16) ||
     ipv4InRange(address, "100.64.0.0", 10) ||
-    ipv4InRange(address, "0.0.0.0", 8)
+    ipv4InRange(address, "0.0.0.0", 8) ||
+    ipv4InRange(address, "192.0.0.0", 24) ||
+    ipv4InRange(address, "192.0.2.0", 24) ||
+    ipv4InRange(address, "192.88.99.0", 24) ||
+    ipv4InRange(address, "198.18.0.0", 15) ||
+    ipv4InRange(address, "198.51.100.0", 24) ||
+    ipv4InRange(address, "203.0.113.0", 24) ||
+    ipv4InRange(address, "224.0.0.0", 4) ||
+    ipv4InRange(address, "240.0.0.0", 4)
   );
 }
 
@@ -116,20 +121,31 @@ function expandIPv6(address: string): number[] | null {
 // unwraps IPv4-mapped addresses (::ffff:a.b.c.d) and checks the embedded v4.
 function isNonPublicIPv6(address: string): boolean {
   const groups = expandIPv6(address.toLowerCase());
-  if (!groups) return false;
+  if (!groups) return true;
   const [g0, g1, g2, g3, g4, g5, g6, g7] = groups;
+  if (groups.some((group) => !Number.isFinite(group))) return true;
   if (g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0 && g6 === 0 && g7 === 1) return true;
-  if ((g0 & 0xfe00) === 0xfc00) return true;
-  if ((g0 & 0xffc0) === 0xfe80) return true;
   if (g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0xffff) {
     const mapped = `${(g6 >> 8) & 0xff}.${g6 & 0xff}.${(g7 >> 8) & 0xff}.${g7 & 0xff}`;
     return isNonPublicIPv4(mapped);
   }
+  if (g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0 && g6 === 0 && g7 === 0) return true;
+  if ((g0 & 0xfe00) === 0xfc00) return true;
+  if ((g0 & 0xffc0) === 0xfe80) return true;
+  if ((g0 & 0xffc0) === 0xfec0) return true;
+  if ((g0 & 0xff00) === 0xff00) return true;
+  // Only global-unicast 2000::/3 is accepted. This also rejects IPv4-compatible,
+  // discard-only, and other special-use ranges outside global unicast.
+  if ((g0 & 0xe000) !== 0x2000) return true;
+  // Documentation, Teredo, and 6to4 ranges are special-purpose, not public targets.
+  if ((g0 === 0x2001 && (g1 === 0 || g1 === 0x0db8)) || g0 === 0x2002) return true;
   return false;
 }
 
 function isNonPublicIpLiteral(address: string, family: number): boolean {
-  return family === 4 || isIPv4(address) ? isNonPublicIPv4(address) : isNonPublicIPv6(address);
+  const actualFamily = isIP(address);
+  if (actualFamily === 0 || actualFamily !== family) return true;
+  return actualFamily === 4 ? isNonPublicIPv4(address) : isNonPublicIPv6(address);
 }
 
 function isDisallowedHostname(hostname: string): boolean {
@@ -144,30 +160,57 @@ function isDisallowedHostname(hostname: string): boolean {
  * localhost-ish hostnames, and hosts that are (or resolve to) a loopback,
  * private, link-local or CGNAT address -- guarding against SSRF and DNS rebinding.
  */
-export async function isSafeHost(url: URL, dnsLookup: DnsLookup): Promise<boolean> {
-  if (url.username || url.password) return false;
+function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) {
+    void promise.catch(() => {});
+    return Promise.reject(new DOMException("The operation was aborted", "AbortError"));
+  }
+  return new Promise<T>((resolve, reject) => {
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const onAbort = () => {
+      cleanup();
+      reject(new DOMException("The operation was aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => { cleanup(); resolve(value); },
+      (error) => { cleanup(); reject(error); }
+    );
+  });
+}
+
+/** Returns every resolved public address so the caller can pin its socket to this exact DNS result. */
+export async function resolveSafeHostAddresses(url: URL, dnsLookup: DnsLookup, signal?: AbortSignal): Promise<DnsRecord[] | null> {
+  if (signal?.aborted) return null;
+  if (url.username || url.password) return null;
   const hostname = url.hostname.replace(/^\[|\]$/g, "");
-  if (isDisallowedHostname(hostname)) return false;
+  if (isDisallowedHostname(hostname)) return null;
   const literalFamily = isIP(hostname);
-  if (literalFamily) return !isNonPublicIpLiteral(hostname, literalFamily);
+  if (literalFamily) return isNonPublicIpLiteral(hostname, literalFamily) ? null : [{ address: hostname, family: literalFamily }];
   try {
-    const records = await dnsLookup(hostname, { all: true });
-    if (records.length === 0) return false;
-    return records.every((record) => !isNonPublicIpLiteral(record.address, record.family));
+    const records = await withAbort(Promise.resolve().then(() => dnsLookup(hostname, { all: true })), signal);
+    if (signal?.aborted || records.length === 0 || records.some((record) => isNonPublicIpLiteral(record.address, record.family))) return null;
+    return records.map(({ address, family }) => ({ address, family }));
   } catch {
-    return false;
+    return null;
   }
 }
 
-async function isSafeUrl(url: URL, dnsLookup: DnsLookup): Promise<boolean> {
-  if (url.protocol !== "https:") return false;
-  return isSafeHost(url, dnsLookup);
+export async function isSafeHost(url: URL, dnsLookup: DnsLookup, signal?: AbortSignal): Promise<boolean> {
+  return (await resolveSafeHostAddresses(url, dnsLookup, signal)) !== null;
+}
+
+async function isSafeUrl(url: URL, dnsLookup: DnsLookup, signal: AbortSignal): Promise<DnsRecord[] | null> {
+  if (url.protocol !== "https:") return null;
+  return resolveSafeHostAddresses(url, dnsLookup, signal);
 }
 
 export async function fetchUrlText(
   url: string,
-  fetchFn: typeof fetch = globalThis.fetch,
-  dnsLookup: DnsLookup = defaultDnsLookup
+  fetchFn?: typeof fetch,
+  dnsLookup: DnsLookup = defaultDnsLookup,
+  pinnedTransport: PinnedHttpTransport = fetchPinnedHttp
 ): Promise<string | null> {
   let current: URL;
   try {
@@ -177,19 +220,25 @@ export async function fetchUrlText(
   }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), URL_TIMEOUT_MS);
+  const customFetch = fetchFn === globalThis.fetch ? undefined : fetchFn;
   try {
     for (let redirectCount = 0; ; redirectCount += 1) {
-      if (!(await isSafeUrl(current, dnsLookup))) return null;
-      const response = await fetchFn(current.toString(), {
+      const addresses = await isSafeUrl(current, dnsLookup, controller.signal);
+      if (!addresses) return null;
+      const init: RequestInit = {
         signal: controller.signal,
         redirect: "manual",
         headers: {
           accept: "text/html,text/plain;q=0.9,*/*;q=0.1",
           "user-agent": "caphub/2 (+https://caphub.agentjoey.ai)"
         }
-      });
+      };
+      const response = customFetch
+        ? await customFetch(current.toString(), init)
+        : await pinnedTransport(current, addresses as readonly PinnedAddress[], init);
       const location = response.headers.get("location");
       if (response.status >= 300 && response.status < 400 && location) {
+        await response.body?.cancel().catch(() => {});
         if (redirectCount >= MAX_REDIRECTS) return null;
         try {
           current = new URL(location, current);
@@ -198,7 +247,10 @@ export async function fetchUrlText(
         }
         continue;
       }
-      if (!response.ok) return null;
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => {});
+        return null;
+      }
       const reader = response.body?.getReader();
       if (!reader) return null;
       const chunks: Uint8Array[] = [];

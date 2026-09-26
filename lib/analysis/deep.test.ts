@@ -29,6 +29,7 @@ const analysisValue = {
 
 function deps(opts: {
   capability?: typeof capabilityRow | null;
+  leaseActive?: boolean;
   planValues?: unknown[]; // consumed in order across successive "deep_plan" invokes (for plan-retry tests)
   factsValueOverride?: unknown;
   analysisValues?: unknown[]; // consumed in order across successive "deep_analysis" invokes (for retry tests)
@@ -41,6 +42,8 @@ function deps(opts: {
   const prompts: string[] = [];
   const steps: Array<{ step: string; ok: boolean; error: string | null }> = [];
   const updates: Array<{ values: unknown[] }> = [];
+  const transactionSql: string[] = [];
+  let released = 0;
   const capability = opts.capability === undefined ? capabilityRow : opts.capability;
   const usage = opts.reasonUsage ?? { inputTokens: 10, outputTokens: 10 };
   let analysisCallIndex = 0;
@@ -48,8 +51,9 @@ function deps(opts: {
   const remainingAnalysisValues = opts.analysisValues ? [...opts.analysisValues] : [analysisValue];
   const remainingPlanValues = opts.planValues ? [...opts.planValues] : [planValue];
 
-  const pool = {
-    query: async (text: string, values: unknown[] = []) => {
+  const query = async (text: string, values: unknown[] = []) => {
+      if (text.includes("FROM caphub_v2.analysis_runs") && text.includes("FOR UPDATE")) return { rows: [{ id: lease.runId }] };
+      if (text.includes("FROM caphub_v2.analysis_runs") && text.includes("clock_timestamp")) return { rows: [{ lease_active: opts.leaseActive ?? true }] };
       if (text.startsWith("SELECT id, title, type, summary, summary_points, tags, source_url, playbook, updated_at FROM caphub_v2.capabilities")) {
         return { rows: capability ? [capability] : [] };
       }
@@ -62,7 +66,16 @@ function deps(opts: {
         return { rows: [] };
       }
       return { rows: [] };
-    }
+  };
+  const pool = {
+    query,
+    connect: async () => ({
+      query: async (text: string, values: unknown[] = []) => {
+        transactionSql.push(text);
+        return query(text, values);
+      },
+      release: () => { released += 1; }
+    })
   };
 
   const d: DeepAnalysisDeps = {
@@ -98,12 +111,12 @@ function deps(opts: {
       }
     }
   };
-  return { d, calls, prompts, steps, updates };
+  return { d, calls, prompts, steps, updates, transactionSql, released: () => released };
 }
 
 describe("runDeepAnalysis", () => {
   it("runs plan → search (one call per query) → synthesize (facts, then the final card) and validates against DeepAnalysis", async () => {
-    const { d, calls, steps } = deps();
+    const { d, calls, steps, transactionSql } = deps();
     const out = await runDeepAnalysis(d, lease, new AbortController().signal);
     expect(out).toEqual({ capabilityId: "cab_1" });
     expect(calls).toEqual([
@@ -113,6 +126,9 @@ describe("runDeepAnalysis", () => {
     ]);
     expect(steps.map((s) => s.step)).toEqual(["plan", "search", "search", "search", "search", "search", "synthesize", "synthesize"]);
     expect(steps.every((s) => s.ok)).toBe(true);
+    expect(transactionSql[0]).toBe("BEGIN");
+    expect(transactionSql.findIndex((sql) => sql.includes("FOR UPDATE"))).toBeLessThan(transactionSql.findIndex((sql) => sql.startsWith("UPDATE caphub_v2.capabilities SET deep_analysis")));
+    expect(transactionSql.at(-1)).toBe("COMMIT");
   });
 
   it("completes a 5-query plan (the worst-case size) within the budget: 1 plan + 5 search + 2 synthesize = 8 calls", async () => {
@@ -123,6 +139,38 @@ describe("runDeepAnalysis", () => {
     const budgetedCalls = calls.filter((c) => c === "plan" || c === "facts" || c === "synthesize-final" || c.startsWith("search:")).length;
     expect(budgetedCalls).toBe(8);
     expect(budgetedCalls).toBeLessThanOrEqual(DEEP_BUDGET_LIMITS.maxCalls);
+  });
+
+  it("carries bounded retrieved body evidence and fact source attribution into synthesis while keeping the stored schema compatible", async () => {
+    const evidence = "UNIQUE_EVIDENCE_2026_REQUIRES_DATABASE_MIGRATION";
+    const { d, prompts, updates } = deps({
+      searchImpl: async () => ({
+        value: { sources: [{ title: "Docs", url: "https://a.example/1", content: `Useful detail: ${evidence}` }] },
+        usage: { inputTokens: 0, outputTokens: 0 }
+      })
+    });
+
+    await runDeepAnalysis(d, lease, new AbortController().signal);
+
+    expect(prompts[1]).toContain(evidence);
+    expect(prompts[2]).toContain(evidence);
+    expect(prompts[2]).toContain("fact one");
+    expect(prompts[2]).toContain("source: [0]");
+    const stored = JSON.parse(updates[0].values[1] as string);
+    expect(stored.sources).toEqual([{ title: "Docs", url: "https://a.example/1" }]);
+    expect(stored.sources[0]).not.toHaveProperty("content");
+  });
+
+  it("rejects final source URLs that were not retrieved and retries with grounded sources", async () => {
+    const inventedSource = {
+      ...analysisValue,
+      sources: [{ title: "Invented", url: "https://invented.example/claim" }]
+    };
+    const { d, updates } = deps({ analysisValues: [inventedSource, analysisValue] });
+
+    await runDeepAnalysis(d, lease, new AbortController().signal);
+
+    expect(JSON.parse(updates[0].values[1] as string).sources).toEqual([{ title: "Docs", url: "https://a.example/1" }]);
   });
 
   it("rejects (invalid output, retried) a plan with 6 queries, and succeeds once the retry returns 5", async () => {
@@ -175,6 +223,15 @@ describe("runDeepAnalysis", () => {
     await expect(runDeepAnalysis(d, lease, new AbortController().signal)).rejects.toMatchObject({ code: "CAPABILITY_NOT_FOUND" });
     expect(capturedQuery).toMatch(/verdict = 'keep'/);
     expect(capturedQuery).toMatch(/deleted_at IS NULL/);
+  });
+
+  it("does not write when the database lease fence reports this owner stale or expired", async () => {
+    const { d, updates, transactionSql, released } = deps({ leaseActive: false });
+    await expect(runDeepAnalysis(d, lease, new AbortController().signal)).rejects.toMatchObject({ code: "LEASE_LOST" });
+    expect(updates).toHaveLength(0);
+    expect(transactionSql.some((sql) => sql.includes("owner_token") && sql.includes("lease_until > clock_timestamp()"))).toBe(true);
+    expect(transactionSql).toContain("ROLLBACK");
+    expect(released()).toBe(1);
   });
 
   it("fails with BUDGET once the deep run's 10-call / 400k-token budget is exceeded, without writing deep_analysis", async () => {

@@ -4,14 +4,14 @@ import { createDeepSeekCall } from "../providers/deepseek";
 import { ProviderError } from "../providers/errors";
 import type { SearchCall } from "../providers/minimax-search";
 import { createTavilySearch } from "../providers/tavily";
-import type { Lease } from "../queue/runs";
+import { withLeaseTransaction, type Lease } from "../queue/runs";
 import { jsonStringifyStripNul } from "../text/sanitize";
 import { RunBudget } from "./budget";
 import {
-  deepAnalysisSchema, deepFactsSchema, deepPlanSchema,
-  type CapabilityType, type DeepAnalysis, type DeepSource, type Playbook, type SearchResult, type SummaryPoint
+  MAX_SOURCE_CONTENT, deepAnalysisSchemaFor, deepFactsSchemaFor, deepPlanSchema,
+  type CapabilityType, type DeepAnalysis, type Playbook, type SearchResult, type SummaryPoint
 } from "./card";
-import { deepFactsPrompt, deepPlanPrompt, deepSynthesizePrompt, type DeepSubject } from "./prompts";
+import { deepFactsPrompt, deepPlanPrompt, deepSynthesizePrompt, type DeepEvidenceSource, type DeepSubject } from "./prompts";
 import { recordStep } from "./steps";
 import { runStructured, withTimeout, type StructuredCall } from "./structured";
 
@@ -30,9 +30,11 @@ export const DEEP_RUN_TIMEOUT_MS = 300_000;
  * 一次完整深度分析约 8 次调用（上限 10）。
  */
 export const DEEP_BUDGET_LIMITS = { maxCalls: 10, maxTokens: 400_000 };
+/** Maximum distinct source bodies retained across up to five search calls (each ≤ 2 KiB). */
+const DEEP_MAX_EVIDENCE_SOURCES = 20;
 
 export interface DeepAnalysisDeps {
-  pool: Pick<Pool, "query">;
+  pool: Pick<Pool, "query" | "connect">;
   /** DeepSeek structured call, reused for both the `plan` step and the two `synthesize` passes. */
   reason: StructuredCall;
   /** Tavily search, one call per planned query. */
@@ -124,34 +126,36 @@ export async function runDeepAnalysis(deps: DeepAnalysisDeps, lease: Lease, sign
       budget, timeoutMs: DEEP_TIMEOUTS.plan, signal: t.signal
     });
 
-    const sources: DeepSource[] = [];
+    const sources: DeepEvidenceSource[] = [];
     const seenUrls = new Set<string>();
     for (const query of plan.queries) {
       const result = await runDeepSearch(deps, lease.runId, query, budget, t.signal);
       for (const s of result.sources) {
-        if (seenUrls.has(s.url)) continue;
+        if (seenUrls.has(s.url) || sources.length >= DEEP_MAX_EVIDENCE_SOURCES) continue;
         seenUrls.add(s.url);
-        sources.push({ title: s.title, url: s.url });
+        sources.push({ title: s.title, url: s.url, content: s.content.slice(0, MAX_SOURCE_CONTENT) });
       }
     }
 
     const factsResult = await runStructured({
       pool: deps.pool, runId: lease.runId, step: "synthesize", call: deps.reason,
-      prompt: deepFactsPrompt(subject, sources), schemaName: "deep_facts", schema: deepFactsSchema,
+      prompt: deepFactsPrompt(subject, sources), schemaName: "deep_facts", schema: deepFactsSchemaFor(sources.length),
       budget, timeoutMs: DEEP_TIMEOUTS.synthesize, signal: t.signal
     });
 
     const analysis: DeepAnalysis = await runStructured({
       pool: deps.pool, runId: lease.runId, step: "synthesize", call: deps.reason,
-      prompt: deepSynthesizePrompt(subject, sources, factsResult.facts.map((f) => f.text)),
-      schemaName: "deep_analysis", schema: deepAnalysisSchema,
+      prompt: deepSynthesizePrompt(subject, sources, factsResult.facts),
+      schemaName: "deep_analysis", schema: deepAnalysisSchemaFor(sources),
       budget, timeoutMs: DEEP_TIMEOUTS.synthesize, signal: t.signal
     });
 
-    await deps.pool.query(
-      "UPDATE caphub_v2.capabilities SET deep_analysis = $2, deep_analysis_at = now(), deep_analysis_of = $3 WHERE id = $1",
-      [capability.id, jsonStringifyStripNul(analysis), capability.updated_at]
-    );
+    await withLeaseTransaction(deps.pool, lease, t.signal, async (db) => {
+      await db.query(
+        "UPDATE caphub_v2.capabilities SET deep_analysis = $2, deep_analysis_at = now(), deep_analysis_of = $3 WHERE id = $1",
+        [capability.id, jsonStringifyStripNul(analysis), capability.updated_at]
+      );
+    });
 
     return { capabilityId: capability.id };
   } catch (error) {

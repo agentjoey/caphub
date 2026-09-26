@@ -9,6 +9,7 @@ const card = {
   confidence: 0.9, usage: "integrate", playbook: { kind: "integrate", install: [], repo: null }, tags: ["x"], source_url: null,
   scenarios: ["coding"], score: 4, score_reason: "r", source_facts: {}, overlap: { relation: "none", target: null, reason: "" }
 };
+const humanReferenceCard = { ...card, usage: "reference", playbook: { kind: "reference", points: ["how to assess"] } };
 const pendingCard = { ...card, confidence: 0.5 };
 const experienceCard = { ...card, type: "experience", playbook: { kind: "experience", content: "做法本身", when_to_use: "何时用" } };
 const extraction = { what: "w", visible_text: "", commands: [], prompts: [], source_hints: [], questions: [] };
@@ -30,6 +31,13 @@ function deps(kind: Kind, opts: {
   enrichedAt?: string | null;
   /** `deleted` the fake upsert RETURNs; false unless overridden. */
   deleted?: boolean;
+  /** Whether the fake database reports this worker still owns an unexpired run lease. */
+  leaseActive?: boolean;
+  /** Successive DB-clock checks, allowing expiry between the initial lock and pre-commit fence. */
+  leaseActiveSequence?: boolean[];
+  /** Human suggestion marker for the existing row, separate from the older type_by marker. */
+  pinnedSuggestionBy?: "auto" | "human";
+  pinnedUsage?: "integrate" | "reference";
   /** Throws from the enqueue's INSERT; code defaults to 23505 (a concurrent duplicate) unless overridden. */
   enrichEnqueueThrows?: boolean;
   enrichEnqueueThrowsCode?: string;
@@ -58,11 +66,17 @@ function deps(kind: Kind, opts: {
   let videoInputSeen: unknown;
   let videoPromptSeen = "";
   let released = 0;
+  let leaseCheckIndex = 0;
   const query = async (text: string, values: unknown[] = []) => {
     sql.push({ text, values });
+    if (text.includes("FROM caphub_v2.analysis_runs") && text.includes("FOR UPDATE")) return { rows: [{ id: "run_test" }] };
+    if (text.includes("FROM caphub_v2.analysis_runs") && text.includes("clock_timestamp")) {
+      const active = opts.leaseActiveSequence?.[leaseCheckIndex++] ?? opts.leaseActive ?? true;
+      return { rows: [{ lease_active: active }] };
+    }
     if (opts.failTagBump && text.includes("INSERT INTO caphub_v2.tags")) throw Object.assign(new Error("duplicate"), { code: "21000" });
-    if (text.startsWith("SELECT type FROM caphub_v2.capabilities WHERE capture_id")) {
-      return { rows: opts.pinnedType ? [{ type: opts.pinnedType }] : [] };
+    if (text.startsWith("SELECT type, usage, suggestion_by FROM caphub_v2.capabilities")) {
+      return { rows: opts.pinnedType ? [{ type: opts.pinnedType, usage: opts.pinnedUsage ?? "integrate", suggestion_by: opts.pinnedSuggestionBy ?? "auto" }] : [] };
     }
     if (text.startsWith("SELECT id, embedding IS NOT NULL AS has_embedding")) {
       return { rows: opts.existingCapability === undefined ? [] : opts.existingCapability === null ? [] : [{ id: opts.existingCapability.id, has_embedding: opts.existingCapability.hasEmbedding }] };
@@ -97,8 +111,11 @@ function deps(kind: Kind, opts: {
       return { rows: [{ id: "cab_1", verdict, previous_verdict: null, deleted: opts.deleted ?? false, enriched_at: opts.enrichedAt ?? null }] };
     }
     if (text.includes("INSERT INTO caphub_v2.analysis_runs")) {
-      if (opts.enrichEnqueueThrows) throw Object.assign(new Error("duplicate"), { code: opts.enrichEnqueueThrowsCode ?? "23505" });
-      return { rows: [] };
+      if (opts.enrichEnqueueThrows) {
+        if ((opts.enrichEnqueueThrowsCode ?? "23505") === "23505") return { rows: [] };
+        throw Object.assign(new Error("enqueue failed"), { code: opts.enrichEnqueueThrowsCode });
+      }
+      return { rows: [{ id: "run_enrich" }] };
     }
     return { rows: [] };
   };
@@ -168,14 +185,97 @@ describe("runPipeline", () => {
     expect(tagBump).toBeDefined();
   });
 
-  it("saves the capability and its tag bump in one transaction on a pool client", async () => {
+  it("fences capability and tag writes in one transaction, then fences the recoverable enrich enqueue separately", async () => {
     const { d, sql, released } = deps("text");
     await runPipeline(d, { runId: "run_tx", captureId: "cap_tx", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
     const tx = sql.filter((q) => q.client).map((q) => q.text.includes("INSERT INTO caphub_v2.capabilities") ? "upsert"
       : q.text.includes("UPDATE caphub_v2.capabilities SET serial") ? "assign-serial"
-      : q.text.includes("INSERT INTO caphub_v2.tags") ? "bump" : q.text);
-    expect(tx).toEqual(["BEGIN", "upsert", "assign-serial", "bump", "COMMIT"]);
+      : q.text.includes("INSERT INTO caphub_v2.tags") ? "bump"
+      : q.text.includes("INSERT INTO caphub_v2.analysis_runs") ? "enqueue-enrich"
+      : q.text.includes("FOR UPDATE") ? "lease-lock"
+      : q.text.includes("clock_timestamp") ? "lease-check" : q.text);
+    expect(tx).toEqual([
+      "BEGIN", "lease-lock", "lease-check", "upsert", "assign-serial", "bump", "lease-check", "COMMIT",
+      "BEGIN", "lease-lock", "lease-check", "enqueue-enrich", "lease-check", "COMMIT"
+    ]);
+    expect(released()).toBe(2);
+  });
+
+  it("rolls back a capability and tag write when the lease expires before COMMIT", async () => {
+    const { d, sql, released } = deps("text", { leaseActiveSequence: [true, false] });
+    await expect(runPipeline(d, { runId: "run_expired_after_write", captureId: "cap_expired", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal))
+      .rejects.toMatchObject({ code: "LEASE_LOST" });
+    const clientSql = sql.filter((q) => q.client).map((q) => q.text);
+    expect(clientSql.some((text) => text.includes("INSERT INTO caphub_v2.capabilities"))).toBe(true);
+    expect(clientSql).toContain("ROLLBACK");
+    expect(clientSql).not.toContain("COMMIT");
     expect(released()).toBe(1);
+  });
+
+  it("rolls back writes when cancellation arrives after the tag bump and before COMMIT", async () => {
+    const { d, sql } = deps("text");
+    const controller = new AbortController();
+    const originalConnect = d.pool.connect.bind(d.pool);
+    d.pool.connect = (async () => {
+      const client = await originalConnect();
+      const originalQuery = client.query.bind(client);
+      client.query = (async (text: string, values: unknown[] = []) => {
+        const result = await originalQuery(text, values);
+        if (text.includes("INSERT INTO caphub_v2.tags")) controller.abort();
+        return result;
+      }) as never;
+      return client;
+    }) as never;
+    await expect(runPipeline(d, { runId: "run_cancel_after_write", captureId: "cap_cancel", pipeline: "mixed", ownerToken: "t" }, controller.signal))
+      .rejects.toMatchObject({ code: "ABORTED" });
+    const clientSql = sql.filter((q) => q.client).map((q) => q.text);
+    expect(clientSql).toContain("ROLLBACK");
+    expect(clientSql).not.toContain("COMMIT");
+  });
+
+  it("rejects an expired or reclaimed lease before the final capability write", async () => {
+    const { d, sql, released } = deps("text", { leaseActive: false });
+    await expect(runPipeline(d, { runId: "run_stale", captureId: "cap_stale", pipeline: "mixed", ownerToken: "old" }, new AbortController().signal))
+      .rejects.toMatchObject({ code: "LEASE_LOST" });
+    const tx = sql.filter((q) => q.client).map((q) => q.text);
+    expect(tx.some((text) => text.includes("FOR UPDATE"))).toBe(true);
+    expect(tx.some((text) => text.includes("owner_token") && text.includes("lease_until > clock_timestamp()"))).toBe(true);
+    expect(sql.some((q) => q.text.includes("INSERT INTO caphub_v2.capabilities"))).toBe(false);
+    expect(tx).toContain("ROLLBACK");
+    expect(released()).toBe(1);
+  });
+
+  it("checks cancellation after connect and while waiting for the ownership row", async () => {
+    const beforeBegin = deps("text");
+    const controller = new AbortController();
+    const originalConnect = beforeBegin.d.pool.connect.bind(beforeBegin.d.pool);
+    beforeBegin.d.pool.connect = (async () => {
+      const client = await originalConnect();
+      controller.abort();
+      return client;
+    }) as never;
+    await expect(runPipeline(beforeBegin.d, { runId: "run_aborted", captureId: "cap_aborted", pipeline: "mixed", ownerToken: "t" }, controller.signal))
+      .rejects.toMatchObject({ code: "ABORTED" });
+    expect(beforeBegin.sql.some((q) => q.text.includes("INSERT INTO caphub_v2.capabilities"))).toBe(false);
+
+    const whileWaiting = deps("text");
+    const waitingController = new AbortController();
+    const connect = whileWaiting.d.pool.connect.bind(whileWaiting.d.pool);
+    whileWaiting.d.pool.connect = (async () => {
+      const client = await connect();
+      const query = client.query.bind(client);
+      client.query = (async (text: string, values: unknown[] = []) => {
+        const result = await query(text, values);
+        if (text.includes("FOR UPDATE")) waitingController.abort();
+        return result;
+      }) as never;
+      return client;
+    }) as never;
+    await expect(runPipeline(whileWaiting.d, { runId: "run_wait", captureId: "cap_wait", pipeline: "mixed", ownerToken: "t" }, waitingController.signal))
+      .rejects.toMatchObject({ code: "ABORTED" });
+    const tx = whileWaiting.sql.filter((q) => q.client).map((q) => q.text);
+    expect(tx).toContain("ROLLBACK");
+    expect(whileWaiting.sql.some((q) => q.text.includes("INSERT INTO caphub_v2.capabilities"))).toBe(false);
   });
 
   it("rolls back the capability when the tag bump fails", async () => {
@@ -187,14 +287,16 @@ describe("runPipeline", () => {
     expect(released()).toBe(1);
   });
 
-  it("enqueues an M3.7 enrich run, outside the capability transaction, when the card enters keep with enriched_at still null", async () => {
+  it("enqueues an M3.7 enrich run in a separate lease-fenced transaction after the capability transaction", async () => {
     const { d, sql } = deps("text");
     await runPipeline(d, { runId: "run_enrich", captureId: "cap_enrich", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
     const enqueue = sql.find((q) => q.text.includes("INSERT INTO caphub_v2.analysis_runs"));
     expect(enqueue).toBeDefined();
-    // Issued via deps.pool directly, not the capability upsert's transactional client -- see
-    // pipeline.ts's comment on why this must happen after COMMIT, not inside the transaction.
-    expect(enqueue!.client).toBeUndefined();
+    // It stays separate because enqueue failure is recoverable after the capability commit, but
+    // still uses a lease fence so a stale runner cannot enqueue after losing ownership.
+    expect(enqueue!.client).toBe(true);
+    const commitCount = sql.filter((q) => q.client && q.text === "COMMIT").length;
+    expect(commitCount).toBe(2);
     expect(enqueue!.text).toContain("'enrich'");
     expect(enqueue!.values).toEqual([expect.any(String), "cap_enrich", "mixed"]);
   });
@@ -221,7 +323,7 @@ describe("runPipeline", () => {
     expect(sql.some((q) => q.text.includes("INSERT INTO caphub_v2.analysis_runs"))).toBe(false);
   });
 
-  it("does not fail the pipeline run when a concurrent enqueue already queued an enrich run (23505)", async () => {
+  it("does not fail the pipeline run when an active enrich run makes the targeted insert a no-op", async () => {
     const { d } = deps("text", { enrichEnqueueThrows: true });
     const out = await runPipeline(d, { runId: "run_dup_enrich", captureId: "cap_dup_enrich", pipeline: "mixed", ownerToken: "t" }, new AbortController().signal);
     expect(out).toEqual({ capabilityId: "cab_1", verdict: "keep" });
@@ -443,6 +545,26 @@ describe("runPipeline", () => {
     await runPipeline(d, { runId: "run_pinned", captureId: "cap_pinned", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
     expect(reasonPrompt()).toMatch(/硬性约束/);
     expect(reasonPrompt()).toContain("experience");
+  });
+
+  it("passes human-pinned suggestion usage into the prompt and accepts only its matching playbook", async () => {
+    const { d, sql, reasonPrompt } = deps("text", {
+      pinnedType: "skill", pinnedUsage: "reference", pinnedSuggestionBy: "human", reasonValue: humanReferenceCard
+    });
+    await runPipeline(d, { runId: "run_pinned_usage", captureId: "cap_pinned_usage", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal);
+    expect(reasonPrompt()).toContain("usage 已由人工确定为「reference」");
+    const insert = sql.find((q) => q.text.includes("INSERT INTO caphub_v2.capabilities"))!;
+    expect(insert.values[12]).toBe("reference");
+  });
+
+  it("rejects a human-pinned usage mismatch instead of storing a playbook for another usage", async () => {
+    const { d, sql, calls } = deps("text", {
+      pinnedType: "skill", pinnedUsage: "reference", pinnedSuggestionBy: "human", reasonValue: card
+    });
+    await expect(runPipeline(d, { runId: "run_pinned_usage_bad", captureId: "cap_pinned_usage_bad", pipeline: "minimax", ownerToken: "t" }, new AbortController().signal))
+      .rejects.toMatchObject({ code: "INVALID_OUTPUT" });
+    expect(calls.filter((call) => call === "reason")).toHaveLength(2);
+    expect(sql.some((q) => q.text.includes("INSERT INTO caphub_v2.capabilities"))).toBe(false);
   });
 
   it("stores the card with the pinned type when the model complies (enforced at the schema layer)", async () => {

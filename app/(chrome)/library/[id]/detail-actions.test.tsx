@@ -90,11 +90,63 @@ describe("DetailActions", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "复核" }));
     await waitFor(() => expect(reviewAction).toHaveBeenCalledOnce());
-    await waitFor(() => expect(screen.getByRole("button", { name: "复核中" })).toBeTruthy());
 
     fireEvent.click(screen.getByRole("button", { name: "删除" }));
     fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
     await waitFor(() => expect(softDeleteAction).toHaveBeenCalledWith("cab_1", originalUpdatedAt));
+  });
+
+  it("re-enables review when refreshed server props report that the review finished", async () => {
+    const props = {
+      id: "cab_1",
+      captureId: "cap_1",
+      updatedAt: "2026-09-19T00:00:00.000Z",
+      verdict: "keep" as const,
+      type: "skill" as const,
+      usage: "integrate" as const,
+      tags: ["cli"]
+    };
+    reviewAction.mockResolvedValue({ ok: true, updatedAt: "2026-09-19T12:00:00.000Z" });
+    const view = render(<DetailActions {...props} reviewPending={false} />);
+    const reviewButton = screen.getByRole("button", { name: "复核" });
+
+    fireEvent.click(reviewButton);
+    await waitFor(() => expect(reviewAction).toHaveBeenCalledOnce());
+    view.rerender(<DetailActions {...props} reviewPending={true} />);
+    expect(screen.getByRole("button", { name: "复核中" }).hasAttribute("disabled")).toBe(true);
+
+    view.rerender(<DetailActions {...props} reviewPending={false} />);
+    const reenabledButton = screen.getByRole("button", { name: "复核" });
+    expect(reenabledButton.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(reenabledButton);
+    await waitFor(() => expect(reviewAction).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+    await waitFor(() => expect(softDeleteAction).toHaveBeenCalledWith("cab_1", props.updatedAt));
+  });
+
+  it("re-enables review when refresh already sees a quickly completed request as not pending", async () => {
+    reviewAction.mockResolvedValue({ ok: true, updatedAt: "2026-09-19T12:00:00.000Z" });
+    render(
+      <DetailActions
+        id="cab_1"
+        captureId="cap_1"
+        updatedAt="2026-09-19T00:00:00.000Z"
+        verdict="keep"
+        type="skill"
+        usage="integrate"
+        tags={[]}
+        reviewPending={false}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "复核" }));
+    await waitFor(() => expect(reviewAction).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.getByRole("button", { name: "复核" }).hasAttribute("disabled")).toBe(false));
+
+    fireEvent.click(screen.getByRole("button", { name: "复核" }));
+    await waitFor(() => expect(reviewAction).toHaveBeenCalledTimes(2));
   });
 
   it("does not go stale on a rerun CONFLICT (already queued), so delete still works", async () => {

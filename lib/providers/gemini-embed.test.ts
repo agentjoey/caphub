@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createGeminiEmbed } from "./gemini-embed";
 
 function unitVector(seed: number): number[] {
@@ -99,5 +99,65 @@ describe("createGeminiEmbed", () => {
     }) as unknown as typeof fetch;
     await expect(createGeminiEmbed({ apiKey: "k", fetch: fetchFn }).embed(["a"], "document", controller.signal))
       .rejects.toMatchObject({ code: "ABORTED" });
+  });
+
+  it("keeps its timeout active while consuming a stalled response body", async () => {
+    vi.useFakeTimers();
+    let requestSignal!: AbortSignal;
+    let bodyController!: ReadableStreamDefaultController<Uint8Array>;
+    const fetchFn = (async (_url: string, init: RequestInit) => {
+      requestSignal = init.signal as AbortSignal;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          bodyController = controller;
+          requestSignal.addEventListener("abort", () => controller.error(new DOMException("aborted", "AbortError")), { once: true });
+        }
+      });
+      return new Response(body, { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const promise = createGeminiEmbed({ apiKey: "k", fetch: fetchFn }).embed(["a"], "document");
+    const observed = promise.then(() => null, (error) => error);
+
+    try {
+      await vi.advanceTimersByTimeAsync(15_000);
+      const result = await Promise.race([observed, Promise.resolve("still-pending")]);
+      expect(result).toMatchObject({ code: "TIMEOUT" });
+      expect(requestSignal.aborted).toBe(true);
+    } finally {
+      try { bodyController?.close(); } catch { /* already errored by the abort signal */ }
+      await observed;
+      vi.useRealTimers();
+    }
+  });
+
+  it("forwards caller cancellation while consuming a response body", async () => {
+    const caller = new AbortController();
+    let requestSignal!: AbortSignal;
+    let bodyController!: ReadableStreamDefaultController<Uint8Array>;
+    let markFetchStarted!: () => void;
+    const fetchStarted = new Promise<void>((resolve) => { markFetchStarted = resolve; });
+    const fetchFn = (async (_url: string, init: RequestInit) => {
+      requestSignal = init.signal as AbortSignal;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          bodyController = controller;
+          requestSignal.addEventListener("abort", () => controller.error(new DOMException("aborted", "AbortError")), { once: true });
+        }
+      });
+      markFetchStarted();
+      return new Response(body, { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const promise = createGeminiEmbed({ apiKey: "k", fetch: fetchFn }).embed(["a"], "document", caller.signal);
+    const observed = promise.then(() => null, (error) => error);
+
+    try {
+      await fetchStarted;
+      caller.abort();
+      expect(requestSignal.aborted).toBe(true);
+      expect(await observed).toMatchObject({ code: "ABORTED" });
+    } finally {
+      try { bodyController?.close(); } catch { /* already errored by the abort signal */ }
+      await observed;
+    }
   });
 });

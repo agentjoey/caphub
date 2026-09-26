@@ -1,5 +1,6 @@
 import { withTimeout } from "./structured";
-import { stripHtml, isSafeHost, defaultDnsLookup, type DnsLookup } from "./material/url";
+import { stripHtml, resolveSafeHostAddresses, defaultDnsLookup, type DnsLookup } from "./material/url";
+import { fetchPinnedHttp, type PinnedHttpTransport } from "./material/safe-http";
 
 /** Hard timeout for the whole fetchCanonical call (metadata + readme + page, whichever path runs). */
 export const CANONICAL_TIMEOUT_MS = 10_000;
@@ -29,6 +30,8 @@ export interface FetchCanonicalOptions {
   signal?: AbortSignal;
   /** Overridable for tests; defaults to real DNS resolution. */
   dnsLookup?: DnsLookup;
+  /** Overrides the production pinned transport in deterministic tests. */
+  transport?: PinnedHttpTransport;
 }
 
 interface GithubRepoMeta {
@@ -51,9 +54,9 @@ function parseGithubRepo(url: URL): { owner: string; repo: string } | null {
 }
 
 /** http(s)-only, and never a loopback/private/link-local/CGNAT host -- guards every fetch this module makes, including the fixed GitHub API hosts (DNS rebinding still applies to them). */
-async function isAllowedTarget(url: URL, dnsLookup: DnsLookup): Promise<boolean> {
-  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
-  return isSafeHost(url, dnsLookup);
+async function isAllowedTarget(url: URL, dnsLookup: DnsLookup, signal: AbortSignal) {
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  return resolveSafeHostAddresses(url, dnsLookup, signal);
 }
 
 /**
@@ -64,22 +67,28 @@ async function isAllowedTarget(url: URL, dnsLookup: DnsLookup): Promise<boolean>
  */
 async function safeFetch(
   url: URL,
-  fetchFn: typeof fetch,
+  fetchFn: typeof fetch | undefined,
   signal: AbortSignal,
   dnsLookup: DnsLookup,
-  headers: Record<string, string>
+  headers: Record<string, string>,
+  transport: PinnedHttpTransport
 ): Promise<Response | null> {
   let current = url;
   for (let redirectCount = 0; ; redirectCount += 1) {
-    if (!(await isAllowedTarget(current, dnsLookup))) return null;
+    const addresses = await isAllowedTarget(current, dnsLookup, signal);
+    if (!addresses) return null;
     let response: Response;
     try {
-      response = await fetchFn(current.toString(), { signal, redirect: "manual", headers });
+      const init = { signal, redirect: "manual" as const, headers };
+      response = fetchFn
+        ? await fetchFn(current.toString(), init)
+        : await transport(current, addresses, init);
     } catch {
       return null;
     }
     const location = response.headers.get("location");
     if (response.status >= 300 && response.status < 400 && location) {
+      await response.body?.cancel().catch(() => {});
       if (redirectCount >= MAX_REDIRECTS) return null;
       try {
         current = new URL(location, current);
@@ -116,18 +125,32 @@ async function readLimitedBody(response: Response, maxBytes: number): Promise<st
   return new TextDecoder().decode(Buffer.concat(chunks).subarray(0, maxBytes));
 }
 
+async function cancelResponseBody(response: Response | null | undefined): Promise<void> {
+  await response?.body?.cancel().catch(() => {});
+}
+
 function extractTitle(html: string): string {
   const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   if (!match) return "";
   return match[1].replace(/\s+/g, " ").trim();
 }
 
-async function fetchPage(url: URL, fetchFn: typeof fetch, signal: AbortSignal, dnsLookup: DnsLookup): Promise<{ title: string; text: string } | null> {
+async function fetchPage(
+  url: URL,
+  fetchFn: typeof fetch | undefined,
+  signal: AbortSignal,
+  dnsLookup: DnsLookup,
+  transport: PinnedHttpTransport
+): Promise<{ title: string; text: string } | null> {
   const response = await safeFetch(url, fetchFn, signal, dnsLookup, {
     accept: "text/html,text/plain;q=0.9,*/*;q=0.1",
     "user-agent": USER_AGENT
-  });
-  if (!response || !response.ok) return null;
+  }, transport);
+  if (!response) return null;
+  if (!response.ok) {
+    await cancelResponseBody(response);
+    return null;
+  }
   const raw = await readLimitedBody(response, MAX_CANONICAL_BODY_BYTES);
   if (raw === null) return null;
   const contentType = response.headers.get("content-type") ?? "";
@@ -138,14 +161,31 @@ async function fetchPage(url: URL, fetchFn: typeof fetch, signal: AbortSignal, d
   return { title, text };
 }
 
-async function fetchGithubRepo(owner: string, repo: string, fetchFn: typeof fetch, signal: AbortSignal, dnsLookup: DnsLookup): Promise<CanonicalResult> {
+async function fetchGithubRepo(
+  owner: string,
+  repo: string,
+  fetchFn: typeof fetch | undefined,
+  signal: AbortSignal,
+  dnsLookup: DnsLookup,
+  transport: PinnedHttpTransport
+): Promise<CanonicalResult> {
   const metaResponse = await safeFetch(new URL(`${GITHUB_API_BASE}/repos/${owner}/${repo}`), fetchFn, signal, dnsLookup, {
     accept: "application/vnd.github+json",
     "user-agent": USER_AGENT
-  });
-  if (!metaResponse || !metaResponse.ok) return null;
+  }, transport);
+  if (!metaResponse) return null;
+  if (!metaResponse.ok) {
+    await cancelResponseBody(metaResponse);
+    return null;
+  }
 
-  const meta = (await metaResponse.json().catch(() => null)) as GithubRepoMeta | null;
+  const metaBody = await readLimitedBody(metaResponse, MAX_CANONICAL_BODY_BYTES);
+  let meta: GithubRepoMeta | null = null;
+  try {
+    meta = metaBody ? JSON.parse(metaBody) as GithubRepoMeta : null;
+  } catch {
+    meta = null;
+  }
   if (!meta) return null;
 
   const facts: CanonicalFacts = {};
@@ -159,10 +199,12 @@ async function fetchGithubRepo(owner: string, repo: string, fetchFn: typeof fetc
   const readmeResponse = await safeFetch(new URL(`${GITHUB_API_BASE}/repos/${owner}/${repo}/readme`), fetchFn, signal, dnsLookup, {
     accept: "application/vnd.github.raw",
     "user-agent": USER_AGENT
-  });
+  }, transport);
   if (readmeResponse?.ok) {
     const raw = await readLimitedBody(readmeResponse, MAX_CANONICAL_BODY_BYTES);
     text = raw?.trim() ?? "";
+  } else {
+    await cancelResponseBody(readmeResponse);
   }
   if (!text && typeof meta.description === "string") text = meta.description.trim();
 
@@ -190,13 +232,16 @@ export async function fetchCanonical(url: string, options: FetchCanonicalOptions
   } catch {
     return null;
   }
-
+  if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || parsed.username || parsed.password) return null;
   const dnsLookup = options.dnsLookup ?? defaultDnsLookup;
+  // The production caller passes the global fetch explicitly. Treat that exact function as the
+  // default transport so it cannot re-resolve a hostname after our safety check. Distinct fetch
+  // functions remain an intentional test seam.
+  const fetchFn = options.fetch === globalThis.fetch ? undefined : options.fetch;
+  const transport = options.transport ?? fetchPinnedHttp;
   const baseSignal = options.signal ?? new AbortController().signal;
   const t = withTimeout(baseSignal, CANONICAL_TIMEOUT_MS);
   try {
-    if (!(await isAllowedTarget(parsed, dnsLookup))) return null;
-
     const repoMatch = parseGithubRepo(parsed);
     if (repoMatch) {
       // fetchGithubRepo is expected to resolve to null on any failure, but a mid-stream body-read
@@ -205,7 +250,7 @@ export async function fetchCanonical(url: string, options: FetchCanonicalOptions
       // mode, instead of escaping to this function's own outer catch and skipping it entirely.
       let repoResult: CanonicalResult = null;
       try {
-        repoResult = await fetchGithubRepo(repoMatch.owner, repoMatch.repo, options.fetch, t.signal, dnsLookup);
+        repoResult = await fetchGithubRepo(repoMatch.owner, repoMatch.repo, fetchFn, t.signal, dnsLookup, transport);
       } catch {
         repoResult = null;
       }
@@ -213,7 +258,7 @@ export async function fetchCanonical(url: string, options: FetchCanonicalOptions
       // Metadata fetch failed, was rate-limited, a mid-stream read failed, or the repo doesn't
       // exist -- degrade to a plain page fetch.
     }
-    const page = await fetchPage(parsed, options.fetch, t.signal, dnsLookup);
+    const page = await fetchPage(parsed, fetchFn, t.signal, dnsLookup, transport);
     return page ? { kind: "page", url: parsed.toString(), title: page.title, text: page.text } : null;
   } catch {
     return null;

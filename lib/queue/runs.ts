@@ -1,9 +1,82 @@
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import type { Pipeline } from "../config";
 import { newId } from "../ids";
+import { ProviderError } from "../providers/errors";
 
 export interface Lease { runId: string; captureId: string; pipeline: Pipeline; ownerToken: string }
 export interface RunOutcome { state: "done" | "failed"; errorCode?: string; errorMessage?: string }
+
+/** Fails promptly when cancellation lands between any two asynchronous transaction steps. */
+export function assertRunNotAborted(signal: AbortSignal): void {
+  if (signal.aborted) throw new ProviderError("ABORTED");
+}
+
+function leaseLostError(): Error & { code: "LEASE_LOST" } {
+  return Object.assign(new Error("LEASE_LOST"), { code: "LEASE_LOST" as const });
+}
+
+async function assertLeaseOwned(db: PoolClient, lease: Lease, lock: boolean): Promise<void> {
+  if (lock) {
+    const locked = await db.query<{ id: string }>(
+      "SELECT id FROM caphub_v2.analysis_runs WHERE id = $1 FOR UPDATE", [lease.runId]
+    );
+    if (!locked.rows[0]) throw leaseLostError();
+  }
+  // This is a separate statement from BEGIN/SELECT FOR UPDATE on purpose: clock_timestamp()
+  // observes time after any row-lock wait, while now() would still report the transaction's
+  // start time and could approve an owner whose lease expired while this statement was blocked.
+  const current = await db.query<{ lease_active: boolean }>(
+    `SELECT (state = 'running' AND owner_token = $2 AND lease_until > clock_timestamp()) AS lease_active
+     FROM caphub_v2.analysis_runs WHERE id = $1`,
+    [lease.runId, lease.ownerToken]
+  );
+  if (current.rows[0]?.lease_active !== true) throw leaseLostError();
+}
+
+/**
+ * Serialize a run's final business writes against reclaim/finish. Call only after all provider
+ * work: this transaction locks the lease row until commit, checks ownership using the database
+ * clock after acquiring that lock, and rechecks cancellation/expiry before commit. A claimant
+ * cannot take the row while these writes run; an owner that already lost or expired while waiting
+ * cannot enter the callback. Any failed check rolls back, and the connection is always released.
+ */
+export async function withLeaseTransaction<T>(
+  pool: Pick<Pool, "connect">,
+  lease: Lease,
+  signal: AbortSignal,
+  write: (db: PoolClient) => Promise<T>
+): Promise<T> {
+  assertRunNotAborted(signal);
+  const db = await pool.connect();
+  let inTransaction = false;
+  try {
+    assertRunNotAborted(signal);
+    // Roll back even if the BEGIN round trip rejects after the server started it.
+    inTransaction = true;
+    await db.query("BEGIN");
+    assertRunNotAborted(signal);
+    await assertLeaseOwned(db, lease, true);
+    assertRunNotAborted(signal);
+    const result = await write(db);
+    assertRunNotAborted(signal);
+    await assertLeaseOwned(db, lease, false);
+    assertRunNotAborted(signal);
+    await db.query("COMMIT");
+    inTransaction = false;
+    return result;
+  } catch (error) {
+    if (inTransaction) {
+      try {
+        await db.query("ROLLBACK");
+      } catch {
+        // Keep the original ownership, cancellation, or write error as the useful failure.
+      }
+    }
+    throw error;
+  } finally {
+    db.release();
+  }
+}
 
 /**
  * A normal analysis run, a deep-analysis run and an enrichment run (migration 010/011's
@@ -80,11 +153,6 @@ export class RunQueue {
   }
 }
 
-/** True for a Postgres unique_violation (23505) error, e.g. a race against a partial unique index. */
-function isUniqueViolation(e: unknown): boolean {
-  return typeof e === "object" && e !== null && (e as { code?: unknown }).code === "23505";
-}
-
 /**
  * Queues an `enrich` run (M3.7's second pass) for a capture whose card just became `keep` and
  * has never been enriched (`enriched_at IS NULL` -- the caller's job to check before calling
@@ -104,19 +172,16 @@ function isUniqueViolation(e: unknown): boolean {
  *
  * Concurrency is a fire-and-forget INSERT, not a pre-check + insert: migration 011's
  * `analysis_runs_one_active_enrich` partial unique index (one active enrich run per capture) is
- * the only guard, and a losing race surfaces as 23505 here, swallowed as "already queued" rather
- * than treated as a failure of whatever write just triggered this (a card decision or upsert
- * must never fail because an enrich run was already queued for it).
+ * the only guard. Its targeted ON CONFLICT keeps a duplicate enqueue harmless without poisoning
+ * a surrounding transaction (a caught 23505 would leave PostgreSQL's transaction aborted).
  */
 export async function enqueueEnrichRun(pool: Pick<Pool, "query">, captureId: string, pipeline: Pipeline): Promise<boolean> {
-  try {
-    await pool.query(
-      "INSERT INTO caphub_v2.analysis_runs (id, capture_id, pipeline, state, kind) VALUES ($1, $2, $3, 'queued', 'enrich')",
-      [newId("run"), captureId, pipeline]
-    );
-    return true;
-  } catch (e) {
-    if (isUniqueViolation(e)) return false;
-    throw e;
-  }
+  const inserted = await pool.query<{ id: string }>(
+    `INSERT INTO caphub_v2.analysis_runs (id, capture_id, pipeline, state, kind)
+     VALUES ($1, $2, $3, 'queued', 'enrich')
+     ON CONFLICT (capture_id) WHERE kind = 'enrich' AND state IN ('queued','running') DO NOTHING
+     RETURNING id`,
+    [newId("run"), captureId, pipeline]
+  );
+  return inserted.rows.length > 0;
 }

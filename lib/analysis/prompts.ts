@@ -77,15 +77,9 @@ export function searchQuery(extraction: Extraction | null, material: Material): 
 export function reasonPrompt(input: {
   material: Material; extraction: Extraction | null; sources: SearchResult["sources"];
   similar: SimilarCandidate[]; existingTags: string[]; scenarios: Scenario[];
-  /**
-   * When a human has already hand-set this capability's `type` (via 改建议), a rerun must
-   * honor it rather than let the model re-derive (and possibly revert) it — see
-   * lib/analysis/pipeline.ts. Passed as a hard constraint on `type` and on how `playbook`
-   * must be shaped for it (e.g. an `experience` card must put the core content into
-   * `playbook.content`); pipeline.ts also forces `card.type` to this value after parsing, as
-   * a backstop against a disobedient model.
-   */
+  /** Human-edited suggestion fields, passed as hard constraints so the generated playbook fits. */
   pinnedType?: CapabilityType | null;
+  pinnedUsage?: "integrate" | "reference" | null;
 }): string {
   const materialText = input.material.kind === "text" ? input.material.text
     : input.material.kind === "url" ? `URL: ${input.material.url}\n页面正文：${input.material.text ?? "（抓取失败）"}`
@@ -95,11 +89,12 @@ export function reasonPrompt(input: {
   const extractionText = input.material.kind === "video"
     ? (input.extraction ? `视频内容提取结果：\n${JSON.stringify(input.extraction)}` : `视频内容未能读取：只能依据标题与简介判断，必须在 signals 里写一条「视频未能读取，仅依据标题与简介」。`)
     : input.extraction ? `视觉提取结果：\n${JSON.stringify(input.extraction)}` : "";
+  const pinnedSuggestion = input.pinnedType || input.pinnedUsage
+    ? `硬性约束：${input.pinnedType ? `type 已由人工确定为「${input.pinnedType}」，必须原样保留` : "type 按输入判断"}${input.pinnedUsage ? `；usage 已由人工确定为「${input.pinnedUsage}」，必须原样保留` : ""}；playbook 必须与 type/usage 匹配（experience 类型必须使用 { kind: "experience", content, when_to_use } 形状，并把核心内容写进 playbook.content）。`
+    : "";
   return [
     `你在为一个个人 agent 能力库做评估与建档。${CAPABILITY_TYPE_DEFINITIONS}`,
-    input.pinnedType
-      ? `硬性约束：这张卡片的 type 已由人工确定为「${input.pinnedType}」，本次重跑必须原样使用这个 type，不得改判为其他类型；playbook 必须按这个 type 的形状组织内容（例如 type 为 experience 时，必须把核心内容本身写进 playbook.content）。`
-      : "",
+    pinnedSuggestion,
     `原始输入：\n${materialText}`,
     extractionText,
     videoClipped ? "视频超过 90 分钟，只分析了前 90 分钟，必须在 signals 里写明这一点。" : "",
@@ -169,6 +164,10 @@ export interface DeepSubject {
   source_url: string | null; playbook: Card["playbook"];
 }
 
+/** Search results retained for deep analysis; `content` is bounded at collection time. */
+export interface DeepEvidenceSource extends DeepSource { content: string }
+export interface DeepEvidenceFact { text: string; source: number | null }
+
 function deepSubjectText(subject: DeepSubject): string {
   return [
     `标题：${subject.title}`,
@@ -197,30 +196,30 @@ export function deepPlanPrompt(subject: DeepSubject): string {
 }
 
 /** Prompt for the first `synthesize` pass: merge raw search results into grounded facts. */
-export function deepFactsPrompt(subject: DeepSubject, sources: DeepSource[]): string {
+export function deepFactsPrompt(subject: DeepSubject, sources: DeepEvidenceSource[]): string {
   return [
     "你在为个人 agent 能力库的一张卡片做深度分析，现在是第一步「事实归并」：把下面的联网检索结果提炼成一条条客观事实，供下一步写成最终结论使用。",
     deepSubjectText(subject),
     sources.length
-      ? `联网检索结果（编号从 0 开始，对应下面的下标）：\n${sources.map((s, i) => `[${i}] ${s.title} ${s.url}`).join("\n")}`
+      ? `联网检索结果（编号从 0 开始，对应下面的下标）：\n${sources.map((s, i) => `[${i}] ${s.title} ${s.url}\n检索到的正文：\n${s.content}`).join("\n\n")}`
       : "联网检索结果：无（本次所有检索式都没有找到结果）。",
     "facts 给出最多 40 条事实，每条不超过 300 字；每条事实必须能在上面某个编号的检索结果里找到依据，source 填该结果的下标（从 0 开始的整数）；如果某条是你的合理推断而非直接来自某个检索结果，source 填 null，但不要编造具体的人名、数字、日期、案例这类看似确凿的细节。检索结果为空，或某个方向确实没找到东西，facts 里就不要为那个方向编造事实——宁可少写。"
   ].join("\n\n");
 }
 
 /** Prompt for the second `synthesize` pass: compose the final, scannable DeepAnalysis card. */
-export function deepSynthesizePrompt(subject: DeepSubject, sources: DeepSource[], facts: string[]): string {
+export function deepSynthesizePrompt(subject: DeepSubject, sources: DeepEvidenceSource[], facts: DeepEvidenceFact[]): string {
   return [
     "你在为个人 agent 能力库的一张卡片做深度分析，现在是第二步「成文」：基于下面已经归并好的事实和原始检索结果，写成一张简短、可扫读的深度分析卡片。绝对不要写成长篇大论，每个字段都有严格的字数上限，超过会被拒绝重写。",
     deepSubjectText(subject),
-    facts.length ? `已归并的事实：\n${facts.map((f, i) => `${i + 1}. ${f}`).join("\n")}` : "已归并的事实：无。",
+    facts.length ? `已归并的事实（source 是原始检索结果的下标）：\n${facts.map((f, i) => `${i + 1}. ${f.text}（原始 source: ${f.source === null ? "无" : `[${f.source}] ${sources[f.source]?.title ?? ""} ${sources[f.source]?.url ?? ""}`}）`).join("\n")}` : "已归并的事实：无。",
     sources.length
-      ? `原始检索结果（编号从 0 开始）：\n${sources.map((s, i) => `[${i}] ${s.title} ${s.url}`).join("\n")}`
+      ? `原始检索结果（编号从 0 开始，包含检索到的正文）：\n${sources.map((s, i) => `[${i}] ${s.title} ${s.url}\n检索到的正文：\n${s.content}`).join("\n\n")}`
       : "原始检索结果：无。",
     "请输出 DeepAnalysis：headline 是不超过 40 字的一句话结论；architecture 是 { summary ≤ 80 字, points：3–5 条，每条 ≤ 40 字 }，说明这个能力大致怎么构建/运作；implementation 同样是 { summary ≤ 80 字, points：3–5 条，每条 ≤ 40 字 }，说明落地/接入的关键步骤；use_cases 给 3–5 条 { title ≤ 20 字, detail ≤ 60 字 } 的具体应用场景；feedback 给 { positive: 0–3 条, negative: 0–3 条 } 的口碑要点，每条是 { text ≤ 40 字, source }，只写检索结果里真实出现过的评价，没有就留空数组。",
     "feedback 每条的 source：这条评价来自某个具体检索结果时，填你自己输出的 sources 数组里的下标（从 0 开始）；只是综合印象、说不出具体出处时，必须填 null。绝不能为了把 source 填上就随便挑一个下标——宁可填 null。",
     "risks 给 2–4 条风险/局限，每条 ≤ 50 字。",
-    "sources 是你在上面这些字段里实际引用到的检索结果，按你自己的顺序重新列出 { title, url }（可以是原始检索结果的子集，不要求全部收录，也不要新增没出现过的链接）。",
+    "sources 是你在上面这些字段里实际引用到的检索结果，按原始检索结果顺序重新列出 { title, url }（可以是子集，不要求全部收录，不要新增或改写链接）。其中每个 url 必须与某条原始检索结果完全一致；cases 和 feedback 的 source 填你自己输出的 sources 数组下标。facts 里的 source 则是原始检索结果下标；使用某条 fact 时，把它对应的原始来源加入自己的 sources，再按 sources 中的新下标填写 cases/feedback。",
     "cases 给 0–4 条 { title ≤ 30 字, detail ≤ 60 字, source } 的具体案例/落地实例；source 必须是上面你自己输出的 sources 数组里的下标（从 0 开始），必须是真实在检索结果里找到的案例，绝不能编造；如果检索结果里确实没有找到任何公开案例，cases 必须是空数组，不要为了凑数编造。"
   ].join("\n\n");
 }

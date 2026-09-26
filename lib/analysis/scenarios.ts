@@ -59,25 +59,28 @@ function overlapFieldFor(codes: string[]) {
  * `cardSchema`) because `.extend()` isn't available on the ZodEffects `superRefine`
  * produces; the same cross-field rules are re-applied via `refineCard`.
  *
- * `pinnedType`, when given, additionally narrows `type` to a `z.literal` of that exact value
- * (a human already set it via 改建议 — see lib/analysis/pipeline.ts's `loadPinnedType`). This
- * must happen at the schema layer, before `refineCard` runs, rather than by mutating `card.type`
- * after parsing: `refineCard` is what enforces that `playbook.kind` matches `type` (e.g. an
- * `experience` type requires an `experience`-shaped playbook), so narrowing `type` here makes a
- * disobedient model's mismatched playbook fail validation and go through the existing
- * invalid-output retry path, instead of a post-hoc type swap silently storing a card whose type
- * and playbook shape disagree.
+ * `pinnedType`, or a pinned suggestion containing type/usage, narrows those fields to literals
+ * (a human already set them via 改建议 — see lib/analysis/pipeline.ts). This must happen at the
+ * schema layer, before `refineCard` runs, so a disobedient model's mismatched type/usage/playbook
+ * fails validation and follows the existing invalid-output retry path.
  *
  * `overlapCandidates`, when given, narrows `overlap.target` the same way -- see
  * {@link overlapFieldFor}.
  */
-export function cardSchemaFor(slugs: string[], pinnedType?: CapabilityType, overlapCandidates: string[] = []) {
+export function cardSchemaFor(
+  slugs: string[],
+  pinned?: CapabilityType | { type: CapabilityType; usage?: "integrate" | "reference" },
+  overlapCandidates: string[] = []
+) {
   if (slugs.length === 0) throw new Error("cardSchemaFor requires at least one scenario slug");
   const nonEmpty = slugs as [string, ...string[]];
+  const pinnedType = typeof pinned === "string" ? pinned : pinned?.type;
+  const pinnedUsage = typeof pinned === "string" ? undefined : pinned?.usage;
   return cardObjectSchema
     .extend({
       scenarios: scenariosFieldFor(nonEmpty),
       type: pinnedType ? z.literal(pinnedType) : capabilityTypeSchema,
+      usage: pinnedUsage ? z.literal(pinnedUsage) : cardObjectSchema.shape.usage,
       overlap: overlapFieldFor(overlapCandidates)
     })
     .superRefine(refineCard);

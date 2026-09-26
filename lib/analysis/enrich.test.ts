@@ -45,20 +45,34 @@ function deps(opts: {
   searchUsage?: { inputTokens: number; outputTokens: number };
   /** rowCount the fake write-back UPDATE resolves with; 1 (a match) unless overridden. */
   writeBackRowCount?: number;
+  /** Whether the fake database reports this worker still owns an unexpired run lease. */
+  leaseActive?: boolean;
+  /** Successive lease-fence reads, allowing a lease to expire between the initial and pre-commit checks. */
+  leaseActiveSequence?: boolean[];
+  /** Tags and suggestion marker returned from the current row by the optimistic update. */
+  storedTags?: string[];
+  storedSuggestionBy?: "auto" | "human";
   /** The capture's URL, returned for the YouTube check; null (not a link capture) unless overridden. */
   captureUrl?: string | null;
 } = {}) {
   const calls: string[] = [];
   const steps: Array<{ step: string; ok: boolean; error: string | null; output: string | null }> = [];
   const updates: Array<{ text: string; values: unknown[] }> = [];
+  const transactionSql: string[] = [];
+  let released = 0;
+  let leaseCheckIndex = 0;
   const tagBumps: string[][] = [];
   let reasonPromptSeen = "";
   const capability = opts.capability === undefined ? capabilityRow : opts.capability;
   const reasonUsage = opts.reasonUsage ?? { inputTokens: 10, outputTokens: 10 };
   const searchUsage = opts.searchUsage ?? { inputTokens: 5, outputTokens: 5 };
 
-  const pool = {
-    query: async (text: string, values: unknown[] = []) => {
+  const query = async (text: string, values: unknown[] = []) => {
+      if (text.includes("FROM caphub_v2.analysis_runs") && text.includes("FOR UPDATE")) return { rows: [{ id: lease.runId }] };
+      if (text.includes("FROM caphub_v2.analysis_runs") && text.includes("clock_timestamp")) {
+        const active = opts.leaseActiveSequence?.[leaseCheckIndex++] ?? opts.leaseActive ?? true;
+        return { rows: [{ lease_active: active }] };
+      }
       if (text.startsWith("SELECT url FROM caphub_v2.captures")) {
         return { rows: [{ url: opts.captureUrl ?? null }] };
       }
@@ -71,14 +85,30 @@ function deps(opts: {
       }
       if (text.startsWith("UPDATE caphub_v2.capabilities SET")) {
         updates.push({ text, values });
-        return { rows: [], rowCount: opts.writeBackRowCount ?? 1 };
+        const matched = (opts.writeBackRowCount ?? 1) > 0;
+        return {
+          rows: matched && text.includes("RETURNING tags, suggestion_by") ? [{
+            tags: opts.storedTags ?? ((opts.storedSuggestionBy ?? capability?.suggestion_by) === "human" ? capability?.tags ?? [] : values[3] as string[]),
+            suggestion_by: opts.storedSuggestionBy ?? capability?.suggestion_by ?? "auto"
+          }] : [],
+          rowCount: matched ? 1 : 0
+        };
       }
       if (text.includes("INSERT INTO caphub_v2.tags")) {
         tagBumps.push(values[0] as string[]);
         return { rows: [] };
       }
       return { rows: [] };
-    }
+  };
+  const pool = {
+    query,
+    connect: async () => ({
+      query: async (text: string, values: unknown[] = []) => {
+        transactionSql.push(text);
+        return query(text, values);
+      },
+      release: () => { released += 1; }
+    })
   };
 
   const d: EnrichDeps = {
@@ -104,7 +134,7 @@ function deps(opts: {
       return opts.canonical === undefined ? canonicalRepo : opts.canonical;
     }
   };
-  return { d, calls, steps, updates, tagBumps, reasonPrompt: () => reasonPromptSeen };
+  return { d, calls, steps, updates, tagBumps, transactionSql, released: () => released, reasonPrompt: () => reasonPromptSeen };
 }
 
 describe("runEnrichment", () => {
@@ -123,6 +153,47 @@ describe("runEnrichment", () => {
     const { d, calls } = deps({ captureUrl: "https://github.com/a/b" });
     await runEnrichment(d, lease, new AbortController().signal);
     expect(calls).toContain("reason");
+  });
+
+  it("does not write when its lease expired or was reclaimed after provider work", async () => {
+    const { d, updates, transactionSql, released } = deps({ leaseActive: false });
+    await expect(runEnrichment(d, lease, new AbortController().signal)).rejects.toMatchObject({ code: "LEASE_LOST" });
+    expect(updates).toHaveLength(0);
+    expect(transactionSql.some((sql) => sql.includes("owner_token") && sql.includes("lease_until > clock_timestamp()"))).toBe(true);
+    expect(transactionSql).toContain("ROLLBACK");
+    expect(released()).toBe(1);
+  });
+
+  it("rolls back the card write when the lease expires before COMMIT", async () => {
+    const { d, updates, transactionSql, released } = deps({ leaseActiveSequence: [true, false] });
+    await expect(runEnrichment(d, lease, new AbortController().signal)).rejects.toMatchObject({ code: "LEASE_LOST" });
+    expect(updates).toHaveLength(1);
+    expect(transactionSql).toContain("ROLLBACK");
+    expect(transactionSql).not.toContain("COMMIT");
+    expect(released()).toBe(1);
+  });
+
+  it("rolls back an update and skips Telegram notification when cancellation lands before COMMIT", async () => {
+    const { d, updates, transactionSql } = deps();
+    const controller = new AbortController();
+    const originalConnect = d.pool.connect.bind(d.pool);
+    d.pool.connect = (async () => {
+      const client = await originalConnect();
+      const originalQuery = client.query.bind(client);
+      client.query = (async (text: string, values: unknown[] = []) => {
+        const result = await originalQuery(text, values);
+        if (text.startsWith("UPDATE caphub_v2.capabilities SET") && text.includes("RETURNING tags, suggestion_by")) controller.abort();
+        return result;
+      }) as never;
+      return client;
+    }) as never;
+    const notify = vi.fn(async () => {});
+    d.notifyEnriched = notify;
+    await expect(runEnrichment(d, lease, controller.signal)).rejects.toMatchObject({ code: "ABORTED" });
+    expect(updates).toHaveLength(1);
+    expect(transactionSql).toContain("ROLLBACK");
+    expect(transactionSql).not.toContain("COMMIT");
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it("fetches the canonical source, searches up to 2 open_questions, rewrites the card, and writes it back", async () => {
@@ -229,23 +300,25 @@ describe("runEnrichment", () => {
     expect(updates[0].text).toMatch(/tags = CASE WHEN suggestion_by = 'human' THEN tags ELSE \$4 END/);
   });
 
-  it("never writes verdict, verdict_by, status, progress, deep_analysis or notified_at, and warns (without throwing) when the write-back matches no row", async () => {
+  it("never writes verdict, verdict_by, status, progress, deep_analysis or notified_at, and fails explicitly when an optimistic suggestion guard matches no row", async () => {
     const { d, updates } = deps({ writeBackRowCount: 0 });
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      const out = await runEnrichment(d, lease, new AbortController().signal);
-      expect(out).toEqual({ capabilityId: "cab_1" });
-      expect(warn).toHaveBeenCalled();
-    } finally {
-      warn.mockRestore();
-    }
+    await expect(runEnrichment(d, lease, new AbortController().signal)).rejects.toMatchObject({ code: "SUGGESTION_CHANGED" });
     // Assert against the statement text itself, not just the param count -- a param-count-only
     // check can't catch a literal `notified_at = NULL` (or similar) being added to the SET list
     // without adding a corresponding placeholder.
     for (const forbidden of ["verdict", "verdict_by", "status", "progress", "deep_analysis", "notified_at", "prompts", "prompt_unresolved"]) {
       expect(updates[0].text).not.toMatch(new RegExp(`\\b${forbidden}\\b`));
     }
-    expect(updates[0].values).toHaveLength(12);
+    expect(updates[0].values).toHaveLength(14);
+    expect(updates[0].text).toMatch(/AND \(suggestion_by <> 'human' OR \(type = \$13 AND usage = \$14\)\)/);
+  });
+
+  it("does not notify after an optimistic human suggestion conflict", async () => {
+    const { d } = deps({ writeBackRowCount: 0 });
+    const notify = vi.fn(async () => {});
+    d.notifyEnriched = notify;
+    await expect(runEnrichment(d, lease, new AbortController().signal)).rejects.toMatchObject({ code: "SUGGESTION_CHANGED" });
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it("throws CAPABILITY_NOT_FOUND when the capture has no keep, non-deleted capability row", async () => {
@@ -290,6 +363,12 @@ describe("runEnrichment", () => {
       capability: pinnedCapability,
       rewrittenOverride: { ...rewrittenValue, type: pinnedCapability.type, usage: pinnedCapability.usage, tags: ["should-be-ignored"] }
     });
+    await runEnrichment(d, lease, new AbortController().signal);
+    expect(tagBumps).toEqual([]);
+  });
+
+  it("uses the actual tags and marker returned by the update for tag accounting", async () => {
+    const { d, tagBumps } = deps({ storedTags: ["human-edited"], storedSuggestionBy: "human" });
     await runEnrichment(d, lease, new AbortController().signal);
     expect(tagBumps).toEqual([]);
   });

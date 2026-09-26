@@ -26,7 +26,24 @@ describe("runTick error codes", () => {
   }
 
   it("records every allow-listed code as-is", async () => {
-    for (const code of RUN_ERROR_CODES) expect((await failWith(Object.assign(new Error(code), { code }))).errorCode).toBe(code);
+    expect(RUN_ERROR_CODES).toContain("LEASE_LOST");
+    expect(RUN_ERROR_CODES).toContain("SUGGESTION_CHANGED");
+    for (const code of RUN_ERROR_CODES) {
+      if (code === "LEASE_LOST") continue; // It is recognized but never passed to finish.
+      expect((await failWith(Object.assign(new Error(code), { code }))).errorCode).toBe(code);
+    }
+    expect(runErrorCode({ code: "LEASE_LOST" })).toBe("LEASE_LOST");
+  });
+
+  it("does not finish a run when its write fence reports lease loss", async () => {
+    const finishCalls: unknown[] = [];
+    const queue = {
+      claim: async () => lease,
+      heartbeat: async () => true,
+      finish: async (...args: unknown[]) => { finishCalls.push(args); return true; }
+    };
+    await runTick({ queue, run: async () => { throw Object.assign(new Error("lease lost"), { code: "LEASE_LOST" }); }, clock: () => new Date(), ownerToken: () => "old-token" }, new AbortController().signal);
+    expect(finishCalls).toEqual([]);
   });
 
   it("records unknown codes (e.g. pg '23505'), missing codes and non-Error throws as INTERNAL, keeping the message truncated to 500", async () => {

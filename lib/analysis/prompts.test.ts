@@ -61,7 +61,7 @@ describe("reasonPrompt", () => {
     const prompt = reasonPrompt({ material, extraction: null, sources: [], similar: [], existingTags: [], scenarios, pinnedType: "experience" });
     expect(prompt).toMatch(/硬性约束/);
     expect(prompt).toContain("experience");
-    expect(prompt).toMatch(/不得改判为其他类型/);
+    expect(prompt).toMatch(/必须原样保留/);
     expect(prompt).toMatch(/playbook\.content/);
   });
 
@@ -211,16 +211,19 @@ describe("deepSynthesizePrompt", () => {
     title: "Scrapling", type: "tool" as const, summary: "抓取框架",
     tags: ["web-scraping"], source_url: "https://example.com", playbook: { kind: "reference" as const, points: ["p"] }
   };
-  const sources = [{ title: "Docs", url: "https://a.example/1" }, { title: "Reddit", url: "https://b.example/2" }];
+  const sources = [
+    { title: "Docs", url: "https://a.example/1", content: "Official implementation details" },
+    { title: "Reddit", url: "https://b.example/2", content: "User feedback" }
+  ];
 
   it("numbers the retrieved sources from 0 so both cases and feedback can index into them", () => {
-    const prompt = deepSynthesizePrompt(subject, sources, ["fact one"]);
+    const prompt = deepSynthesizePrompt(subject, sources, [{ text: "fact one", source: 0 }]);
     expect(prompt).toContain("[0] Docs https://a.example/1");
     expect(prompt).toContain("[1] Reddit https://b.example/2");
   });
 
   it("asks feedback points for a source index, with null as the honest escape hatch rather than a guessed index", () => {
-    const prompt = deepSynthesizePrompt(subject, sources, ["fact one"]);
+    const prompt = deepSynthesizePrompt(subject, sources, [{ text: "fact one", source: 0 }]);
     // The point itself is capped and shaped as { text, source } …
     expect(prompt).toMatch(/feedback[^\n]*text ≤ 40 字, source/);
     // … and the grounding rule spells out both branches, including the no-guessing instruction.
@@ -239,10 +242,28 @@ describe("deepSynthesizePrompt", () => {
     expect(prompt).toContain("摘要要点：（无）");
   });
 
+  it("includes retrieved bodies and labels fact source indexes from the raw result list", () => {
+    const prompt = deepSynthesizePrompt(subject, sources, [{ text: "The CLI supports config files", source: 0 }]);
+    expect(prompt).toContain("Official implementation details");
+    expect(prompt).toContain("原始 source: [0] Docs https://a.example/1");
+  });
+
   it("folds the subject's summary_points into the deep-analysis subject text, not just the ~120-char summary lead (M3.8: most of a card's substance now lives in summary_points)", () => {
     const withPoints = { ...subject, summary_points: [{ label: "定位", text: "自适应反爬抓取库" }, { label: "限制", text: "仅支持 Python" }] };
     const prompt = deepSynthesizePrompt(withPoints, [], []);
     expect(prompt).toContain("摘要要点：**定位。** 自适应反爬抓取库 **限制。** 仅支持 Python");
+  });
+});
+
+describe("reasonPrompt with human-pinned suggestions", () => {
+  it("tells the model to keep both pinned type and usage and shape the playbook to match", () => {
+    const prompt = reasonPrompt({
+      material: { kind: "text", text: "source" }, extraction: null, sources: [], similar: [], existingTags: [],
+      scenarios: [{ slug: "coding", labelZh: "编程", labelEn: "Coding", keywords: [] }],
+      pinnedType: "skill", pinnedUsage: "reference"
+    });
+    expect(prompt).toContain("usage 已由人工确定为「reference」");
+    expect(prompt).toContain("playbook 必须与 type/usage 匹配");
   });
 });
 
@@ -297,7 +318,7 @@ describe("deep prompts carry the shared verbatim-prompts instruction", () => {
     title: "Scrapling", type: "tool" as const, summary: "抓取框架",
     tags: ["web-scraping"], source_url: "https://example.com", playbook: { kind: "reference" as const, points: ["p"] }
   };
-  const sources = [{ title: "Docs", url: "https://a.example/1" }];
+  const sources = [{ title: "Docs", url: "https://a.example/1", content: "bounded body" }];
 
   it("includes PROMPTS_STORED_SEPARATELY in deepPlanPrompt", () => {
     expect(deepPlanPrompt(subject)).toContain(PROMPTS_STORED_SEPARATELY);
@@ -308,7 +329,7 @@ describe("deep prompts carry the shared verbatim-prompts instruction", () => {
   });
 
   it("includes PROMPTS_STORED_SEPARATELY in deepSynthesizePrompt", () => {
-    expect(deepSynthesizePrompt(subject, sources, ["fact"])).toContain(PROMPTS_STORED_SEPARATELY);
+    expect(deepSynthesizePrompt(subject, sources, [{ text: "fact", source: null }])).toContain(PROMPTS_STORED_SEPARATELY);
   });
 });
 

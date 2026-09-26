@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { fetchCanonical, MAX_CANONICAL_BODY_BYTES } from "./canonical";
-import type { DnsLookup } from "./material/url";
+import type { DnsLookup, DnsRecord } from "./material/url";
 
 // A stand-in for `dns.promises.lookup` that resolves any hostname to a
 // single public address, so tests never touch real DNS or the network.
@@ -24,6 +24,17 @@ describe("fetchCanonical", () => {
     expect(result).toBeNull();
     expect(fetchFn).not.toHaveBeenCalled();
   });
+
+  it.each(["ftp://github.com/acme/widget", "https://user:secret@github.com/acme/widget"])(
+    "does not call GitHub API for unsafe repository URL syntax %s",
+    async (url) => {
+      const fetchFn = vi.fn();
+      const dnsLookup = vi.fn(async () => [{ address: "93.184.216.34", family: 4 }]);
+      await expect(fetchCanonical(url, { fetch: fetchFn as unknown as typeof fetch, dnsLookup })).resolves.toBeNull();
+      expect(fetchFn).not.toHaveBeenCalled();
+      expect(dnsLookup).not.toHaveBeenCalled();
+    }
+  );
 
   it("returns null without fetching for a loopback IP literal", async () => {
     const fetchFn = vi.fn();
@@ -66,6 +77,68 @@ describe("fetchCanonical", () => {
     // `url` reflects the canonical input, not the redirect target -- consistent with the rest of the module.
     expect(result).toEqual({ kind: "page", url: "https://widget.example/redirector", title: "Landing", text: "Landing Landed safely." });
     expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancels redirect response bodies before following the next URL", async () => {
+    let bodyCanceled = false;
+    let calls = 0;
+    const redirectBody = new ReadableStream<Uint8Array>({ cancel() { bodyCanceled = true; } });
+    const fetchFn = vi.fn(async () => {
+      if (calls++ === 0) return new Response(redirectBody, { status: 302, headers: { location: "https://widget.example/landing" } });
+      return htmlResponse("<html><body>landed</body></html>");
+    });
+
+    const result = await fetchCanonical("https://widget.example/redirector", { fetch: fetchFn as unknown as typeof fetch, dnsLookup: publicLookup });
+    expect(result?.text).toBe("landed");
+    expect(bodyCanceled).toBe(true);
+  });
+
+  it("cancels non-2xx response bodies before returning null", async () => {
+    let bodyCanceled = false;
+    const body = new ReadableStream<Uint8Array>({ cancel() { bodyCanceled = true; } });
+    const fetchFn = vi.fn(async () => new Response(body, { status: 404 }));
+
+    await expect(fetchCanonical("https://widget.example/gone", { fetch: fetchFn as unknown as typeof fetch, dnsLookup: publicLookup })).resolves.toBeNull();
+    expect(bodyCanceled).toBe(true);
+  });
+
+  it("pins the resolved address on every canonical redirect hop", async () => {
+    const addresses: Record<string, DnsRecord> = {
+      "widget.example": { address: "93.184.216.34", family: 4 },
+      "public.example": { address: "8.8.8.8", family: 4 }
+    };
+    const resolved: string[] = [];
+    const dnsLookup: DnsLookup = async (hostname) => {
+      resolved.push(hostname);
+      return [addresses[hostname]];
+    };
+    const originalFetch = globalThis.fetch;
+    const globalFetch = vi.fn(async () => new Response("global fetch bypass", { status: 200 }));
+    vi.stubGlobal("fetch", globalFetch);
+    const transport = vi.fn(async (url: URL, pinned: readonly DnsRecord[]) => {
+      if (url.hostname === "widget.example") return new Response(null, { status: 302, headers: { location: "https://public.example/landing" } });
+      expect(pinned).toEqual([addresses["public.example"]]);
+      return htmlResponse("<html><head><title>Pinned</title></head><body>pinned page</body></html>");
+    });
+    const call = fetchCanonical as unknown as (
+      url: string,
+      options: {
+        fetch: typeof fetch;
+        dnsLookup: DnsLookup;
+        transport: (url: URL, addresses: readonly DnsRecord[], init: RequestInit) => Promise<Response>;
+      }
+    ) => Promise<Awaited<ReturnType<typeof fetchCanonical>>>;
+
+    try {
+      await expect(call("https://widget.example/redirector", { fetch: globalThis.fetch, dnsLookup, transport })).resolves.toEqual({
+        kind: "page", url: "https://widget.example/redirector", title: "Pinned", text: "Pinned pinned page"
+      });
+      expect(transport).toHaveBeenCalledTimes(2);
+      expect(resolved).toEqual(["widget.example", "public.example"]);
+      expect(globalFetch).not.toHaveBeenCalled();
+    } finally {
+      vi.stubGlobal("fetch", originalFetch);
+    }
   });
 
   it("returns null on a 404", async () => {
@@ -119,6 +192,37 @@ describe("fetchCanonical", () => {
     }
   });
 
+  it("returns on timeout when DNS resolution never settles", async () => {
+    vi.useFakeTimers();
+    const fetchFn = vi.fn();
+    const stalledLookup: DnsLookup = async () => new Promise(() => {});
+    const promise = fetchCanonical("https://widget.example/slow-dns", { fetch: fetchFn as unknown as typeof fetch, dnsLookup: stalledLookup });
+    const observed = promise.then((value) => value, (error) => error);
+
+    try {
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(Promise.race([observed, Promise.resolve("still-pending")])).resolves.toBeNull();
+      expect(fetchFn).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not resolve DNS after caller cancellation", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const fetchFn = vi.fn();
+    const dnsLookup = vi.fn(async () => { throw new Error("DNS should not run"); });
+
+    await expect(fetchCanonical("https://widget.example/aborted", {
+      fetch: fetchFn as unknown as typeof fetch,
+      dnsLookup,
+      signal: controller.signal
+    })).resolves.toBeNull();
+    expect(dnsLookup).not.toHaveBeenCalled();
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
   it("fetches README and repo metadata for a GitHub repo URL", async () => {
     const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
       const target = typeof input === "string" ? input : input.toString();
@@ -155,6 +259,27 @@ describe("fetchCanonical", () => {
         homepage: "https://widget.example"
       }
     });
+  });
+
+  it("caps GitHub metadata before parsing an oversized JSON response", async () => {
+    const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
+      const target = typeof input === "string" ? input : input.toString();
+      if (target === "https://api.github.com/repos/acme/widget") {
+        return new Response(JSON.stringify({
+          html_url: "https://github.com/acme/widget",
+          full_name: "acme/widget",
+          description: "A widget library",
+          padding: "x".repeat(MAX_CANONICAL_BODY_BYTES * 2)
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (target === "https://github.com/acme/widget") return htmlResponse("<html><body>bounded fallback</body></html>");
+      throw new Error(`unexpected fetch: ${target}`);
+    });
+
+    await expect(fetchCanonical("https://github.com/acme/widget", { fetch: fetchFn as unknown as typeof fetch, dnsLookup: publicLookup })).resolves.toEqual({
+      kind: "page", url: "https://github.com/acme/widget", title: "", text: "bounded fallback"
+    });
+    expect(fetchFn).toHaveBeenCalledTimes(2);
   });
 
   it("degrades to a plain page fetch when the GitHub API returns 403", async () => {

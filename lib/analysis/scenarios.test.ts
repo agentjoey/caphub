@@ -100,6 +100,18 @@ describe("cardSchemaFor", () => {
     expect(parsed.playbook).toEqual({ kind: "experience", content: "做法本身", when_to_use: "何时用" });
   });
 
+  it("pins human type and usage together so a stale type/usage playbook cannot validate", () => {
+    const schema = cardSchemaFor(slugs, { type: "skill", usage: "reference" });
+    expect(() => schema.parse({
+      ...valid, type: "skill", usage: "integrate", scenarios: ["coding"],
+      playbook: { kind: "integrate", install: [], repo: null }
+    })).toThrow();
+    expect(schema.parse({
+      ...valid, type: "skill", usage: "reference", scenarios: ["coding"],
+      playbook: { kind: "reference", points: ["how to assess"] }
+    })).toMatchObject({ type: "skill", usage: "reference", playbook: { kind: "reference" } });
+  });
+
   it("without a pinnedType, behaves exactly as before (any valid type/playbook combination passes)", () => {
     const schema = cardSchemaFor(slugs);
     expect(schema.parse({ ...valid, type: "skill", scenarios: ["coding"] }).type).toBe("skill");

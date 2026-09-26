@@ -5,7 +5,7 @@ import { createDeepSeekCall } from "../providers/deepseek";
 import { ProviderError } from "../providers/errors";
 import type { SearchCall } from "../providers/minimax-search";
 import { createTavilySearch } from "../providers/tavily";
-import type { Lease } from "../queue/runs";
+import { assertRunNotAborted, withLeaseTransaction, type Lease } from "../queue/runs";
 import { jsonStringifyStripNul, stripNul } from "../text/sanitize";
 import { RunBudget } from "./budget";
 import { fetchCanonical, type CanonicalResult } from "./canonical";
@@ -32,7 +32,7 @@ export const ENRICH_BUDGET_LIMITS = { maxCalls: 5, maxTokens: 250_000 };
 export const ENRICH_MAX_SEARCHES = 2;
 
 export interface EnrichDeps {
-  pool: Pick<Pool, "query">;
+  pool: Pick<Pool, "query" | "connect">;
   /** DeepSeek structured call for the single rewrite ("reason") step. */
   reason: StructuredCall;
   /** Tavily search, one call per targeted open_question (≤ 2). */
@@ -240,10 +240,14 @@ export async function runEnrichment(deps: EnrichDeps, lease: Lease, signal: Abor
     // stamping enriched_at. Deep analysis (explicitly requested topic research) is unaffected.
     const capture = (await deps.pool.query<{ url: string | null }>(
       "SELECT url FROM caphub_v2.captures WHERE id = $1", [lease.captureId])).rows[0];
+    assertRunNotAborted(t.signal);
     if (capture?.url && parseYouTubeUrl(capture.url)) {
       // A card enriched before this rule (or before a rerun rewrote it from the video) would
       // otherwise keep showing 已补充调研 over content that no longer came from that pass.
-      await deps.pool.query("UPDATE caphub_v2.capabilities SET enriched_at = NULL WHERE id = $1 AND enriched_at IS NOT NULL", [capability.id]);
+      await withLeaseTransaction(deps.pool, lease, t.signal, async (db) => {
+        await db.query("UPDATE caphub_v2.capabilities SET enriched_at = NULL WHERE id = $1 AND enriched_at IS NOT NULL", [capability.id]);
+        assertRunNotAborted(t.signal);
+      });
       return { capabilityId: capability.id };
     }
     const budget = new RunBudget(ENRICH_BUDGET_LIMITS);
@@ -288,6 +292,7 @@ export async function runEnrichment(deps: EnrichDeps, lease: Lease, signal: Abor
     });
 
     const sourceFacts = finalizeSourceFacts(mergeSourceFacts(rewritten.source_facts, canonical));
+    assertRunNotAborted(t.signal);
 
     // The `suggestion_by = 'human'` guard is re-evaluated by the CASE expressions below against
     // the row's *current* value at UPDATE time, not `capability.suggestion_by` read up to
@@ -298,7 +303,8 @@ export async function runEnrichment(deps: EnrichDeps, lease: Lease, signal: Abor
     // The schema-level `z.literal` pinning above (enrichCardSchemaFor) is a belt-and-braces
     // layer only when suggestion_by was already 'human' at load time -- this CASE is the actual
     // enforcement against a suggestion_by that changed after that.
-    const result = await deps.pool.query(
+    await withLeaseTransaction(deps.pool, lease, t.signal, async (db) => {
+      const result = await db.query<{ tags: string[]; suggestion_by: "auto" | "human" }>(
       `UPDATE caphub_v2.capabilities SET
          type = CASE WHEN suggestion_by = 'human' THEN type ELSE $2 END,
          usage = CASE WHEN suggestion_by = 'human' THEN usage ELSE $3 END,
@@ -306,42 +312,47 @@ export async function runEnrichment(deps: EnrichDeps, lease: Lease, signal: Abor
          summary = $5, summary_points = $12, signals = $6, playbook = $7,
          source_facts = $8, score = $9, score_reason = $10, open_questions = $11,
          enriched_at = now(), updated_at = now()
-       WHERE id = $1 AND deleted_at IS NULL`,
+       WHERE id = $1 AND deleted_at IS NULL
+         AND (suggestion_by <> 'human' OR (type = $13 AND usage = $14))
+       RETURNING tags, suggestion_by`,
       [
         capability.id, rewritten.type, rewritten.usage, rewritten.tags.map(stripNul), stripNul(rewritten.summary), jsonStringifyStripNul(rewritten.signals),
         jsonStringifyStripNul(rewritten.playbook), jsonStringifyStripNul(sourceFacts), rewritten.score,
-        stripNul(rewritten.score_reason), jsonStringifyStripNul(rewritten.open_questions), jsonStringifyStripNul(rewritten.summary_points)
+        stripNul(rewritten.score_reason), jsonStringifyStripNul(rewritten.open_questions), jsonStringifyStripNul(rewritten.summary_points), rewritten.type, rewritten.usage
       ]
-    );
-    if (result.rowCount === 0) {
-      // The card was soft-deleted between loadCapability's read and this write -- not a failure
-      // worth retrying (there's nothing left to enrich), but worth surfacing since it means the
-      // run's provider calls above were spent for nothing.
-      console.warn(JSON.stringify({ runId: lease.runId, enrichWriteBack: "no matching row (deleted mid-run?)", capabilityId: capability.id }));
-    } else {
+      );
+      assertRunNotAborted(t.signal);
+      const row = result.rows[0];
+      if (!row) throw Object.assign(new Error("SUGGESTION_CHANGED"), { code: "SUGGESTION_CHANGED" as const });
       // Mirrors pipeline.ts's own write path: bumpTags only when the write actually landed and
       // the tags this run wrote actually changed (never for a pinned card, whose tags column the
       // UPDATE above left untouched) -- otherwise topTags()'s "reuse existing tags" list never
       // learns a tag this pass introduced, encouraging synonym drift across enrichment rewrites.
-      if (!pinned && !tagsEqual(capability.tags, rewritten.tags)) {
+      if (row.suggestion_by !== "human" && !tagsEqual(capability.tags, row.tags)) {
+        await db.query("SAVEPOINT enrich_tag_bump");
         try {
-          await bumpTags(deps.pool, rewritten.tags);
+          await bumpTags(db, row.tags);
+          assertRunNotAborted(t.signal);
+          await db.query("RELEASE SAVEPOINT enrich_tag_bump");
         } catch (error) {
+          await db.query("ROLLBACK TO SAVEPOINT enrich_tag_bump");
+          await db.query("RELEASE SAVEPOINT enrich_tag_bump");
+          assertRunNotAborted(t.signal);
           console.warn(JSON.stringify({ runId: lease.runId, enrichBumpTagsFailed: error instanceof Error ? error.message : String(error), capabilityId: capability.id }));
         }
       }
-      // M3.7 controller ruling: the write-back above deliberately never touches notified_at (a
-      // background rewrite must never re-push), but that means the phone card would otherwise
-      // keep showing the pre-enrichment summary forever unless it's edited in place. Best-effort
-      // and non-fatal -- the enrich write-back above already succeeded regardless of whether this
-      // edit does; deps.notifyEnriched (lib/telegram/decide.ts's editCardAfterEnrich) is itself
-      // contracted not to throw, this try/catch is belt-and-braces only.
-      if (deps.notifyEnriched) {
-        try {
-          await deps.notifyEnriched(capability.id, t.signal);
-        } catch (error) {
-          console.warn(JSON.stringify({ runId: lease.runId, enrichNotifyFailed: error instanceof Error ? error.message : String(error), capabilityId: capability.id }));
-        }
+      return row;
+    });
+
+    // M3.7 controller ruling: the write-back above deliberately never touches notified_at (a
+    // background rewrite must never re-push), but that means the phone card would otherwise
+    // keep showing the pre-enrichment summary forever unless it's edited in place. Notify only
+    // after a fenced commit; conflicts and rolled-back writes never announce success.
+    if (deps.notifyEnriched) {
+      try {
+        await deps.notifyEnriched(capability.id, t.signal);
+      } catch (error) {
+        console.warn(JSON.stringify({ runId: lease.runId, enrichNotifyFailed: error instanceof Error ? error.message : String(error), capabilityId: capability.id }));
       }
     }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { decideAction, editSuggestionAction, rerunAction, reviewAction, softDeleteAction } from "../../../actions";
 import type { CapabilityType } from "../../../../lib/analysis/card";
@@ -35,7 +35,8 @@ export function DetailActions({
   const router = useRouter();
   const [state, setState] = useState<State>("idle");
   const [updatedAt, setUpdatedAt] = useLockToken(initialUpdatedAt);
-  const [reviewPending, setReviewPending] = useState(initialReviewPending);
+  const [reviewRefreshPending, startReviewRefresh] = useTransition();
+  const reviewPending = initialReviewPending || reviewRefreshPending;
   const [message, setMessage] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -93,27 +94,28 @@ export function DetailActions({
     if (disabled || reviewPending) return;
     setState("busy");
     setMessage(null);
-    try {
-      const result = await reviewAction(id);
-      // Intentionally NOT setUpdatedAt(result.updatedAt) on success: requestReview() only sets
-      // review_requested_at/review_error, it never touches capabilities.updated_at, and its
-      // ActionResult.updatedAt is just the server's current time, not a new lock token. Adopting
-      // it as `updatedAt` would desync the optimistic-lock value from the row's real
-      // updated_at, so the very next decide()/saveEdit()/confirmDelete() would always CONFLICT.
-      if (result.ok) {
-        setReviewPending(true);
+    startReviewRefresh(async () => {
+      try {
+        const result = await reviewAction(id);
+        // Intentionally NOT setUpdatedAt(result.updatedAt) on success: requestReview() only sets
+        // review_requested_at/review_error, it never touches capabilities.updated_at, and its
+        // ActionResult.updatedAt is just the server's current time, not a new lock token. Adopting
+        // it as `updatedAt` would desync the optimistic-lock value from the row's real
+        // updated_at, so the very next decide()/saveEdit()/confirmDelete() would always CONFLICT.
+        if (result.ok) {
+          setState("idle");
+          router.refresh();
+          return;
+        }
+        // A CONFLICT here means "复核已在进行中" (already queued/running) — not a lock conflict
+        // on this capability row — so it must not disable the rest of the card's actions.
+        setMessage(result.message);
         setState("idle");
-        router.refresh();
-        return;
+      } catch {
+        setMessage(dict.genericError);
+        setState("idle");
       }
-      // A CONFLICT here means "复核已在进行中" (already queued/running) — not a lock conflict
-      // on this capability row — so it must not disable the rest of the card's actions.
-      setMessage(result.message);
-      setState("idle");
-    } catch {
-      setMessage(dict.genericError);
-      setState("idle");
-    }
+    });
   }
 
   async function rerun() {

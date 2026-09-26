@@ -31,9 +31,8 @@ export function createGeminiEmbed(opts: { apiKey: string; fetch?: typeof fetch }
       if (texts.length > MAX_TEXTS) throw new Error(`gemini embed: max ${MAX_TEXTS} texts per call, got ${texts.length}`);
       const outerSignal = signal ?? new AbortController().signal;
       const t = withTimeout(outerSignal, TIMEOUT_MS);
-      let response: Response;
       try {
-        response = await fetchFn(GEMINI_EMBED_URL, {
+        const response = await fetchFn(GEMINI_EMBED_URL, {
           method: "POST",
           headers: { "x-goog-api-key": opts.apiKey, "content-type": "application/json" },
           body: JSON.stringify({
@@ -46,16 +45,25 @@ export function createGeminiEmbed(opts: { apiKey: string; fetch?: typeof fetch }
           }),
           signal: t.signal
         });
+        if (!response.ok) throw new ProviderError(failureForHttpStatus(response.status));
+
+        let body: unknown;
+        try {
+          body = await response.json();
+        } catch (error) {
+          if (error instanceof SyntaxError) throw new ProviderError("INVALID_OUTPUT", { cause: error });
+          throw error;
+        }
+        const parsed = responseSchema.safeParse(body);
+        if (!parsed.success) throw new ProviderError("INVALID_OUTPUT");
+        if (parsed.data.embeddings.length !== texts.length) throw new ProviderError("INVALID_OUTPUT");
+        return parsed.data.embeddings.map((e) => l2Normalize(e.values));
       } catch (error) {
+        if (error instanceof ProviderError) throw error;
         throw new ProviderError(t.timedOut() ? "TIMEOUT" : outerSignal.aborted ? "ABORTED" : "UNAVAILABLE", { cause: error });
       } finally {
         t.clear();
       }
-      if (!response.ok) throw new ProviderError(failureForHttpStatus(response.status));
-      const parsed = responseSchema.safeParse(await response.json().catch(() => null));
-      if (!parsed.success) throw new ProviderError("INVALID_OUTPUT");
-      if (parsed.data.embeddings.length !== texts.length) throw new ProviderError("INVALID_OUTPUT");
-      return parsed.data.embeddings.map((e) => l2Normalize(e.values));
     }
   };
 }

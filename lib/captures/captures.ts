@@ -1,9 +1,10 @@
 import type { Pool } from "pg";
 import type { Pipeline } from "../config";
 import { newId } from "../ids";
+import { stripNul } from "../text/sanitize";
 import type { ObjectStore } from "../storage/s3";
 import { makeThumbnail, thumbKeyFor } from "../storage/thumbs";
-import { dedupeKeyFor, normalizeText, normalizeUrl, type CaptureInput } from "./dedupe";
+import { dedupeKeyFor, normalizeUrl, type CaptureInput } from "./dedupe";
 
 export interface SubmitResult { captureId: string; runId: string | null; duplicate: boolean }
 
@@ -55,7 +56,7 @@ export async function submitCapture(
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
       [captureId, input.source, input.kind, objectRef?.key ?? null,
         input.kind === "image" ? input.mimeType : null,
-        input.kind === "text" ? normalizeText(input.text) : null,
+        input.kind === "text" ? stripNul(input.text) : null,
         input.kind === "url" ? normalizeUrl(input.url) : null,
         dedupeKey, input.telegram?.chatId ?? null, input.telegram?.messageId ?? null, thumbKey]
     );

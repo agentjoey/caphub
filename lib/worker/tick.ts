@@ -3,7 +3,8 @@ import type { Lease, RunQueue } from "../queue/runs";
 /** Error codes a failed run may record; any other thrown code (or none) is recorded as INTERNAL. */
 export const RUN_ERROR_CODES = [
   "TIMEOUT", "AUTHENTICATION", "BILLING", "UNAVAILABLE", "INVALID_OUTPUT", "ABORTED", "BUDGET",
-  "OBJECT_UNAVAILABLE", "PIPELINE_UNAVAILABLE", "CAPTURE_NOT_FOUND", "INVALID_IMAGE", "REASON_STEP_NOT_FOUND", "CAPABILITY_NOT_FOUND"
+  "OBJECT_UNAVAILABLE", "PIPELINE_UNAVAILABLE", "CAPTURE_NOT_FOUND", "INVALID_IMAGE", "REASON_STEP_NOT_FOUND", "CAPABILITY_NOT_FOUND",
+  "LEASE_LOST", "SUGGESTION_CHANGED"
 ] as const;
 export type RunErrorCode = (typeof RUN_ERROR_CODES)[number] | "INTERNAL";
 
@@ -45,7 +46,9 @@ export async function runTick(deps: TickDeps, signal: AbortSignal): Promise<"idl
       const errorCode = runErrorCode(error);
       const errorMessage = (error instanceof Error ? error.message : String(error)).slice(0, 500);
       if (errorCode === "INTERNAL") deps.log?.({ runId: lease.runId, internalError: errorMessage });
-      await deps.queue.finish(lease, { state: "failed", errorCode, errorMessage }, deps.clock());
+      // A lease-fence failure means this runner has no authority to finish the run, even as
+      // failed. Leave the row to its current owner / normal expiry reclaim path.
+      if (errorCode !== "LEASE_LOST") await deps.queue.finish(lease, { state: "failed", errorCode, errorMessage }, deps.clock());
     }
   } finally {
     clearInterval(heartbeat);
