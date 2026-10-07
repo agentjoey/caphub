@@ -60,6 +60,7 @@ export const dictZh = {
     clearFile: "清除图片",
     promise: "投递 → 分析 → 建档",
     dropHeading: "把截图拖到这里",
+    dropRelease: "松手即投递",
     dropHint: "支持 PNG、JPEG、WebP，也可以直接粘贴。同一张图不会重复分析。",
     chooseFile: "选择图片",
     contextTitle: "文字或链接",

@@ -22,6 +22,21 @@ export function CaptureForm({ locale = "zh" }: { locale?: Locale }) {
   const [duplicateCapabilityId, setDuplicateCapabilityId] = useState<string | null>(null);
   const [duplicateNotice, setDuplicateNotice] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  // dragenter/dragleave fire for every child the pointer crosses, so count them: the zone is lit
+  // while the count is above zero, not just until the first child's dragleave.
+  const dragDepth = useRef(0);
+  const [dragActive, setDragActive] = useState(false);
+
+  function handleDragEnter(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    dragDepth.current += 1;
+    setDragActive(true);
+  }
+
+  function handleDragLeave() {
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragActive(false);
+  }
 
   function chooseFile(candidate: File | undefined | null) {
     if (!candidate) return;
@@ -41,6 +56,8 @@ export function CaptureForm({ locale = "zh" }: { locale?: Locale }) {
 
   function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
+    dragDepth.current = 0;
+    setDragActive(false);
     chooseFile(event.dataTransfer.files[0]);
   }
 
@@ -105,7 +122,8 @@ export function CaptureForm({ locale = "zh" }: { locale?: Locale }) {
           <div className="caphub-section-heading"><h2 id="capture-evidence-title">{dict.evidenceTitle}</h2><span>{dict.evidenceHint}</span></div>
           <input ref={inputRef} id="capture-image" aria-label={dict.fileInputAria} type="file" accept="image/png,image/jpeg,image/webp" hidden
             disabled={pending} onChange={(event) => chooseFile(event.currentTarget.files?.[0])} />
-          <div className="caphub-drop-zone" role="group" aria-label={dict.dropZoneAria}
+          <div className="caphub-drop-zone" role="group" aria-label={dict.dropZoneAria} data-drag={dragActive ? "true" : undefined}
+            onDragEnter={handleDragEnter} onDragLeave={handleDragLeave}
             onDragOver={(event) => event.preventDefault()} onDrop={handleDrop} onPaste={handlePaste}>
             {file ? (
               <div className="caphub-selected-file">
@@ -123,7 +141,7 @@ export function CaptureForm({ locale = "zh" }: { locale?: Locale }) {
                   </svg>
                 </span>
                 <span className="caphub-promise">{dict.promise}</span>
-                <h3>{dict.dropHeading}</h3>
+                <h3>{dragActive ? dict.dropRelease : dict.dropHeading}</h3>
                 <p>{dict.dropHint}</p>
                 <button className="caphub-quiet-button" type="button" onClick={() => inputRef.current?.click()} disabled={pending}>{dict.chooseFile}</button>
               </div>

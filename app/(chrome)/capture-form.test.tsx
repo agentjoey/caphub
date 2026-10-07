@@ -66,4 +66,26 @@ describe("CaptureForm", () => {
     await waitFor(() => expect(screen.getByText(/这条内容之前投递过，已指向原记录/)).toBeTruthy());
     expect(screen.queryByRole("link", { name: "查看已有卡片" })).toBeNull();
   });
+
+  it("lights the drop zone up while a file is dragged over it, and settles back when it leaves", () => {
+    render(<CaptureForm />);
+    const zone = screen.getByRole("group", { name: "截图拖放区" });
+    fireEvent.dragEnter(zone);
+    // Entering a child element fires another dragenter before the outer dragleave: still lit.
+    fireEvent.dragEnter(zone.querySelector("h3")!);
+    fireEvent.dragLeave(zone);
+    expect(zone.getAttribute("data-drag")).toBe("true");
+    expect(screen.getByText("松手即投递")).toBeTruthy();
+    fireEvent.dragLeave(zone.querySelector("h3")!);
+    expect(zone.hasAttribute("data-drag")).toBe(false);
+    expect(screen.queryByText("松手即投递")).toBeNull();
+  });
+
+  it("clears the drag state on drop", () => {
+    render(<CaptureForm />);
+    const zone = screen.getByRole("group", { name: "截图拖放区" });
+    fireEvent.dragEnter(zone);
+    fireEvent.drop(zone, { dataTransfer: { files: [pngFile()] } });
+    expect(zone.hasAttribute("data-drag")).toBe(false);
+  });
 });

@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useLayoutEffect, useRef, useState } from "react";
 import { format } from "../../lib/i18n";
 import { NAV_ITEMS, isNavCurrent } from "./nav";
 
@@ -20,8 +21,28 @@ export function PrimaryNav({
   countAria?: string;
 }) {
   const pathname = usePathname();
+  const navRef = useRef<HTMLElement>(null);
+  // The current item's underline is one bar that slides between items, measured after layout. Until
+  // it is measured (server render, first paint) each link's own CSS underline shows instead, and
+  // the very first placement doesn't animate — only moves between pages do.
+  const [bar, setBar] = useState<{ left: number; width: number; moved: boolean } | null>(null);
+  useLayoutEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+    const place = () => {
+      const current = nav.querySelector<HTMLElement>("a[aria-current='page']");
+      setBar((prev) => current
+        ? { left: current.offsetLeft, width: current.offsetWidth, moved: prev !== null }
+        : null);
+    };
+    place();
+    // Labels change width when the web font arrives or the locale switches.
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(place);
+    observer?.observe(nav);
+    return () => observer?.disconnect();
+  }, [pathname]);
   return (
-    <nav className="primary-nav" aria-label={navAria}>
+    <nav className="primary-nav" aria-label={navAria} ref={navRef} data-bar={bar ? "" : undefined}>
       {NAV_ITEMS.map((item) => {
         const label = labels[item.href] ?? item.label;
         const count = counts[item.href] ?? 0;
@@ -37,6 +58,14 @@ export function PrimaryNav({
           </Link>
         );
       })}
+      {bar && (
+        <span
+          className="primary-nav__bar"
+          aria-hidden="true"
+          data-moved={bar.moved ? "" : undefined}
+          style={{ transform: `translateX(${bar.left}px)`, width: bar.width }}
+        />
+      )}
     </nav>
   );
 }

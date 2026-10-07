@@ -238,6 +238,22 @@ body {
   background: var(--amber);
 }
 
+/* The sliding underline (primary-nav.tsx): one bar positioned on the current item, inset by the
+   link's own padding so it matches the static ::after it replaces once measured. */
+.primary-nav { position: relative; }
+.primary-nav[data-bar] a[aria-current="page"]::after { display: none; }
+.primary-nav__bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--amber);
+  background-clip: content-box;
+  padding: 0 var(--space-4);
+  pointer-events: none;
+}
+.primary-nav__bar[data-moved] { transition: transform var(--dur-3) var(--ease-out), width var(--dur-3) var(--ease-out); }
+
 /* Language switch: a two-segment toggle */
 .lang-switch {
   display: inline-flex;
@@ -373,6 +389,7 @@ body {
   }
   .primary-nav a { padding: 0 var(--space-3); }
   .primary-nav a[aria-current="page"]::after { left: 12px; right: 12px; }
+  .primary-nav__bar { padding: 0 var(--space-3); }
   .main-content {
     padding: var(--space-5) var(--space-4) 56px;
   }
@@ -402,6 +419,10 @@ body {
 .caphub-section-heading h2 { margin: 0; font-size: var(--text-xl); font-weight: 700; letter-spacing: -0.015em; line-height: var(--leading-heading); }
 .caphub-section-heading > span { color: var(--ink-faint); font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: 0.04em; text-transform: uppercase; }
 .caphub-drop-zone { display: grid; min-height: 258px; place-items: center; padding: 28px; text-align: center; background-color: var(--paper); background-image: repeating-linear-gradient(-45deg, transparent 0, transparent 8px, var(--hairline-faint) 8px, var(--hairline-faint) 9px); border: 1px dashed var(--hairline-strong); border-radius: var(--radius-lg); }
+.caphub-drop-zone { transition: border-color var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out), background-color var(--dur-2) var(--ease-out); }
+/* A file held over the zone: solid ink edge and a hard offset shadow — the one place the app uses
+   one, so "let go here" feels physical. */
+.caphub-drop-zone[data-drag="true"] { background-color: var(--paper-raised); border: 1px solid var(--ink); box-shadow: 4px 4px 0 var(--ink); }
 .caphub-drop-content { display: grid; justify-items: center; max-width: 430px; }
 .caphub-upload-mark { display: grid; width: 54px; height: 54px; margin-bottom: 16px; place-items: center; background: var(--paper-raised); border: 1px solid var(--hairline-strong); border-radius: 50%; }
 .caphub-upload-mark svg { width: 24px; height: 24px; }
@@ -684,6 +705,12 @@ a.badge--status-superseded:hover { border-color: var(--ink); }
   .search-form input { font-size: 16px; }
 }
 
+/* Library → detail: the card title morphs into the page heading (components/library/shared-title.tsx). */
+::view-transition-group(.morph) { animation-duration: var(--dur-3); animation-timing-function: var(--ease-out); }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+}
+
 /* Library (2026-10-08 refresh): queue links in the page head, a type bar plus one folded filter
    panel, applied-filter chips, then one card per capability. */
 .library-queues { display: flex; flex-wrap: wrap; gap: var(--space-2); }
@@ -808,6 +835,9 @@ a.video-moments__t:hover { color: var(--ink); }
 .code-block { display: flex; align-items: flex-start; gap: var(--space-3); padding: 9px 8px 9px 14px; background: var(--paper); border: 1px solid var(--hairline); border-radius: var(--radius-md); }
 .code-block pre { flex: 1; min-width: 0; margin: 0; padding-top: 2px; font-family: var(--font-mono); font-size: var(--text-sm); line-height: 1.6; color: var(--ink); }
 .code-block__copy { flex: none; }
+/* "已复制": one small settle — --ease-pop is for confirmations like this, never decoration. */
+.btn[data-status="copied"] { animation: caphub-pop var(--dur-2) var(--ease-pop); }
+@keyframes caphub-pop { from { transform: scale(0.94); } }
 .code-block__copy .btn { padding: 3px 10px; font-size: var(--text-xs); background: var(--paper-raised); }
 .playbook__repo { margin-top: var(--space-3); font-family: var(--font-mono); font-size: var(--text-sm); overflow-wrap: anywhere; }
 .prompt-block { max-width: var(--measure); margin-top: var(--space-4); padding: 14px 16px; background: var(--paper); border-left: 2px solid var(--amber); border-radius: 0 var(--radius-md) var(--radius-md) 0; }

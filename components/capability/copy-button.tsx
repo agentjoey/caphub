@@ -32,7 +32,7 @@ export function CopyButton({ text, label, locale = "zh" }: { text: string; label
   // only its text changes.
   return (
     <>
-      <button type="button" className="btn" onClick={copy}>
+      <button type="button" className="btn" data-status={status} onClick={copy}>
         {message || resolvedLabel}
       </button>
       <span className="sr-only" role="status" aria-live="polite">{message}</span>

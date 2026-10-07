@@ -6,6 +6,7 @@ import { getDict, type Locale } from "../../lib/i18n";
 import { CapturePreview } from "../capability/capture-preview";
 import { ScoreBadge } from "../capability/score-badge";
 import { TagList } from "../capability/tag-list";
+import { SharedTitle } from "./shared-title";
 
 /** Tags shown on a card before the `+N` remainder (M3.8 decision 4, carried over from the list row). */
 const CARD_TAGS = 3;
@@ -25,10 +26,12 @@ export function CapabilityCard({ row, locale, relativeTime }: { row: CapabilityR
     <Link className="cap-card" href={`/library/${row.id}`} data-muted={muted ? "" : undefined}>
       <CapturePreview capture={row.capture} size="card" placeholder={typeLabel(row.type, locale)} locale={locale} />
       <div className="cap-card__body">
-        <h2 className="cap-card__title">
-          {row.title}
-          {serial && <span className="serial"> {serial}</span>}
-        </h2>
+        <SharedTitle id={row.id}>
+          <h2 className="cap-card__title">
+            {row.title}
+            {serial && <span className="serial"> {serial}</span>}
+          </h2>
+        </SharedTitle>
         {row.summary.trim() !== "" && <p className="cap-card__summary">{row.summary}</p>}
         <div className="cap-card__badges">
           <span className="badge badge--type">{typeLabel(row.type, locale)}</span>

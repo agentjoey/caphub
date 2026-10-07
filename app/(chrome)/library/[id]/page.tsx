@@ -26,6 +26,7 @@ import { libraryHref } from "../../../../lib/library/search-params";
 import { getRuntime } from "../../../../lib/runtime";
 import { getLocale } from "../../../../lib/i18n/locale";
 import { format, getDict } from "../../../../lib/i18n";
+import { SharedTitle } from "../../../../components/library/shared-title";
 import { PipelineWatcher } from "../../../../components/shell/pipeline-watcher";
 import { DetailActions } from "./detail-actions";
 
@@ -92,31 +93,33 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       <p className="back-link"><Link href="/library">{dict.detail.back}</Link></p>
       <div className="page-head">
         <div>
-          <h1 className="page-title">
-            {detail.title}
-            {serial && <span className="serial"> {serial}</span>}
-            <ScoreBadge score={detail.score} reason={detail.scoreReason} locale={locale} />
-            {detail.deepAnalysis && (
-              <span className="badge badge--deep" title={dict.deepAnalysis.badgeAria}>{dict.deepAnalysis.badge}</span>
-            )}
-            {detail.enrichedAt && (
-              <span className="badge badge--enriched" title={format(dict.detail.enrichedBadgeAria, { date: formatDateTime(detail.enrichedAt, locale) })}>
-                {format(dict.detail.enrichedBadge, { date: formatDateTime(detail.enrichedAt, locale) })}
-              </span>
-            )}
-            {detail.status === "deprecated" && (
-              <span className="badge badge--status-deprecated">{dict.statusBadge.deprecated}</span>
-            )}
-            {detail.status === "superseded" && (
-              detail.supersededBy && detail.supersededBySerial ? (
-                <Link className="badge badge--status-superseded" href={`/library/${detail.supersededBy}`}>
-                  {format(dict.statusBadge.supersededBy, { target: detail.supersededBySerial })}
-                </Link>
-              ) : (
-                <span className="badge badge--status-superseded">{dict.statusBadge.supersededGeneric}</span>
-              )
-            )}
-          </h1>
+          <SharedTitle id={detail.id}>
+            <h1 className="page-title">
+              {detail.title}
+              {serial && <span className="serial"> {serial}</span>}
+              <ScoreBadge score={detail.score} reason={detail.scoreReason} locale={locale} />
+              {detail.deepAnalysis && (
+                <span className="badge badge--deep" title={dict.deepAnalysis.badgeAria}>{dict.deepAnalysis.badge}</span>
+              )}
+              {detail.enrichedAt && (
+                <span className="badge badge--enriched" title={format(dict.detail.enrichedBadgeAria, { date: formatDateTime(detail.enrichedAt, locale) })}>
+                  {format(dict.detail.enrichedBadge, { date: formatDateTime(detail.enrichedAt, locale) })}
+                </span>
+              )}
+              {detail.status === "deprecated" && (
+                <span className="badge badge--status-deprecated">{dict.statusBadge.deprecated}</span>
+              )}
+              {detail.status === "superseded" && (
+                detail.supersededBy && detail.supersededBySerial ? (
+                  <Link className="badge badge--status-superseded" href={`/library/${detail.supersededBy}`}>
+                    {format(dict.statusBadge.supersededBy, { target: detail.supersededBySerial })}
+                  </Link>
+                ) : (
+                  <span className="badge badge--status-superseded">{dict.statusBadge.supersededGeneric}</span>
+                )
+              )}
+            </h1>
+          </SharedTitle>
           <p className="page-subtitle detail-meta">
             {typeLabel(detail.type, locale)} · <VerdictBadge verdict={detail.verdict} verdictBy={detail.verdictBy} locale={locale} /> · {format(dict.detail.createdAt, { date: formatDateTime(detail.createdAt, locale) })}
           </p>

@@ -55,6 +55,7 @@ export const dictEn: Dict = {
     clearFile: "Clear image",
     promise: "Capture → Analyze → File",
     dropHeading: "Drop a screenshot here",
+    dropRelease: "Drop to capture",
     dropHint: "PNG, JPEG, or WebP — pasting works too. The same image is never analyzed twice.",
     chooseFile: "Choose image",
     contextTitle: "Text or link",
