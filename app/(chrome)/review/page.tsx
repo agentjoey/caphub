@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ReviewCard } from "../../../components/review/review-card";
+import { ReviewKeys } from "../../../components/review/review-keys";
 import { getCapabilityDetail, listPending, PAGE_SIZE } from "../../../lib/library/queries";
 import { getRuntime } from "../../../lib/runtime";
 import { getLocale } from "../../../lib/i18n/locale";
@@ -35,6 +36,7 @@ export default async function Page({
           <h1 className="page-title">{dict.review.title}</h1>
           <p className="page-subtitle">{format(dict.review.subtitle, { count: total })}</p>
         </div>
+        {items.length > 0 && <ReviewKeys total={total} labels={{ remaining: dict.review.remaining, hint: dict.review.keysHint }} />}
       </div>
       {items.length === 0 ? (
         <p className="empty">{dict.review.empty}</p>

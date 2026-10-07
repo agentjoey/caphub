@@ -7,6 +7,7 @@ import type { CapabilityDetail, CapabilityRow } from "../../lib/library/queries"
 import { getDict, type Locale } from "../../lib/i18n";
 import { AnalysisDetails } from "../capability/analysis-details";
 import { CardSummary } from "../capability/card-summary";
+import { REVIEW_DONE_EVENT } from "./review-keys";
 import { SuggestionEditor } from "./suggestion-editor";
 
 type State = "idle" | "saving" | "done" | "stale";
@@ -27,6 +28,11 @@ export function ReviewCard({ row, detail, locale = "zh" }: { row: CapabilityRow;
   const stale = state === "stale";
   const finished = state === "done";
 
+  // Tells ReviewKeys (the page's keyboard triage) to count this card down and move focus on.
+  function announceDone() {
+    window.dispatchEvent(new CustomEvent(REVIEW_DONE_EVENT, { detail: { id: row.id } }));
+  }
+
   async function decide(verdict: "keep" | "discard") {
     if (busy) return;
     setState("saving");
@@ -38,6 +44,7 @@ export function ReviewCard({ row, detail, locale = "zh" }: { row: CapabilityRow;
         setDoneLabel(verdict === "keep" ? dict.review.doneKeep : dict.review.doneDiscard);
         setEditing(false);
         setState("done");
+        announceDone();
         return;
       }
       setMessage(result.message);
@@ -58,6 +65,7 @@ export function ReviewCard({ row, detail, locale = "zh" }: { row: CapabilityRow;
         setDoneLabel(dict.review.doneKeep);
         setEditing(false);
         setState("done");
+        announceDone();
         return null;
       }
       if (result.reason === "CONFLICT") {
@@ -102,21 +110,30 @@ export function ReviewCard({ row, detail, locale = "zh" }: { row: CapabilityRow;
   }
 
   return (
-    <div className="review-item" data-state={state} id={row.id}>
-      <CardSummary row={row} locale={locale} />
-      <AnalysisDetails detail={detail} locale={locale} />
-      {message && <p className="inline-error review-item__message">{message}</p>}
-      {finished ? (
-        <p className="review-item__done">{doneLabel}</p>
-      ) : (
-        <>
-          <div className="review-item__actions">
-            <button type="button" className="btn btn--primary" disabled={busy} onClick={() => decide("keep")}>{dict.detailActions.keep}</button>
-            <button type="button" className="btn btn--danger" disabled={busy} onClick={() => decide("discard")}>{dict.detailActions.discard}</button>
-            <button type="button" className="btn" disabled={busy} onClick={toggleEditing}>{dict.detailActions.editSuggestion}</button>
-            <button type="button" className="btn" disabled={busy} onClick={rerun}>{dict.detailActions.rerun}</button>
-          </div>
-          {editing && (
+    <div className="review-item" data-state={state} id={row.id} data-review-item="" tabIndex={-1} aria-label={row.title}>
+      {/* The card body folds away (grid-template-rows 1fr → 0fr) once decided, leaving only the
+          one-line outcome below — the queue visibly shrinks instead of greying out in place. */}
+      <div className="review-item__fold" inert={finished}>
+        <div>
+          <CardSummary row={row} locale={locale} />
+          {!finished && (
+            <div className="review-item__actions">
+              <button type="button" className="btn btn--primary" data-action="keep" aria-keyshortcuts="Y" disabled={busy} onClick={() => decide("keep")}>
+                {dict.detailActions.keep}<kbd className="kbd" aria-hidden="true">Y</kbd>
+              </button>
+              <button type="button" className="btn btn--danger" data-action="discard" aria-keyshortcuts="X" disabled={busy} onClick={() => decide("discard")}>
+                {dict.detailActions.discard}<kbd className="kbd" aria-hidden="true">X</kbd>
+              </button>
+              <button type="button" className="btn" data-action="edit" aria-keyshortcuts="E" disabled={busy} onClick={toggleEditing}>
+                {dict.detailActions.editSuggestion}<kbd className="kbd" aria-hidden="true">E</kbd>
+              </button>
+              <button type="button" className="btn" data-action="rerun" aria-keyshortcuts="R" disabled={busy} onClick={rerun}>
+                {dict.detailActions.rerun}<kbd className="kbd" aria-hidden="true">R</kbd>
+              </button>
+            </div>
+          )}
+          {message && <p className="inline-error review-item__message">{message}</p>}
+          {editing && !finished && (
             <SuggestionEditor
               initialType={row.type}
               initialUsage={row.usage}
@@ -126,8 +143,10 @@ export function ReviewCard({ row, detail, locale = "zh" }: { row: CapabilityRow;
               locale={locale}
             />
           )}
-        </>
-      )}
+          <AnalysisDetails detail={detail} locale={locale} />
+        </div>
+      </div>
+      {finished && <p className="review-item__done" role="status">{doneLabel} · {row.title}</p>}
     </div>
   );
 }

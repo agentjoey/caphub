@@ -616,14 +616,47 @@ a.stat--accent:hover { background: color-mix(in srgb, var(--amber-soft) 70%, var
 /* Matches the sticky .app-header's 60px height plus a little breathing room, so a #<id> anchor
    jump (from the home page's recent-captures "查看/View" link on a pending card) doesn't land
    the card underneath it. */
-.review-item { scroll-margin-top: 76px; margin-bottom: var(--space-8); padding-bottom: var(--space-8); border-bottom: 1px solid var(--hairline-strong); }
-.review-item:last-child { border-bottom: 0; }
-.review-item[data-state="done"] { opacity: .55; }
-.review-item__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: var(--space-4); }
+.review-item { scroll-margin-top: 76px; scroll-margin-bottom: 24px; margin-bottom: var(--space-6); border-radius: var(--radius-lg); outline: none; }
+/* The current card (keyboard focus or anything inside it focused) gets the ink rule — emphasis by
+   line, not by another colour. :focus-visible's global ring is replaced by this for the card. */
+.review-item:focus-visible { box-shadow: none; }
+.review-item:focus .review-card, .review-item:focus-within .review-card { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.review-item .review-card { transition: border-color var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out); }
+/* Decided: the body folds shut and only the one-line outcome remains. */
+.review-item__fold { display: grid; grid-template-rows: 1fr; transition: grid-template-rows var(--dur-3) var(--ease-out), opacity var(--dur-3) var(--ease-out); }
+.review-item__fold > div { min-height: 0; overflow: hidden; }
+.review-item[data-state="done"] .review-item__fold { grid-template-rows: 0fr; opacity: 0; }
+.review-item[data-state="done"] { margin-bottom: var(--space-3); }
+.review-item__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: var(--space-3); padding: 0 2px; }
+.review-item__actions .btn { gap: 8px; }
 .review-item[data-state="stale"] .review-item__actions { opacity: .5; pointer-events: none; }
-.review-item[data-state="stale"] .suggestion-editor, .review-item[data-state="done"] .suggestion-editor { opacity: .5; pointer-events: none; }
+.review-item[data-state="stale"] .suggestion-editor { opacity: .5; pointer-events: none; }
 .review-item__message { margin-top: 10px; }
-.review-item__done { margin-top: 14px; font-weight: 600; }
+.review-item__done { padding: 10px 16px; color: var(--ink-muted); background: var(--paper-recessed); border-radius: var(--radius-md); font-size: var(--text-sm); font-weight: 600; overflow-wrap: anywhere; }
+.review-item .analysis-details { margin: var(--space-3) 2px 0; }
+
+/* Review page head: what's left and the keyboard map, right-aligned under nothing but the title. */
+.review-keys { display: grid; justify-items: end; gap: 4px; text-align: right; }
+.review-keys__remaining { font-family: var(--font-mono); font-size: var(--text-sm); font-weight: 500; font-variant-numeric: tabular-nums; }
+.review-keys__hint { color: var(--ink-faint); font-family: var(--font-mono); font-size: var(--text-xs); }
+@media (pointer: coarse) {
+  .review-keys__hint { display: none; }
+}
+@media (max-width: 720px) {
+  .review-keys { justify-items: start; text-align: left; }
+}
+
+/* Review card, summary first: the suggested verdict reads as the card's second line. */
+.review-card .card-suggestion { margin-top: var(--space-3); color: var(--ink); font-size: var(--text-base); font-weight: 500; }
+.card-more { max-width: var(--measure); margin-top: var(--space-3); }
+.card-more > summary { display: inline-flex; align-items: center; gap: 6px; padding: 4px 0; color: var(--ink-muted); font-size: var(--text-sm); font-weight: 600; cursor: pointer; list-style: none; }
+.card-more > summary::-webkit-details-marker { display: none; }
+.card-more > summary::before { content: "▸"; display: inline-block; width: 10px; color: var(--ink-faint); font-size: var(--text-xs); transition: transform var(--dur-2) var(--ease-out); }
+.card-more[open] > summary::before { transform: rotate(90deg); }
+.card-more > summary:hover { color: var(--ink); }
+.card-more .summary-points { margin-top: var(--space-2); }
+.card-more .tag-list { margin-top: var(--space-3); }
+.card-more__source { margin-top: var(--space-3); font-size: var(--text-sm); }
 
 /* Suggestion editor */
 .suggestion-editor { display: grid; gap: 12px; margin-top: 14px; padding: 16px; background: var(--paper-recessed); border: 1px solid var(--hairline); border-radius: var(--radius-md); }

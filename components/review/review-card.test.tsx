@@ -43,19 +43,41 @@ describe("ReviewCard", () => {
     expect(container.querySelector("[data-state='stale']")).toBeTruthy();
   });
 
-  it("shows a done state and fades the card when keep succeeds", async () => {
+  it("shows a done state and folds the card when keep succeeds", async () => {
     decideAction.mockResolvedValueOnce({ ok: true, updatedAt: "2026-09-19T00:01:00.000Z" });
     const { container } = render(<ReviewCard row={row as never} detail={detail as never} />);
     fireEvent.click(screen.getByRole("button", { name: "保留" }));
-    await waitFor(() => expect(screen.getByText("已保留")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/^已保留 · Scrapling/)).toBeTruthy());
     expect(container.querySelector("[data-state='done']")).toBeTruthy();
+  });
+
+  it("announces a decided card so the review queue can count down and move on", async () => {
+    decideAction.mockResolvedValueOnce({ ok: true, updatedAt: "2026-09-19T00:01:00.000Z" });
+    const seen: unknown[] = [];
+    const listener = (event: Event) => seen.push((event as CustomEvent).detail);
+    window.addEventListener("caphub:review-done", listener);
+    try {
+      render(<ReviewCard row={row as never} detail={detail as never} />);
+      fireEvent.click(screen.getByRole("button", { name: "保留" }));
+      await waitFor(() => expect(seen).toEqual([{ id: "cab_1" }]));
+    } finally {
+      window.removeEventListener("caphub:review-done", listener);
+    }
+  });
+
+  it("puts the decision buttons right under the summary, ahead of the folded analysis details", () => {
+    const { container } = render(<ReviewCard row={row as never} detail={detail as never} />);
+    const actions = container.querySelector(".review-item__actions")!;
+    const details = container.querySelector(".analysis-details");
+    expect(actions.querySelector("[data-action='keep'] kbd")?.textContent).toBe("Y");
+    if (details) expect(actions.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("shows a done state with 已丢弃 when discard succeeds", async () => {
     decideAction.mockResolvedValueOnce({ ok: true, updatedAt: "2026-09-19T00:01:00.000Z" });
     render(<ReviewCard row={row as never} detail={detail as never} />);
     fireEvent.click(screen.getByRole("button", { name: "丢弃" }));
-    await waitFor(() => expect(screen.getByText("已丢弃")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/^已丢弃 · Scrapling/)).toBeTruthy());
     expect(decideAction).toHaveBeenCalledWith("cab_1", "2026-09-19T00:00:00.000Z", "discard");
   });
 
@@ -80,7 +102,7 @@ describe("ReviewCard", () => {
     editSuggestionAction.mockResolvedValueOnce({ ok: true, updatedAt: "2026-09-19T00:02:00.000Z" });
     fireEvent.change(tagsInput, { target: { value: "rag, python" } });
     fireEvent.click(screen.getByRole("button", { name: "保存并保留" }));
-    await waitFor(() => expect(screen.getByText("已保留")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/^已保留 · Scrapling/)).toBeTruthy());
     expect(editSuggestionAction).toHaveBeenLastCalledWith("cab_1", "2026-09-19T00:00:00.000Z", "skill", "integrate", ["rag", "python"]);
   });
 
@@ -96,7 +118,7 @@ describe("ReviewCard", () => {
     expect(decideAction).not.toHaveBeenCalled();
 
     resolveEdit({ ok: true, updatedAt: "2026-09-19T00:03:00.000Z" });
-    await waitFor(() => expect(screen.getByText("已保留")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/^已保留 · Scrapling/)).toBeTruthy());
   });
 
   it("greys out and disables the open editor (not only the action row) when its own save conflicts", async () => {

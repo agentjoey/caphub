@@ -28,6 +28,26 @@ describe("CardSummary", () => {
     expect(container.querySelector("img")?.getAttribute("src")).toBe(`/api/objects/sha256/ab/${"a".repeat(64)}`);
     expect(container.textContent).not.toMatch(/cab_|cap_|run_/);
   });
+
+  it("leads with the verdict and the summary, folding points, signals and tags away", () => {
+    const withPoints = { ...row, summaryPoints: [{ label: "定位", text: "一句话定位" }] };
+    const { container } = render(<CardSummary row={withPoints as never} />);
+    const more = container.querySelector("details.card-more")!;
+    expect(more.hasAttribute("open")).toBe(false);
+    expect(more.querySelector("summary")?.textContent).toBe("完整摘要 · 1 条要点");
+    expect(more.textContent).toContain("一句话定位");
+    expect(more.textContent).toContain("web-scraping");
+    expect(more.querySelector(".card-signals")).toBeTruthy();
+    // The lead and the verdict stay outside the fold.
+    expect(more.textContent).not.toContain("摘要文字");
+    expect(more.textContent).not.toContain("成熟开源");
+  });
+
+  it("renders no fold when there is nothing beyond the lead", () => {
+    const bare = { ...row, summaryPoints: [], signals: [], tags: [] };
+    const { container } = render(<CardSummary row={bare as never} />);
+    expect(container.querySelector("details.card-more")).toBeNull();
+  });
 });
 
 describe("PlaybookView", () => {

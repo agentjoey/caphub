@@ -95,7 +95,9 @@ export const dictEn: Dict = {
     subtitle: "{count} cards pending",
     empty: "No cards pending review. Once new submissions finish analysis, uncertain ones will show up here.",
     doneKeep: "Kept",
-    doneDiscard: "Discarded"
+    doneDiscard: "Discarded",
+    remaining: "{count} left",
+    keysHint: "J / K move · Y keep · X discard · E edit · R rerun"
   },
   library: {
     title: "Library",
@@ -269,6 +271,8 @@ export const dictEn: Dict = {
     textThumb: "Text"
   },
   cardSummary: {
+    more: "More",
+    morePoints: "Full summary · {count} points",
     suggestion: "Suggests {verdict} · confidence {confidence} — {reason}",
     promptUnresolved: "{count} prompt(s) could not be located in the capture; check against the original",
     promptMissing: "No source prompt was captured; check against the original"

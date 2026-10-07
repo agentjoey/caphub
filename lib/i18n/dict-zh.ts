@@ -100,7 +100,9 @@ export const dictZh = {
     subtitle: "{count} 张待决卡片",
     empty: "没有待决的卡片。新投递的内容分析完成后，拿不准的会出现在这里。",
     doneKeep: "已保留",
-    doneDiscard: "已丢弃"
+    doneDiscard: "已丢弃",
+    remaining: "剩余 {count} 张",
+    keysHint: "J / K 切换 · Y 保留 · X 丢弃 · E 改建议 · R 重跑"
   },
   library: {
     title: "能力库",
@@ -274,6 +276,8 @@ export const dictZh = {
     textThumb: "文字"
   },
   cardSummary: {
+    more: "更多信息",
+    morePoints: "完整摘要 · {count} 条要点",
     suggestion: "建议{verdict} · 置信度 {confidence} — {reason}",
     promptUnresolved: "有 {count} 条 prompt 原文未能在投递内容里定位，请对照原始投递核对",
     promptMissing: "未摘到 prompt 原文，请对照原始投递补充或改判"
