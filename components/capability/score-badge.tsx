@@ -19,7 +19,8 @@ export function ScoreBadge({
   if (typeof score !== "number" || score < 1) return null;
   const dict = getDict(locale).scoreBadge;
   return (
-    <span className="badge badge--score" title={reason ?? undefined} aria-label={format(dict.aria, { score })}>
+    // Solid amber only for a 4–5: amber is the "look here" colour, so a middling score stays an outline.
+    <span className={`badge badge--score${score < 4 ? " badge--score-quiet" : ""}`} title={reason ?? undefined} aria-label={format(dict.aria, { score })}>
       {format(dict.label, { score })}
     </span>
   );

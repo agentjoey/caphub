@@ -44,6 +44,26 @@ describe("library queries", () => {
     expect(text).toMatch(/cb\.usage = \$\d+/);
     expect(values).toEqual(expect.arrayContaining(["web scraping", ["skill"], ["python"], "integrate"]));
   });
+  it("listLibrary reports why each result matched a text query, reusing the query's own parameters", async () => {
+    const { pool, calls } = recorder([[], [{ total: "0" }]]);
+    await listLibrary(pool, { q: "agent", page: 1 }, { queryEmbedding: null, matchedScenarioSlugs: ["coding"] });
+    const { text, values } = calls[0];
+    expect(text).toContain('AS "matchedBy"');
+    expect(text).toMatch(/CASE WHEN cb\.title ILIKE \$\d+ THEN 'title' END/);
+    expect(text).toMatch(/THEN 'semantic' END/);
+    expect(text).toMatch(/THEN 'scenario' END/);
+    // No new parameters: the reasons reuse the search's own placeholders, so LIMIT/OFFSET keep their slots.
+    expect(values.slice(-2)).toEqual([PAGE_SIZE, 0]);
+    // The count query is unaffected.
+    expect(calls[1].text).not.toContain("matchedBy");
+  });
+  it("listLibrary adds no match reasons without a query, or for a serial lookup", async () => {
+    const { pool, calls } = recorder([[], [{ total: "0" }], [], [{ total: "0" }]]);
+    await listLibrary(pool, { page: 1 });
+    await listLibrary(pool, { q: "SKL-0003", page: 1 });
+    expect(calls[0].text).not.toContain("matchedBy");
+    expect(calls[2].text).not.toContain("matchedBy");
+  });
   it("listLibrary with discarded=true lists discarded instead of kept", async () => {
     const { pool, calls } = recorder([[], [{ total: "0" }]]);
     await listLibrary(pool, { discarded: true, page: 1 });

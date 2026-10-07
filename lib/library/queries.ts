@@ -29,6 +29,8 @@ const CARD_COLUMNS = `
 
 export type CapabilityStatus = "active" | "deprecated" | "superseded";
 
+export type MatchReason = "title" | "text" | "semantic" | "scenario";
+
 export interface CapabilityRow {
   id: string; captureId: string; title: string; type: CapabilityType; summary: string;
   /** `**标签。** 说明句` structured detail lines (M3.8) that follow the lead `summary`; `[]` for a card never re-run since migration 012. */
@@ -52,6 +54,8 @@ export interface CapabilityRow {
   promptUnresolved: number;
   /** Whether this card has a stored deep analysis (M3.6 Task 4) — the 🔬 已深挖 badge and the 已深度分析 filter. The blob itself is only loaded on the detail page (see {@link CapabilityDetail}). */
   hasDeepAnalysis: boolean;
+  /** Only on a text-query library search (see listLibrary): which parts of the card the query hit. */
+  matchedBy?: MatchReason[];
   syncedAt: string | null; deletedAt: string | null; createdAt: string; updatedAt: string;
   capture: { kind: "image" | "text" | "url"; objectKey: string | null; thumbKey: string | null; text: string | null; url: string | null };
 }
@@ -189,7 +193,10 @@ export function listLibrary(pool: Q, f: LibraryFilter, search: LibrarySearchCont
     const semanticSim = `(1 - (cb.embedding <=> $${vecIdx}::vector))`;
     const ftsMatch = `cb.search @@ websearch_to_tsquery('simple', $${qIdx})`;
     const scenarioMatch = `cb.scenarios && $${scenIdx}::text[]`;
-    const ilikeMatch = `(cb.title ILIKE $${ilikeIdx} OR cb.summary ILIKE $${ilikeIdx} OR cb.summary_points::text ILIKE $${ilikeIdx} OR cb.build_notes::text ILIKE $${ilikeIdx} OR EXISTS (SELECT 1 FROM unnest(cb.tags) tg WHERE tg ILIKE $${ilikeIdx}))`;
+    const titleMatch = `cb.title ILIKE $${ilikeIdx}`;
+    const bodyTerms = `cb.summary ILIKE $${ilikeIdx} OR cb.summary_points::text ILIKE $${ilikeIdx} OR cb.build_notes::text ILIKE $${ilikeIdx} OR EXISTS (SELECT 1 FROM unnest(cb.tags) tg WHERE tg ILIKE $${ilikeIdx})`;
+    const bodyMatch = `(${bodyTerms})`;
+    const ilikeMatch = `(${titleMatch} OR ${bodyTerms})`;
     const semanticCandidate = `(cb.embedding IS NOT NULL AND $${vecIdx}::vector IS NOT NULL AND ${semanticSim} >= $${minIdx})`;
 
     clauses.push(`(${semanticCandidate} OR ${ftsMatch} OR ${scenarioMatch} OR ${ilikeMatch})`);
@@ -200,7 +207,15 @@ export function listLibrary(pool: Q, f: LibraryFilter, search: LibrarySearchCont
       ` + CASE WHEN ${ilikeMatch} THEN 0.15 ELSE 0 END` +
       ` + CASE WHEN cb.score IS NOT NULL THEN 0.05 * (cb.score - 3) ELSE 0 END)`;
 
-    return paged(pool, clauses.join(" AND "), values, f.page, `${score} DESC, cb.updated_at DESC, cb.id`);
+    // Why each row matched, for the result card's 命中 line — built from the same expressions
+    // (and placeholders) as the WHERE above, so it can never disagree with what was matched.
+    const matchedBy = `array_remove(ARRAY[` +
+      `CASE WHEN ${titleMatch} THEN 'title' END, ` +
+      `CASE WHEN ${ftsMatch} OR ${bodyMatch} THEN 'text' END, ` +
+      `CASE WHEN ${semanticCandidate} THEN 'semantic' END, ` +
+      `CASE WHEN ${scenarioMatch} THEN 'scenario' END], NULL) AS "matchedBy"`;
+
+    return paged(pool, clauses.join(" AND "), values, f.page, `${score} DESC, cb.updated_at DESC, cb.id`, { columns: matchedBy, join: "" });
   }
 
   if (serial !== null) add((i) => `cb.serial = $${i}`, serial);
