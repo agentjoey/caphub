@@ -17,6 +17,9 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/mini"
 }));
 vi.mock("../../lib/i18n/locale", () => ({ getLocale: async () => "zh" }));
+// The desktop layout reads the pending-review count for its nav; no database in tests.
+vi.mock("../../lib/runtime", () => ({ getRuntime: () => ({ pool: {} }) }));
+vi.mock("../../lib/library/queries", () => ({ countPending: async () => 2 }));
 
 const { default: MiniLayout } = await import("./layout");
 const { default: ChromeLayout } = await import("../(chrome)/layout");

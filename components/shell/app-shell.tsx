@@ -4,7 +4,7 @@ import type { Dict, Locale } from "../../lib/i18n";
 import { LangSwitch } from "./lang-switch";
 import { PrimaryNav } from "./primary-nav";
 
-export function AppShell({ children, locale, dict }: { children: ReactNode; locale: Locale; dict: Dict }) {
+export function AppShell({ children, locale, dict, pending = 0 }: { children: ReactNode; locale: Locale; dict: Dict; pending?: number }) {
   return (
     <div className="app-layout">
       <a href="#main" className="skip-link">{dict.shell.skipLink}</a>
@@ -18,6 +18,8 @@ export function AppShell({ children, locale, dict }: { children: ReactNode; loca
         <PrimaryNav
           navAria={dict.shell.navAria}
           labels={{ "/": dict.shell.navCapture, "/review": dict.shell.navReview, "/library": dict.shell.navLibrary }}
+          counts={{ "/review": pending }}
+          countAria={dict.shell.navCountAria}
         />
         <LangSwitch locale={locale} ariaLabel={dict.shell.langSwitchAria} />
       </header>

@@ -4,6 +4,8 @@ import { AppShell } from "../../components/shell/app-shell";
 import { fontVariables } from "../fonts";
 import { getLocale } from "../../lib/i18n/locale";
 import { getDict } from "../../lib/i18n";
+import { countPending } from "../../lib/library/queries";
+import { getRuntime } from "../../lib/runtime";
 
 export const metadata = { title: "Caphub" };
 
@@ -16,9 +18,10 @@ export const metadata = { title: "Caphub" };
 export default async function ChromeLayout({ children }: { children: ReactNode }) {
   const locale = await getLocale();
   const dict = getDict(locale);
+  const pending = await countPending(getRuntime().pool);
   return (
     <html lang={locale === "en" ? "en" : "zh-CN"} className={fontVariables}>
-      <body><AppShell locale={locale} dict={dict}>{children}</AppShell></body>
+      <body><AppShell locale={locale} dict={dict} pending={pending}>{children}</AppShell></body>
     </html>
   );
 }

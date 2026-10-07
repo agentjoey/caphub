@@ -20,6 +20,18 @@ export interface CapturePreviewData {
   retentionPurgedAt?: string | null;
 }
 
+/**
+ * A list/card tile image that swaps itself for a text placeholder when it fails to load — an old
+ * capture whose original was purged before thumbnails existed has nothing left to show, and a
+ * broken-image box with alt text reads as a bug, not as "no image".
+ */
+function TileImage({ src, className, alt, fallback }: { src: string; className: string; alt: string; fallback: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <span className={className}>{fallback}</span>;
+  // eslint-disable-next-line @next/next/no-img-element -- images are served by the access-guarded /api/objects proxy
+  return <img className={className} src={src} loading="lazy" alt={alt} onError={() => setFailed(true)} />;
+}
+
 function FullImage({ originalSrc, thumbSrc, purged, purgeDate, locale }: {
   originalSrc: string | null; thumbSrc: string | null; purged: boolean; purgeDate: string | null; locale: Locale;
 }) {
@@ -53,8 +65,7 @@ export function CapturePreview({ capture, size = "thumb", locale = "zh" }: { cap
     if (size === "thumb") {
       const src = thumbSrc ?? originalSrc;
       if (!src) return <span className="thumb">{dict.noImage}</span>;
-      // eslint-disable-next-line @next/next/no-img-element -- images are served by the access-guarded /api/objects proxy
-      return <img className="thumb" src={src} loading="lazy" alt={dict.fullAlt} />;
+      return <TileImage src={src} className="thumb" alt={dict.fullAlt} fallback={dict.noImage} />;
     }
     if (!originalSrc && !thumbSrc) return <span className="capture-full">{dict.noImage}</span>;
     return (

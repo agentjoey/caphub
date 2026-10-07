@@ -21,6 +21,14 @@ describe("CapturePreview (thumb size)", () => {
     render(<CapturePreview capture={{ ...baseImage, thumbKey: null }} size="thumb" />);
     expect(screen.getByRole("img").getAttribute("src")).toBe(`/api/objects/${baseImage.objectKey}`);
   });
+
+  it("swaps a failed tile (purged original, no thumbnail) for the no-image placeholder instead of a broken image", () => {
+    const { container } = render(<CapturePreview capture={{ ...baseImage, thumbKey: null }} size="thumb" />);
+    fireEvent.error(screen.getByRole("img"));
+    expect(screen.queryByRole("img")).toBeNull();
+    const tile = container.querySelector("span.thumb");
+    expect(tile?.textContent).toBe("无图");
+  });
 });
 
 describe("CapturePreview (full size)", () => {

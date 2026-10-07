@@ -15,7 +15,8 @@ export const dictZh = {
     navCapture: "投递",
     navReview: "Review",
     navLibrary: "能力库",
-    langSwitchAria: "切换界面语言"
+    langSwitchAria: "切换界面语言",
+    navCountAria: "{label}，{count} 条待处理"
   },
   labels: {
     type: { skill: "技能", experience: "经验", plugin: "插件", prompt: "提示词", tool: "工具", model: "模型", other: "其他" },

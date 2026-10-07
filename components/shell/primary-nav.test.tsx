@@ -22,4 +22,12 @@ describe("PrimaryNav", () => {
     expect(screen.getByRole("link", { name: "Capture" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Library" })).toBeTruthy();
   });
+
+  it("shows a pending count after a nav label, with a spoken label, and nothing for zero", () => {
+    const { rerender } = render(<PrimaryNav counts={{ "/review": 3 }} countAria="{label}，{count} 条待处理" />);
+    const review = screen.getByRole("link", { name: "Review，3 条待处理" });
+    expect(review.querySelector(".nav-count")?.textContent).toBe("3");
+    rerender(<PrimaryNav counts={{ "/review": 0 }} countAria="{label}，{count} 条待处理" />);
+    expect(screen.getByRole("link", { name: "Review" }).querySelector(".nav-count")).toBeNull();
+  });
 });

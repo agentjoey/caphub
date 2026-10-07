@@ -232,13 +232,18 @@ export async function libraryStats(pool: Q): Promise<LibraryStats> {
   for (const r of rows) byType[r.type] = Number(r.n);
   const tagCount = Number((await pool.query<{ n: string }>(
     "SELECT count(DISTINCT t)::text AS n FROM caphub_v2.capabilities, unnest(tags) AS t WHERE verdict = 'keep' AND deleted_at IS NULL AND status = 'active'")).rows[0]?.n ?? 0);
-  const pending = Number((await pool.query<{ n: string }>(
-    "SELECT count(*)::text AS n FROM caphub_v2.capabilities WHERE verdict = 'pending' AND deleted_at IS NULL")).rows[0]?.n ?? 0);
+  const pending = await countPending(pool);
   const toBuild = Number((await pool.query<{ n: string }>(
     `SELECT count(*)::text AS n FROM caphub_v2.capabilities
      WHERE verdict = 'keep' AND deleted_at IS NULL AND status = 'active' AND usage = 'reference' AND progress = ANY($1)`,
     [TO_BUILD_PROGRESS])).rows[0]?.n ?? 0);
   return { byType, total: Object.values(byType).reduce((a, b) => a + b, 0), tagCount, pending, toBuild };
+}
+
+/** Cards awaiting a verdict — the shell's Review nav count. One cheap query, run on every page. */
+export async function countPending(pool: Q): Promise<number> {
+  return Number((await pool.query<{ n: string }>(
+    "SELECT count(*)::text AS n FROM caphub_v2.capabilities WHERE verdict = 'pending' AND deleted_at IS NULL")).rows[0]?.n ?? 0);
 }
 
 /** Per-scenario counts among currently-visible cards (kept, or discarded when `discarded` is set), for the library's scenario chip row. */

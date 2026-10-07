@@ -10,7 +10,8 @@ export const dictEn: Dict = {
     navCapture: "Capture",
     navReview: "Review",
     navLibrary: "Library",
-    langSwitchAria: "Switch interface language"
+    langSwitchAria: "Switch interface language",
+    navCountAria: "{label}, {count} pending"
   },
   labels: {
     type: { skill: "Skill", experience: "Experience", plugin: "Plugin", prompt: "Prompt", tool: "Tool", model: "Model", other: "Other" },
