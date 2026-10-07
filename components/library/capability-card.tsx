@@ -3,7 +3,6 @@ import type { CapabilityRow } from "../../lib/library/queries";
 import { progressLabel, typeLabel, usageLabel } from "../../lib/library/labels";
 import { displaySerial } from "../../lib/library/serial";
 import { getDict, type Locale } from "../../lib/i18n";
-import { CapturePreview } from "../capability/capture-preview";
 import { ScoreBadge } from "../capability/score-badge";
 import { TagList } from "../capability/tag-list";
 import { SharedTitle } from "./shared-title";
@@ -12,10 +11,11 @@ import { SharedTitle } from "./shared-title";
 const CARD_TAGS = 3;
 
 /**
- * One capability in the library grid (owner ruling 2026-10-08: one card per capability). The whole
- * card is a single link: media strip on top (screenshot, video frame or a typed placeholder), then
- * title + serial, the summary lead, the badges, three quiet tags, and the age — plus, on a search,
- * which parts of the card the query hit.
+ * One capability in the library grid (owner rulings 2026-10-08: one card per capability, and no
+ * screenshot on it — the capture is provenance, the card is about the capability). Typography
+ * only: a mono kicker (type · serial, score on the right), the title, the summary lead, the
+ * remaining badges, three quiet tags, and the age — plus, on a search, which parts of the card
+ * the query hit. The whole card is one link.
  */
 export function CapabilityCard({ row, locale, relativeTime }: { row: CapabilityRow; locale: Locale; relativeTime: string }) {
   const dict = getDict(locale);
@@ -24,18 +24,16 @@ export function CapabilityCard({ row, locale, relativeTime }: { row: CapabilityR
   const reasons = row.matchedBy ?? [];
   return (
     <Link className="cap-card" href={`/library/${row.id}`} data-muted={muted ? "" : undefined}>
-      <CapturePreview capture={row.capture} size="card" placeholder={typeLabel(row.type, locale)} locale={locale} />
       <div className="cap-card__body">
+        <div className="cap-card__kicker">
+          <span>{typeLabel(row.type, locale)}{serial && <span className="cap-card__serial"> · {serial}</span>}</span>
+          <ScoreBadge score={row.score} reason={row.scoreReason} locale={locale} />
+        </div>
         <SharedTitle id={row.id}>
-          <h2 className="cap-card__title">
-            {row.title}
-            {serial && <span className="serial"> {serial}</span>}
-          </h2>
+          <h2 className="cap-card__title">{row.title}</h2>
         </SharedTitle>
         {row.summary.trim() !== "" && <p className="cap-card__summary">{row.summary}</p>}
         <div className="cap-card__badges">
-          <span className="badge badge--type">{typeLabel(row.type, locale)}</span>
-          <ScoreBadge score={row.score} reason={row.scoreReason} locale={locale} />
           {row.usage === "reference" ? (
             <span className={`badge badge--progress${row.progress === "done" ? " badge--progress-done" : ""}`}>
               {progressLabel(row.progress, locale)}

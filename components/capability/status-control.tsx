@@ -81,34 +81,38 @@ export function StatusControl({
           </button>
         )}
       </div>
-      <div className="status-control__supersede">
-        <label htmlFor={`superseded-by-${id}`}>{dict.markSupersededLabel}</label>
-        <input
-          id={`superseded-by-${id}`}
-          type="text"
-          value={serialInput}
-          placeholder={dict.serialPlaceholder}
-          disabled={disabled}
-          onChange={(e) => setSerialInput(e.target.value)}
-        />
-        <label htmlFor={`status-note-${id}`}>{dict.noteLabel}</label>
-        <input
-          id={`status-note-${id}`}
-          type="text"
-          value={note}
-          placeholder={dict.notePlaceholder}
-          disabled={disabled}
-          onChange={(e) => setNote(e.target.value)}
-        />
-        <button
-          type="button"
-          className="btn btn--primary"
-          disabled={disabled || !serialInput.trim()}
-          onClick={() => apply("superseded", serialInput.trim())}
-        >
-          {busy ? dict.saving : dict.markSuperseded}
-        </button>
-      </div>
+      {/* Rarely used, and three fields deep: folded until asked for (2026-10-08 detail redesign). */}
+      <details className="status-control__more">
+        <summary>{dict.supersedeToggle}</summary>
+        <div className="status-control__supersede">
+          <label htmlFor={`superseded-by-${id}`}>{dict.markSupersededLabel}</label>
+          <input
+            id={`superseded-by-${id}`}
+            type="text"
+            value={serialInput}
+            placeholder={dict.serialPlaceholder}
+            disabled={disabled}
+            onChange={(e) => setSerialInput(e.target.value)}
+          />
+          <label htmlFor={`status-note-${id}`}>{dict.noteLabel}</label>
+          <input
+            id={`status-note-${id}`}
+            type="text"
+            value={note}
+            placeholder={dict.notePlaceholder}
+            disabled={disabled}
+            onChange={(e) => setNote(e.target.value)}
+          />
+          <button
+            type="button"
+            className="btn btn--primary"
+            disabled={disabled || !serialInput.trim()}
+            onClick={() => apply("superseded", serialInput.trim())}
+          >
+            {busy ? dict.saving : dict.markSuperseded}
+          </button>
+        </div>
+      </details>
       {message && <p className="inline-error">{message}</p>}
     </section>
   );

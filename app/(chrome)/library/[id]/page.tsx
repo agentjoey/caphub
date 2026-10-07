@@ -91,55 +91,63 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     <div>
       <PipelineWatcher active={watching} />
       <p className="back-link"><Link href="/library">{dict.detail.back}</Link></p>
-      <div className="page-head">
-        <div>
-          <SharedTitle id={detail.id}>
-            <h1 className="page-title">
-              {detail.title}
-              {serial && <span className="serial"> {serial}</span>}
-              <ScoreBadge score={detail.score} reason={detail.scoreReason} locale={locale} />
-              {detail.deepAnalysis && (
-                <span className="badge badge--deep" title={dict.deepAnalysis.badgeAria}>{dict.deepAnalysis.badge}</span>
-              )}
-              {detail.enrichedAt && (
-                <span className="badge badge--enriched" title={format(dict.detail.enrichedBadgeAria, { date: formatDateTime(detail.enrichedAt, locale) })}>
-                  {format(dict.detail.enrichedBadge, { date: formatDateTime(detail.enrichedAt, locale) })}
-                </span>
-              )}
-              {detail.status === "deprecated" && (
-                <span className="badge badge--status-deprecated">{dict.statusBadge.deprecated}</span>
-              )}
-              {detail.status === "superseded" && (
-                detail.supersededBy && detail.supersededBySerial ? (
-                  <Link className="badge badge--status-superseded" href={`/library/${detail.supersededBy}`}>
-                    {format(dict.statusBadge.supersededBy, { target: detail.supersededBySerial })}
-                  </Link>
-                ) : (
-                  <span className="badge badge--status-superseded">{dict.statusBadge.supersededGeneric}</span>
-                )
-              )}
-            </h1>
-          </SharedTitle>
-          <p className="page-subtitle detail-meta">
-            {typeLabel(detail.type, locale)} · <VerdictBadge verdict={detail.verdict} verdictBy={detail.verdictBy} locale={locale} /> · {format(dict.detail.createdAt, { date: formatDateTime(detail.createdAt, locale) })}
-          </p>
+      {/* Hero (2026-10-08 redesign): a mono record line, the title alone (it morphs from the library
+          card's), the summary lead, then score/markers and scenarios/usage on one row. */}
+      <header className="detail-hero">
+        <p className="detail-hero__kicker">
+          {typeLabel(detail.type, locale)}
+          {serial && <> · <span className="detail-hero__serial">{serial}</span></>}
+          {" · "}<VerdictBadge verdict={detail.verdict} verdictBy={detail.verdictBy} locale={locale} />
+          {" · "}{format(dict.detail.createdAt, { date: formatDateTime(detail.createdAt, locale) })}
+        </p>
+        <SharedTitle id={detail.id}>
+          <h1 className="page-title">{detail.title}</h1>
+        </SharedTitle>
+        {/* 一句话总结 — the lead, right under the title (section order: summary first). */}
+        <h2 className="sr-only">{dict.detail.summary}</h2>
+        <SummaryBody summary={detail.summary} points={[]} className="detail-hero__lead" />
+        <div className="detail-hero__meta">
+          <ScoreBadge score={detail.score} reason={detail.scoreReason} locale={locale} />
+          {detail.deepAnalysis && (
+            <span className="badge badge--deep" title={dict.deepAnalysis.badgeAria}>{dict.deepAnalysis.badge}</span>
+          )}
+          {detail.enrichedAt && (
+            <span className="badge badge--enriched" title={format(dict.detail.enrichedBadgeAria, { date: formatDateTime(detail.enrichedAt, locale) })}>
+              {format(dict.detail.enrichedBadge, { date: formatDateTime(detail.enrichedAt, locale) })}
+            </span>
+          )}
+          {detail.status === "deprecated" && (
+            <span className="badge badge--status-deprecated">{dict.statusBadge.deprecated}</span>
+          )}
+          {detail.status === "superseded" && (
+            detail.supersededBy && detail.supersededBySerial ? (
+              <Link className="badge badge--status-superseded" href={`/library/${detail.supersededBy}`}>
+                {format(dict.statusBadge.supersededBy, { target: detail.supersededBySerial })}
+              </Link>
+            ) : (
+              <span className="badge badge--status-superseded">{dict.statusBadge.supersededGeneric}</span>
+            )
+          )}
+          <span className="detail-hero__rule" aria-hidden="true" />
+          {cardScenarios.map((s) => (
+            <Link key={s.slug} className="chip chip--scenario" href={libraryHref({ page: 1 }, { scenarios: [s.slug] })}>
+              {locale === "en" ? s.labelEn : s.labelZh}
+            </Link>
+          ))}
+          <span className="badge badge--usage">{usageLabel(detail.usage, locale)}</span>
         </div>
-      </div>
+      </header>
       <div className="detail-grid">
-        <div>
+        {/* Reading column: open sections on a rule, not a stack of boxes; 怎么用 is the one boxed
+            block, because it's what a visit is usually for. */}
+        <div className="detail-main">
           {hasDeepAnalysis && deepAnalysisSection}
-          <section className="panel">
-            <h2 className="panel-title">{dict.detail.summary}</h2>
-            <SummaryBody summary={detail.summary} points={detail.summaryPoints} className="card-summary detail-summary" />
-            <div className="filter-row detail-facets">
-              {cardScenarios.map((s) => (
-                <Link key={s.slug} className="chip chip--scenario" href={libraryHref({ page: 1 }, { scenarios: [s.slug] })}>
-                  {locale === "en" ? s.labelEn : s.labelZh}
-                </Link>
-              ))}
-              <span className="badge badge--usage">{usageLabel(detail.usage, locale)}</span>
-            </div>
-          </section>
+          {(detail.summaryPoints ?? []).length > 0 && (
+            <section className="panel detail-points">
+              <h2 className="panel-title">{dict.detail.points}</h2>
+              <SummaryBody summary="" points={detail.summaryPoints} />
+            </section>
+          )}
           <VideoSummary video={detail.video} locale={locale} />
           {detail.signals.length > 0 && (
             <section className="panel">
@@ -154,7 +162,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           <OpenQuestions questions={detail.openQuestions} locale={locale} />
           <SourcePrompts prompts={detail.prompts} locale={locale} />
           {(playbookHasContent(detail.playbook, detail.type) || (detail.sourceUrl && !sourceUrlIsDuplicate)) && (
-            <section className="panel">
+            <section className="panel detail-howto">
               <h2 className="panel-title">{dict.detail.howToUse}</h2>
               <PlaybookView playbook={detail.playbook} type={detail.type} locale={locale} />
               {detail.sourceUrl && !sourceUrlIsDuplicate && (
@@ -172,16 +180,13 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             </section>
           )}
         </div>
-        <div>
-          <CollapsedCapturePreview
-            capture={{ ...detail.capture, retentionEligibleAt: detail.retentionEligibleAt, retentionPurgedAt: detail.retentionPurgedAt }}
-            locale={locale}
-          />
+        {/* Record column: one sheet, its parts divided by hairlines (each component still renders
+            its own .panel; the aside flattens them). */}
+        <aside className="detail-aside" aria-label={dict.detail.archiveAria}>
           <SourceFacts facts={detail.sourceFacts} locale={locale} />
           {overlap.relation !== "none" && (
             <OverlapNotice id={detail.id} updatedAt={detail.updatedAt} overlap={overlap} locale={locale} />
           )}
-          <StatusControl id={detail.id} updatedAt={detail.updatedAt} status={detail.status} statusNote={detail.statusNote} locale={locale} />
           {detail.usage === "reference" && (
             // No `key` here (nor on DetailActions): these are two siblings of the same children
             // list, so keying both on detail.updatedAt gave them the SAME key and React rendered
@@ -198,37 +203,47 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             />
           )}
           <BuildNotes notes={detail.buildNotes} locale={locale} />
-          <DetailActions
-            id={detail.id}
-            captureId={detail.captureId}
-            updatedAt={detail.updatedAt}
-            verdict={detail.verdict}
-            type={detail.type}
-            usage={detail.usage}
-            tags={detail.tags}
-            reviewPending={Boolean(detail.reviewRequestedAt)}
-            locale={locale}
-          />
-          {detail.reviewRequestedAt && (
-            <p className="notice">{dict.detail.reviewingNotice}</p>
-          )}
-          {detail.reviewError && (
-            <p className="inline-error">{dict.detail.reviewFailedPrefix}{errorLabel(detail.reviewError, locale)}</p>
-          )}
-          {detail.reviewNote && (
-            <div className="panel review-note">
-              <p>{detail.reviewNote.agrees ? dict.detail.reviewNoteAgree : dict.detail.reviewNoteDisagree}</p>
-              {detail.reviewNote.points.length > 0 && (
-                <ul>
-                  {detail.reviewNote.points.map((point, index) => (
-                    <li key={index}>{point}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-          <p className="detail-synced">{format(dict.detail.syncedAt, { date: detail.syncedAt ? formatDateTime(detail.syncedAt, locale) : dict.detail.notSynced })}</p>
-        </div>
+          <section className="panel detail-aside__actions">
+            <h2 className="panel-title">{dict.detail.actionsTitle}</h2>
+            <DetailActions
+              id={detail.id}
+              captureId={detail.captureId}
+              updatedAt={detail.updatedAt}
+              verdict={detail.verdict}
+              type={detail.type}
+              usage={detail.usage}
+              tags={detail.tags}
+              reviewPending={Boolean(detail.reviewRequestedAt)}
+              locale={locale}
+            />
+            {detail.reviewRequestedAt && (
+              <p className="notice">{dict.detail.reviewingNotice}</p>
+            )}
+            {detail.reviewError && (
+              <p className="inline-error">{dict.detail.reviewFailedPrefix}{errorLabel(detail.reviewError, locale)}</p>
+            )}
+            {detail.reviewNote && (
+              <div className="review-note">
+                <p>{detail.reviewNote.agrees ? dict.detail.reviewNoteAgree : dict.detail.reviewNoteDisagree}</p>
+                {detail.reviewNote.points.length > 0 && (
+                  <ul>
+                    {detail.reviewNote.points.map((point, index) => (
+                      <li key={index}>{point}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </section>
+          <StatusControl id={detail.id} updatedAt={detail.updatedAt} status={detail.status} statusNote={detail.statusNote} locale={locale} />
+          <div className="detail-aside__foot">
+            <CollapsedCapturePreview
+              capture={{ ...detail.capture, retentionEligibleAt: detail.retentionEligibleAt, retentionPurgedAt: detail.retentionPurgedAt }}
+              locale={locale}
+            />
+            <p className="detail-synced">{format(dict.detail.syncedAt, { date: detail.syncedAt ? formatDateTime(detail.syncedAt, locale) : dict.detail.notSynced })}</p>
+          </div>
+        </aside>
       </div>
       {!hasDeepAnalysis && deepAnalysisSection}
       <AnalysisDetails detail={detail} locale={locale} />

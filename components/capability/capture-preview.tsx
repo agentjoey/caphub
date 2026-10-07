@@ -71,32 +71,8 @@ function FullImage({ originalSrc, thumbSrc, purged, purgeDate, locale }: {
   );
 }
 
-/**
- * The library card's media strip (2026-10-08): the capture's image (480px thumbnail first) or its
- * YouTube frame, else a typed placeholder (`placeholder`, the card's type label) — never a broken
- * image, never an empty box.
- */
-function CardMedia({ capture, placeholder, alt }: { capture: CapturePreviewData; placeholder: string; alt: string }) {
-  const empty = <span className="cap-card__media" data-empty="">{placeholder}</span>;
-  if (capture.kind === "image") {
-    const key = capture.thumbKey ?? capture.objectKey;
-    if (!key) return empty;
-    return <TileImage src={`/api/objects/${key}`} className="cap-card__media" alt={alt} fallback={placeholder} />;
-  }
-  const videoId = capture.kind === "url" && capture.url ? parseYouTubeUrl(capture.url) : null;
-  if (!videoId) return empty;
-  // Decorative, like the list thumbnail: the card's own title names it.
-  // eslint-disable-next-line @next/next/no-img-element -- external YouTube thumbnail, not a local asset
-  return <img className="cap-card__media" src={`https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`} alt="" loading="lazy" referrerPolicy="no-referrer" />;
-}
-
-export function CapturePreview({ capture, size = "thumb", locale = "zh", placeholder }: {
-  capture: CapturePreviewData; size?: "thumb" | "full" | "card"; locale?: Locale;
-  /** size="card" only: what an image-less card shows instead (its type label). */
-  placeholder?: string;
-}) {
+export function CapturePreview({ capture, size = "thumb", locale = "zh" }: { capture: CapturePreviewData; size?: "thumb" | "full"; locale?: Locale }) {
   const dict = getDict(locale).capturePreview;
-  if (size === "card") return <CardMedia capture={capture} placeholder={placeholder ?? dict.noImage} alt={dict.fullAlt} />;
   if (capture.kind === "image") {
     const thumbSrc = capture.thumbKey ? `/api/objects/${capture.thumbKey}` : null;
     const originalSrc = capture.objectKey ? `/api/objects/${capture.objectKey}` : null;

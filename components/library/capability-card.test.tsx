@@ -20,11 +20,11 @@ const row = {
 
 describe("CapabilityCard", () => {
   it("is one link to the capability, with its title, serial, summary lead and score", () => {
-    render(<CapabilityCard row={row as never} locale="zh" relativeTime="2 天前" />);
+    const { container } = render(<CapabilityCard row={row as never} locale="zh" relativeTime="2 天前" />);
     const link = screen.getByRole("link");
     expect(link.getAttribute("href")).toBe("/library/cab_1");
     expect(screen.getByText("Scrapling 自适应爬虫框架")).toBeTruthy();
-    expect(screen.getByText("SKL-0012")).toBeTruthy();
+    expect(container.querySelector(".cap-card__kicker")?.textContent).toBe("技能 · SKL-0012★ 4/5");
     expect(screen.getByText("一个会自己适应页面结构变化的 Python 爬虫库。")).toBeTruthy();
     expect(screen.getByText("★ 4/5")).toBeTruthy();
     // Three quiet tags, then +1.
@@ -46,10 +46,9 @@ describe("CapabilityCard", () => {
     expect(container.querySelector(".cap-card")?.hasAttribute("data-muted")).toBe(true);
   });
 
-  it("gives a text capture a typed placeholder instead of an image", () => {
-    const text = { ...row, capture: { kind: "text", objectKey: null, thumbKey: null, text: "prompt", url: null } };
-    const { container } = render(<CapabilityCard row={text as never} locale="zh" relativeTime="2 天前" />);
+  it("shows no screenshot or media strip, whatever the capture kind", () => {
+    const { container } = render(<CapabilityCard row={row as never} locale="zh" relativeTime="2 天前" />);
     expect(container.querySelector("img")).toBeNull();
-    expect(container.querySelector(".cap-card__media")?.textContent).toBe("技能");
+    expect(container.querySelector(".cap-card__media")).toBeNull();
   });
 });

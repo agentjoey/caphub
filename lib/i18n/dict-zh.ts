@@ -137,6 +137,9 @@ export const dictZh = {
     moreFooter: "还有 {count} 张 · 下一页"
   },
   detail: {
+    points: "要点",
+    actionsTitle: "操作",
+    archiveAria: "档案与操作",
     back: "← 能力库",
     createdAt: "创建于 {date}",
     summary: "一句话总结",
@@ -206,6 +209,7 @@ export const dictZh = {
     supersededGeneric: "被替代"
   },
   statusControl: {
+    supersedeToggle: "标记为被其他卡片替代…",
     title: "有效性状态",
     markDeprecated: "置为失效",
     restoreActive: "恢复有效",

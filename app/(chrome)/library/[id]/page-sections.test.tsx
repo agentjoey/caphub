@@ -96,7 +96,9 @@ describe("library detail page sections", () => {
     expect(order).toEqual([...order].sort((a, b) => a - b));
   });
 
-  it("promotes 深度分析 above 一句话总结 once an analysis exists, leaving the rest of the order alone", async () => {
+  // 2026-10-08 detail redesign: the summary lead (一句话总结) now sits in the page hero under the
+  // title, so "promoted" means first in the reading column — ahead of every other section.
+  it("promotes 深度分析 to the top of the reading column once an analysis exists, leaving the rest of the order alone", async () => {
     const { container } = await renderDetail({ deepAnalysis: DEEP, deepAnalysisOf: "2026-09-19T00:00:00.000Z" });
     const text = container.textContent ?? "";
     const at = (needle: string) => {
@@ -107,8 +109,9 @@ describe("library detail page sections", () => {
     // "直接整合" (usage badge), not "抓取" (a scenario chip), because the DEEP fixture's use case
     // title contains "抓取" as a substring ("批量抓取"), which would false-match once the deep
     // analysis section is promoted ahead of the scenario chips.
-    const order = [at("深度分析"), at("一句话总结"), at("直接整合"), at("价值信号"), at("怎么用"), at("来源事实"), at("详情")];
+    const order = [at("一句话总结"), at("直接整合"), at("深度分析"), at("价值信号"), at("怎么用"), at("来源事实"), at("详情")];
     expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(container.querySelector(".detail-main")!.firstElementChild!.classList.contains("deep-analysis")).toBe(true);
   });
 
   it.each(["running", "failed"] as const)(
@@ -131,7 +134,7 @@ describe("library detail page sections", () => {
 
   it("puts the score badge next to the title with the reason as its tooltip, not inline with the facts", async () => {
     const { container } = await renderDetail();
-    const badge = container.querySelector(".page-title .badge--score")!;
+    const badge = container.querySelector(".detail-hero .badge--score")!;
     expect(badge.textContent).toBe("★ 4/5");
     expect(badge.getAttribute("title")).toBe("成熟且好装");
     expect(container.querySelector(".source-facts")!.textContent).not.toContain("成熟且好装");
@@ -152,12 +155,12 @@ describe("library detail page sections", () => {
   it("always offers the 深度分析 section, and badges the title only once an analysis exists", async () => {
     const without = await renderDetail();
     expect(without.container.querySelector(".deep-analysis")).toBeTruthy();
-    expect(without.container.querySelector(".page-title .badge--deep")).toBeNull();
+    expect(without.container.querySelector(".detail-hero .badge--deep")).toBeNull();
     cleanup();
     vi.resetModules();
 
     const withDeep = await renderDetail({ deepAnalysis: DEEP, deepAnalysisOf: "2026-09-19T00:00:00.000Z" });
-    expect(withDeep.container.querySelector(".page-title .badge--deep")!.textContent).toBe("🔬 已深挖");
+    expect(withDeep.container.querySelector(".detail-hero .badge--deep")!.textContent).toBe("🔬 已深挖");
     expect(withDeep.container.querySelector(".deep-strip__headline")!.textContent).toBe("自托管的浏览器自动化框架");
   });
 
@@ -190,12 +193,12 @@ describe("library detail page sections", () => {
 
   it("shows a lighter 已补充调研 marker next to the title only when enrichedAt is set", async () => {
     const without = await renderDetail({ enrichedAt: null });
-    expect(without.container.querySelector(".page-title .badge--enriched")).toBeNull();
+    expect(without.container.querySelector(".detail-hero .badge--enriched")).toBeNull();
     cleanup();
     vi.resetModules();
 
     const withEnriched = await renderDetail({ enrichedAt: "2026-09-20T01:00:00.000Z" });
-    const badge = withEnriched.container.querySelector(".page-title .badge--enriched");
+    const badge = withEnriched.container.querySelector(".detail-hero .badge--enriched");
     expect(badge).toBeTruthy();
     expect(badge!.textContent).toContain("已补充调研");
   });
@@ -210,7 +213,8 @@ describe("library detail page sections", () => {
       expect(i, `missing: ${needle}`).toBeGreaterThan(-1);
       return i;
     };
-    expect(at("深度分析")).toBeLessThan(at("一句话总结"));
+    expect(at("深度分析")).toBeLessThan(at("价值信号"));
+    expect(container.querySelector(".detail-main")!.firstElementChild!.classList.contains("deep-analysis")).toBe(true);
   });
 
   describe("detail.sourceUrl vs 怎么用's playbook repo link (dedup)", () => {

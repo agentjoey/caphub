@@ -132,6 +132,9 @@ export const dictEn: Dict = {
     moreFooter: "{count} more · Next page"
   },
   detail: {
+    points: "Key points",
+    actionsTitle: "Actions",
+    archiveAria: "Record and actions",
     back: "← Library",
     createdAt: "Created {date}",
     summary: "Summary",
@@ -201,6 +204,7 @@ export const dictEn: Dict = {
     supersededGeneric: "Superseded"
   },
   statusControl: {
+    supersedeToggle: "Mark as superseded by another card…",
     title: "Validity status",
     markDeprecated: "Mark deprecated",
     restoreActive: "Restore to active",
