@@ -91,7 +91,9 @@ export const dictZh = {
     rerunning: "重跑中…",
     rerunFailed: "重跑失败，请稍后再试。",
     deletedBadge: "已删除",
-    view: "查看"
+    view: "查看",
+    stages: { read: "看图", watch: "看片", search: "搜索", reason: "分析", verdict: "裁决" },
+    stagesAria: "分析中：第 {n} 步，共 {total} 步，{stage}"
   },
   review: {
     title: "Review",

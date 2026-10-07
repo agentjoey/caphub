@@ -593,6 +593,22 @@ a.stat--accent:hover { background: color-mix(in srgb, var(--amber-soft) 70%, var
 
 .recent { margin-top: var(--space-10); }
 
+/* Live analysis (2026-10-08): a breathing amber dot marks anything still in flight; a running
+   capture lists its stages in mono, finished ones in ink, the current one bold, the rest faint. */
+.live-dot { display: inline-block; flex: none; width: 6px; height: 6px; margin-right: 6px; vertical-align: 0.1em; background: var(--amber-border); border-radius: 50%; animation: caphub-breathe 1.6s ease-in-out infinite; }
+.stages { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 0; font-family: var(--font-mono); font-size: var(--text-xs); line-height: 1.6; }
+.stages li { display: inline-flex; align-items: center; color: var(--ink-faint); }
+.stages li + li::before { content: "·"; margin: 0 7px; color: var(--hairline-strong); }
+.stages li[data-state="done"] { color: var(--ink-muted); }
+.stages li[data-state="current"] { color: var(--ink); font-weight: 600; }
+/* A capture the page watched finish: one amber wash fading out, no movement. */
+.list-row[data-arrived] { animation: caphub-arrived 1.4s var(--ease-out) both; }
+@keyframes caphub-arrived { from { background-color: var(--amber-soft); } to { background-color: transparent; } }
+@media (prefers-reduced-motion: reduce) {
+  /* The dot stops breathing; the stage text and the run-state badge carry the state alone. */
+  .live-dot { animation: none !important; }
+}
+
 /* Review item (Task 7): wraps CardSummary + AnalysisDetails + actions with a lifecycle state.
    Named .review-item (not .review-card) because .review-card is already CardSummary's inner
    thumb+content grid class (components/capability/card-summary.tsx) — reusing it here would

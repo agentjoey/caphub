@@ -26,6 +26,7 @@ import { libraryHref } from "../../../../lib/library/search-params";
 import { getRuntime } from "../../../../lib/runtime";
 import { getLocale } from "../../../../lib/i18n/locale";
 import { format, getDict } from "../../../../lib/i18n";
+import { PipelineWatcher } from "../../../../components/shell/pipeline-watcher";
 import { DetailActions } from "./detail-actions";
 
 export const dynamic = "force-dynamic";
@@ -80,8 +81,14 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   // M3.7 task 4: 待核实 (open_questions) slots in right after value signals, before 怎么用; the
   // right column's screenshot is now collapsed behind a closed-by-default <details> since it's a
   // provenance artifact, not the headline.
+  // Background work this page reports on (a rerun, a deep analysis, a DeepSeek re-review): keep
+  // re-rendering while any of it is in flight, so its result replaces the "refresh later" notice.
+  const inFlight = (state: string | null) => state === "queued" || state === "running";
+  const watching = inFlight(detail.runState) || inFlight(detail.deepRunState) || Boolean(detail.reviewRequestedAt);
+
   return (
     <div>
+      <PipelineWatcher active={watching} />
       <p className="back-link"><Link href="/library">{dict.detail.back}</Link></p>
       <div className="page-head">
         <div>

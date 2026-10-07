@@ -86,7 +86,9 @@ export const dictEn: Dict = {
     rerunning: "Rerunning…",
     rerunFailed: "Rerun failed, please try again later.",
     deletedBadge: "Deleted",
-    view: "View"
+    view: "View",
+    stages: { read: "Read", watch: "Watch", search: "Search", reason: "Analyze", verdict: "Verdict" },
+    stagesAria: "Analyzing: step {n} of {total}, {stage}"
   },
   review: {
     title: "Review",

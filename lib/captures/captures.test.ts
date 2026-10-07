@@ -142,4 +142,14 @@ describe("listRecentCaptures", () => {
     // own analysis (M3.6 fix round 2).
     expect(queryText).toContain("WHERE capture_id = c.id AND kind = 'analysis'");
   });
+
+  it("reads the succeeded steps of a running analysis only, for the live stage display", async () => {
+    let queryText = "";
+    const pool = { query: async (text: string) => { queryText = text; return { rows: [] }; } } as never;
+    await listRecentCaptures(pool, 20);
+    expect(queryText).toContain('AS "okSteps"');
+    // Only succeeded attempts move the stage on, and only while the run is still running.
+    expect(queryText).toMatch(/FILTER \(WHERE s\.ok\)/);
+    expect(queryText).toContain("s.run_id = r.id AND r.state = 'running'");
+  });
 });
