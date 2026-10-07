@@ -59,4 +59,26 @@ describe("PipelineWatcher", () => {
     document.dispatchEvent(new Event("visibilitychange"));
     expect(refresh).not.toHaveBeenCalled();
   });
+
+  it("holds off while the user is editing, so a refresh never re-seeds a lock token under an open form", () => {
+    render(<><PipelineWatcher active /><input aria-label="field" /></>);
+    (document.querySelector("input") as HTMLInputElement).focus();
+    vi.advanceTimersByTime(8000);
+    expect(refresh).not.toHaveBeenCalled();
+    (document.activeElement as HTMLElement).blur();
+    const editor = document.createElement("div");
+    editor.setAttribute("data-editing", "");
+    document.body.appendChild(editor);
+    vi.advanceTimersByTime(8000);
+    expect(refresh).not.toHaveBeenCalled();
+    editor.remove();
+    vi.advanceTimersByTime(4000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives up after its time limit, so a stuck queue does not poll forever", () => {
+    render(<PipelineWatcher active maxMs={10000} />);
+    vi.advanceTimersByTime(60000);
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
 });

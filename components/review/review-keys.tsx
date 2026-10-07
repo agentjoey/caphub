@@ -32,10 +32,18 @@ function isTypingTarget(target: EventTarget | null): boolean {
  */
 export function ReviewKeys({ total, labels }: { total: number; labels: { remaining: string; hint: string } }) {
   const [decided, setDecided] = useState(0);
+  // A server re-render (e.g. after revalidation) brings a fresh `total` that already excludes the
+  // cards decided here, so the local count starts over from it ("adjust state on prop change").
+  const [seenTotal, setSeenTotal] = useState(total);
+  if (total !== seenTotal) {
+    setSeenTotal(total);
+    setDecided(0);
+  }
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.metaKey || event.ctrlKey || event.altKey || isTypingTarget(event.target)) return;
+      // Auto-repeat would walk a held Y down the whole queue; IME composition is typing, not a command.
+      if (event.repeat || event.isComposing || event.metaKey || event.ctrlKey || event.altKey || isTypingTarget(event.target)) return;
       const key = event.key.toLowerCase();
       const cards = pendingCards();
       const focused = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>("[data-review-item]") ?? null;
@@ -48,6 +56,9 @@ export function ReviewKeys({ total, labels }: { total: number; labels: { remaini
       }
       const action = ACTION_FOR_KEY[key];
       if (!action) return;
+      // Focus on a card that is saving, decided or stale: that card can't act, and falling back to
+      // another card would decide something the user never looked at.
+      if (focused && index < 0) return;
       const card = index >= 0 ? cards[index] : cards[0];
       const button = card?.querySelector<HTMLButtonElement>(`button[data-action='${action}']`);
       if (!button || button.disabled) return;

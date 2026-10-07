@@ -48,7 +48,7 @@ export function SuggestionEditor({
   const isDisabled = disabled;
 
   return (
-    <div className="suggestion-editor">
+    <div className="suggestion-editor" data-editing="">
       <label htmlFor={typeId}>
         {dict.typeLabel}
         <select

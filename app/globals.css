@@ -92,6 +92,9 @@ a:hover { text-decoration-color: currentColor; }
   box-sizing: border-box;
 }
 
+/* Anchor jumps and Tab-scrolling stop clear of the sticky 60px header. */
+html { scroll-padding-top: 72px; }
+
 body {
   margin: 0;
   padding: 0;

@@ -99,4 +99,30 @@ describe("ReviewKeys", () => {
     expect(screen.getByText("剩余 1 张")).toBeTruthy();
     expect(document.activeElement?.id).toBe("b");
   });
+
+  it("ignores auto-repeat, so holding Y keeps one card, not the whole queue", () => {
+    renderQueue();
+    key("j");
+    key("y");
+    key("y", { repeat: true });
+    key("y", { repeat: true });
+    expect(clicks).toEqual(["a:keep"]);
+  });
+
+  it("does nothing when the focused card is busy or decided, instead of acting on another card", () => {
+    renderQueue([<Card key="a" id="a" />, <Card key="b" id="b" />]);
+    key("j");
+    document.getElementById("a")!.setAttribute("data-state", "saving");
+    key("y");
+    key("x");
+    expect(clicks).toEqual([]);
+  });
+
+  it("re-bases the count on the server's total when the page re-renders", () => {
+    const { rerender } = renderQueue();
+    act(() => { window.dispatchEvent(new CustomEvent(REVIEW_DONE_EVENT, { detail: { id: "a" } })); });
+    expect(screen.getByText("剩余 1 张")).toBeTruthy();
+    rerender(<ReviewKeys total={1} labels={{ remaining: "剩余 {count} 张", hint: "J/K 切换" }} />);
+    expect(screen.getByText("剩余 1 张")).toBeTruthy();
+  });
 });
