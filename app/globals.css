@@ -78,14 +78,12 @@ a:hover { text-decoration-color: currentColor; }
   --radius-xl: 16px;
   /* Pill: badges, chips, tags and buttons all share this one shape (M3.8 decision 3). */
   --radius-pill: 999px;
-  /* Motion (2026-10-08 refresh). Colour/border changes use --dur-1 and no movement; --ease-pop's
-     small overshoot is reserved for tiny confirmations (a badge flip, "copied"), never for
-     buttons or layout. Everything still passes through the reduced-motion kill switch below. */
+  /* Motion (2026-10-08 refresh). Colour/border changes use --dur-1 and no movement; nothing
+     overshoots. Everything still passes through the reduced-motion kill switch below. */
   --dur-1: 120ms;
   --dur-2: 200ms;
   --dur-3: 280ms;
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --ease-pop: cubic-bezier(0.2, 0.9, 0.3, 1.2);
 }
 
 ::selection { background: var(--amber); color: var(--amber-ink); }
@@ -238,21 +236,22 @@ body {
   background: var(--amber);
 }
 
-/* The sliding underline (primary-nav.tsx): one bar positioned on the current item, inset by the
-   link's own padding so it matches the static ::after it replaces once measured. */
+/* The sliding underline (primary-nav.tsx): a 1px-wide bar placed and stretched by transform
+   alone (translateX + scaleX, measured from the current link's text box), so moving it never
+   triggers layout. It replaces each link's static ::after once measured. */
 .primary-nav { position: relative; }
 .primary-nav[data-bar] a[aria-current="page"]::after { display: none; }
 .primary-nav__bar {
   position: absolute;
   left: 0;
   bottom: 0;
+  width: 1px;
   height: 2px;
   background: var(--amber);
-  background-clip: content-box;
-  padding: 0 var(--space-4);
+  transform-origin: 0 0;
   pointer-events: none;
 }
-.primary-nav__bar[data-moved] { transition: transform var(--dur-3) var(--ease-out), width var(--dur-3) var(--ease-out); }
+.primary-nav__bar[data-moved] { transition: transform var(--dur-3) var(--ease-out); }
 
 /* Language switch: a two-segment toggle */
 .lang-switch {
@@ -354,7 +353,7 @@ body {
   border-radius: var(--radius-sm);
 }
 .btn--primary .kbd { color: var(--amber-ink); background: color-mix(in srgb, var(--amber) 55%, white); border-color: var(--amber-border); }
-@media (pointer: coarse) {
+@media (pointer: coarse), (max-width: 600px) {
   .kbd { display: none; }
 }
 
@@ -389,7 +388,6 @@ body {
   }
   .primary-nav a { padding: 0 var(--space-3); }
   .primary-nav a[aria-current="page"]::after { left: 12px; right: 12px; }
-  .primary-nav__bar { padding: 0 var(--space-3); }
   .main-content {
     padding: var(--space-5) var(--space-4) 56px;
   }
@@ -641,7 +639,7 @@ a.badge--status-superseded:hover { border-color: var(--ink); }
 .review-keys { display: grid; justify-items: end; gap: 4px; text-align: right; }
 .review-keys__remaining { font-family: var(--font-mono); font-size: var(--text-sm); font-weight: 500; font-variant-numeric: tabular-nums; }
 .review-keys__hint { color: var(--ink-faint); font-family: var(--font-mono); font-size: var(--text-xs); }
-@media (pointer: coarse) {
+@media (pointer: coarse), (max-width: 600px) {
   .review-keys__hint { display: none; }
 }
 @media (max-width: 720px) {
@@ -835,8 +833,8 @@ a.video-moments__t:hover { color: var(--ink); }
 .code-block { display: flex; align-items: flex-start; gap: var(--space-3); padding: 9px 8px 9px 14px; background: var(--paper); border: 1px solid var(--hairline); border-radius: var(--radius-md); }
 .code-block pre { flex: 1; min-width: 0; margin: 0; padding-top: 2px; font-family: var(--font-mono); font-size: var(--text-sm); line-height: 1.6; color: var(--ink); }
 .code-block__copy { flex: none; }
-/* "已复制": one small settle — --ease-pop is for confirmations like this, never decoration. */
-.btn[data-status="copied"] { animation: caphub-pop var(--dur-2) var(--ease-pop); }
+/* "已复制": one small settle, a confirmation rather than decoration. */
+.btn[data-status="copied"] { animation: caphub-pop var(--dur-2) var(--ease-out); }
 @keyframes caphub-pop { from { transform: scale(0.94); } }
 .code-block__copy .btn { padding: 3px 10px; font-size: var(--text-xs); background: var(--paper-raised); }
 .playbook__repo { margin-top: var(--space-3); font-family: var(--font-mono); font-size: var(--text-sm); overflow-wrap: anywhere; }

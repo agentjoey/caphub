@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatDateTime } from "../../lib/library/format";
 import { format, getDict, type Locale } from "../../lib/i18n";
 import { parseYouTubeUrl } from "../../lib/analysis/material/youtube";
@@ -27,9 +27,17 @@ export interface CapturePreviewData {
  */
 function TileImage({ src, className, alt, fallback }: { src: string; className: string; alt: string; fallback: string }) {
   const [failed, setFailed] = useState(false);
+  const ref = useRef<HTMLImageElement>(null);
+  // An image that already failed while the page was server-rendered HTML (before hydration
+  // attached onError — a quick 404 for a purged original) never fires onError again, so check
+  // once on mount as well.
+  useEffect(() => {
+    const img = ref.current;
+    if (img && img.complete && img.naturalWidth === 0) setFailed(true);
+  }, []);
   if (failed) return <span className={className}>{fallback}</span>;
   // eslint-disable-next-line @next/next/no-img-element -- images are served by the access-guarded /api/objects proxy
-  return <img className={className} src={src} loading="lazy" alt={alt} onError={() => setFailed(true)} />;
+  return <img ref={ref} className={className} src={src} loading="lazy" alt={alt} onError={() => setFailed(true)} />;
 }
 
 function FullImage({ originalSrc, thumbSrc, purged, purgeDate, locale }: {
@@ -40,6 +48,12 @@ function FullImage({ originalSrc, thumbSrc, purged, purgeDate, locale }: {
   // `clientFailed` is only a local <img onError>: it swaps to the thumbnail (a broken original
   // may just be a transient load failure) but never asserts a purge the server hasn't confirmed.
   const [clientFailed, setClientFailed] = useState(false);
+  const originalRef = useRef<HTMLImageElement>(null);
+  // Same pre-hydration failure check as TileImage.
+  useEffect(() => {
+    const img = originalRef.current;
+    if (img && img.complete && img.naturalWidth === 0) setClientFailed(true);
+  }, []);
   const showThumb = purged || clientFailed || !originalSrc;
   if (showThumb) {
     if (!thumbSrc) return <span className="capture-full">{dict.noImage}</span>;
@@ -53,7 +67,7 @@ function FullImage({ originalSrc, thumbSrc, purged, purgeDate, locale }: {
   }
   return (
     // eslint-disable-next-line @next/next/no-img-element -- images are served by the access-guarded /api/objects proxy
-    <img className="capture-full" src={originalSrc} loading="lazy" alt={dict.fullAlt} onError={() => setClientFailed(true)} />
+    <img ref={originalRef} className="capture-full" src={originalSrc} loading="lazy" alt={dict.fullAlt} onError={() => setClientFailed(true)} />
   );
 }
 

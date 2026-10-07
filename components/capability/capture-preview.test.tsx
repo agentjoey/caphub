@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { CapturePreview, CollapsedCapturePreview, type CapturePreviewData } from "./capture-preview";
 import { formatDateTime } from "../../lib/library/format";
@@ -20,6 +20,18 @@ describe("CapturePreview (thumb size)", () => {
   it("falls back to the original when no thumbnail exists yet", () => {
     render(<CapturePreview capture={{ ...baseImage, thumbKey: null }} size="thumb" />);
     expect(screen.getByRole("img").getAttribute("src")).toBe(`/api/objects/${baseImage.objectKey}`);
+  });
+
+  it("also catches a tile that failed before hydration (onError already missed)", () => {
+    const complete = vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(true);
+    const width = vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(0);
+    try {
+      render(<CapturePreview capture={{ ...baseImage, thumbKey: null }} size="thumb" />);
+      expect(screen.queryByRole("img")).toBeNull();
+    } finally {
+      complete.mockRestore();
+      width.mockRestore();
+    }
   });
 
   it("swaps a failed tile (purged original, no thumbnail) for the no-image placeholder instead of a broken image", () => {

@@ -31,9 +31,14 @@ export function PrimaryNav({
     if (!nav) return;
     const place = () => {
       const current = nav.querySelector<HTMLElement>("a[aria-current='page']");
-      setBar((prev) => current
-        ? { left: current.offsetLeft, width: current.offsetWidth, moved: prev !== null }
-        : null);
+      if (!current) return setBar(null);
+      // Match the static underline: the link's box minus its horizontal padding.
+      const style = getComputedStyle(current);
+      const padLeft = parseFloat(style.paddingLeft) || 0;
+      const padRight = parseFloat(style.paddingRight) || 0;
+      const left = current.offsetLeft + padLeft;
+      const width = Math.max(0, current.offsetWidth - padLeft - padRight);
+      setBar((prev) => ({ left, width, moved: prev !== null }));
     };
     place();
     // Labels change width when the web font arrives or the locale switches.
@@ -63,7 +68,7 @@ export function PrimaryNav({
           className="primary-nav__bar"
           aria-hidden="true"
           data-moved={bar.moved ? "" : undefined}
-          style={{ transform: `translateX(${bar.left}px)`, width: bar.width }}
+          style={{ transform: `translateX(${bar.left}px) scaleX(${bar.width})` }}
         />
       )}
     </nav>
