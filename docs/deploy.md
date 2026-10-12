@@ -47,8 +47,30 @@ Not on `web`: provider keys, Telegram variables.
 - `GEMINI_VIDEO_MODEL` — optional, defaults to `gemini-3.8-flash`; the Gemini model used for YouTube video analysis.
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_OWNER_CHAT_ID` — required when `TELEGRAM_ENABLED=true`
 - `PIPELINE`, `VERDICT_AUTO_THRESHOLD`, `ANALYSIS_ENABLED`, `RETENTION_ENABLED`, `TELEGRAM_ENABLED`
+- `WORKER_WAKE_PORT` — optional, defaults to `8787`; the private wake endpoint (see "Idle sleep" below).
+- `WORKER_IDLE_POLL_MS` — optional, defaults to 3 hours (minimum 1 minute); how long the worker sleeps before checking the queue on its own.
 
 Not on `worker`: `CF_ACCESS_AUD`, `CF_ACCESS_TEAM_DOMAIN`.
+
+`web` optionally takes `WORKER_WAKE_URL`; on Railway it defaults to `http://worker.railway.internal:8787/wake` (the worker service's private address), so it only needs setting if the worker service is renamed or the port changes.
+
+### Idle sleep (2026-10-12)
+
+The worker no longer polls the database while idle. Polling every 2 s kept the Neon compute awake 24/7: 80 CU-hrs used in the first 11 days of October, against a free quota of 100 a month. Neon suspends the compute after 5 minutes without queries.
+
+- **Busy:** the worker checks every 2 s.
+- **Going to sleep:** after ~30 s with nothing to do, and once nothing is queued or running in `analysis_runs`, it logs `{"worker":"sleeping"}` and stops querying.
+- **Waking:**
+  - The `web` service POSTs to `worker:8787/wake` over Railway's private network after every server action, every `/api/captures` POST and every MCP write.
+  - The Telegram loop wakes it in-process after handling updates.
+  - It also wakes on its own after `WORKER_IDLE_POLL_MS`.
+- **While asleep:**
+  - The Telegram long poll keeps running; its offset is cached in memory, so an empty poll touches no database.
+  - The notify push only runs after work was done.
+  - The retention sweep runs daily rather than hourly.
+- **Failures:**
+  - If the wake endpoint can't start (the port is taken), the worker logs `{"wakeServer":"failed"}` and falls back to polling every 2 s.
+  - A failed wake is logged on `web` as `{"event":"worker_wake_failed"}` and costs latency only: the run is picked up at the next self-wake.
 
 Local scripts (role `script`: `npm run migrate`, `npm run import:v1`, `npm run spike`):
 
@@ -98,7 +120,7 @@ the Railway dashboard ("Redeploy" on the prior deployment), rather than revertin
 
 - Both `web` and `worker`: replicas = 1.
 - `web`: Railway app sleeping enabled where the plan supports it (idles when there is no traffic).
-- `worker`: sleeping disabled — it must keep running to poll the run queue and sweep retention.
+- `worker`: sleeping disabled. It must keep running to receive wakes, long-poll Telegram and sweep retention, but it leaves the database alone while idle (see "Idle sleep").
 
 ## M2.5 release
 
@@ -144,7 +166,7 @@ that would otherwise open up during a rolling release:
    END $$;
    ```
 5. **Confirm the embed tick has drained.** Should reach `0` within a few minutes of the backfills
-   finishing (the worker loop polls every 2s when idle):
+   finishing (the worker loop polls every 2s while busy; the backfill scripts' writes don't wake it, so redeploy or `curl -X POST` its wake endpoint from another service if it is asleep):
    ```sql
    SELECT count(*) FROM caphub_v2.capabilities
    WHERE deleted_at IS NULL AND (embedding IS NULL OR embedded_at < updated_at);

@@ -116,3 +116,18 @@ describe("enqueueEnrichRun", () => {
     await expect(enqueueEnrichRun(pool as never, "cap_1", "mixed")).rejects.toThrow("boom");
   });
 });
+
+describe("RunQueue.hasOpenRuns", () => {
+  it("asks for any queued or running run of the kinds this worker can process", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const pool = { query: async (text: string, values: unknown[] = []) => { calls.push({ text, values }); return { rows: [{ open: true }] }; } } as never;
+    expect(await new RunQueue(pool).hasOpenRuns(["analysis", "enrich"])).toBe(true);
+    expect(calls[0].text).toContain("state IN ('queued', 'running') AND kind = ANY($1)");
+    expect(calls[0].values).toEqual([["analysis", "enrich"]]);
+  });
+
+  it("is false for an empty answer", async () => {
+    const pool = { query: async () => ({ rows: [{ open: false }] }) } as never;
+    expect(await new RunQueue(pool).hasOpenRuns(["analysis"])).toBe(false);
+  });
+});

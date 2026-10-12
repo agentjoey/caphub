@@ -8,8 +8,12 @@ import {
 import type { Progress } from "../lib/library/labels";
 import { getLocale } from "../lib/i18n/locale";
 import { getRuntime } from "../lib/runtime";
+import { wakeWorker } from "../lib/worker/wake";
 
-function refresh() { revalidatePath("/", "layout"); }
+// Every action here writes a capability or queues a run, i.e. may leave work for the worker (a
+// run to claim, a review to do, an embedding gone stale) — so each one also wakes it, since it no
+// longer polls while idle (lib/worker/wake.ts). The wake is fire-and-forget and never throws.
+function refresh() { revalidatePath("/", "layout"); wakeWorker("web-action"); }
 
 export async function decideAction(id: string, expectedUpdatedAt: string, verdict: "keep" | "discard"): Promise<ActionResult> {
   const locale = await getLocale();

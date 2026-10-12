@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { CaptureDeps, CaptureUpdate } from "./capture";
 import type { CommandDeps, CommandParams } from "./commands";
 import type { CallbackDecoded, HandleCallbackDeps } from "./decide";
-import { runTelegramTick, type TelegramLoopDeps } from "./loop";
+import { runTelegramTick, type OffsetCache, type TelegramLoopDeps } from "./loop";
 import { encodeDecision } from "./router";
 import type { SearchDeps, SearchParams } from "./search";
 import type { TelegramUpdate } from "./api";
@@ -233,5 +233,42 @@ describe("runTelegramTick", () => {
     const result = await runTelegramTick(baseDeps({ api }), controller.signal);
     expect(result).toEqual({ kind: "idle" });
     expect(api.calls).toHaveLength(0);
+  });
+
+  it("with an offset cache, reads the stored offset once and then not again while idle", async () => {
+    const { pool, calls } = fakePool(42);
+    const api = fakeGetUpdates([[], [], []]);
+    const offsetCache: OffsetCache = { loaded: false, value: undefined };
+    const deps = baseDeps({ pool, api, offsetCache, minIdleIntervalMs: 0 });
+    for (let i = 0; i < 3; i++) await runTelegramTick(deps, new AbortController().signal);
+    expect(calls.filter((c) => c.text.includes("SELECT value FROM caphub_v2.telegram_state"))).toHaveLength(1);
+    expect(calls).toHaveLength(1);
+    expect(api.calls.map((c) => c.offset)).toEqual([42, 42, 42]);
+  });
+
+  it("keeps the cache in step with each persisted offset", async () => {
+    const { pool } = fakePool(10);
+    const update = { update_id: 10, message: { message_id: 1, chat: { id: 999 }, text: "hi" } } as unknown as TelegramUpdate;
+    const api = fakeGetUpdates([[update], []]);
+    const offsetCache: OffsetCache = { loaded: false, value: undefined };
+    const deps = baseDeps({ pool, api, offsetCache, minIdleIntervalMs: 0 });
+    await runTelegramTick(deps, new AbortController().signal);
+    expect(offsetCache).toEqual({ loaded: true, value: 11 });
+    await runTelegramTick(deps, new AbortController().signal);
+    expect(api.calls.map((c) => c.offset)).toEqual([10, 11]);
+  });
+
+  it("drops the cache when an offset write fails, so the next tick re-reads what was really persisted", async () => {
+    const calls: string[] = [];
+    const pool = { query: async (text: string) => {
+      calls.push(text);
+      if (text.includes("INSERT INTO caphub_v2.telegram_state")) throw new Error("db down");
+      return { rows: [{ value: "5" }] };
+    } } as never;
+    const update = { update_id: 5, message: { message_id: 1, chat: { id: 999 }, text: "hi" } } as unknown as TelegramUpdate;
+    const offsetCache: OffsetCache = { loaded: false, value: undefined };
+    const deps = baseDeps({ pool, api: fakeGetUpdates([[update]]), offsetCache, minIdleIntervalMs: 0 });
+    await runTelegramTick(deps, new AbortController().signal);
+    expect(offsetCache.loaded).toBe(false);
   });
 });

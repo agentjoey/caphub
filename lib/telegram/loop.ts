@@ -47,10 +47,19 @@ export interface TelegramLoopDeps {
   search: SearchDeps;
   callback: HandleCallbackDeps;
   handlers?: Partial<TelegramLoopHandlers>;
+  /**
+   * In-memory copy of the persisted offset (2026-10-12 Neon fix): with it, an idle poll — the
+   * common case, every ~25 s around the clock — touches no database at all. Read from the database
+   * once, then kept in step with every successful write; dropped after a failed write so the next
+   * tick re-reads what was really persisted. Omitted, every tick reads the offset as before.
+   */
+  offsetCache?: OffsetCache;
   /** Overrides {@link MIN_IDLE_INTERVAL_MS} — test-only (production always uses the real floor). */
   minIdleIntervalMs?: number;
   log?: (o: Record<string, unknown>) => void;
 }
+
+export interface OffsetCache { loaded: boolean; value: number | undefined }
 
 export type TelegramTickOutcome =
   | { kind: "idle" }
@@ -144,7 +153,12 @@ export async function runTelegramTick(deps: TelegramLoopDeps, signal: AbortSigna
 
   let offset: number | undefined;
   try {
-    offset = await loadOffset(deps.pool, deps.log);
+    if (deps.offsetCache?.loaded) {
+      offset = deps.offsetCache.value;
+    } else {
+      offset = await loadOffset(deps.pool, deps.log);
+      if (deps.offsetCache) Object.assign(deps.offsetCache, { loaded: true, value: offset });
+    }
   } catch (error) {
     deps.log?.({ telegram: "load-offset-failed", error: errorMessage(error) });
     return { kind: "error", reason: "load-offset-failed" };
@@ -183,7 +197,9 @@ export async function runTelegramTick(deps: TelegramLoopDeps, signal: AbortSigna
     }
     try {
       await saveOffset(deps.pool, update.update_id + 1);
+      if (deps.offsetCache) deps.offsetCache.value = update.update_id + 1;
     } catch (error) {
+      if (deps.offsetCache) deps.offsetCache.loaded = false;
       // The offset write itself failed — stop here rather than risk drifting silently. The next
       // tick retries from the last successfully persisted offset, so this update (and any after
       // it in this batch) may be reprocessed, which every handler tolerates (capture dedupes,

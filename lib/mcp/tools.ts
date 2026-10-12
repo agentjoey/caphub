@@ -9,6 +9,7 @@ import { getCapabilityDetail, libraryStats, listLibrary, listTodoCapabilities, P
 import { matchScenarios } from "../library/scenario-match";
 import { formatSerial, parseSerialQuery } from "../library/serial";
 import { resolveSerial } from "./serial";
+import { wakeWorker } from "../worker/wake";
 
 export { resolveSerial } from "./serial";
 
@@ -168,10 +169,12 @@ export async function setBuildProgress(deps: ToolDeps, input: SetBuildProgressIn
   if (!card) return { ok: false, error: `找不到编号 ${input.serial}` };
   const r = await setProgress(deps.pool, { id: card.id, expectedUpdatedAt: card.updatedAt, progress: input.progress as Progress, link: input.link ?? null });
   if (!r.ok) return { ok: false, error: r.message };
-  if (!input.note) return { ok: true, serial: input.serial, progress: input.progress };
+  // Each write bumps the card's updated_at, so its embedding goes stale: wake the worker to redo it.
+  if (!input.note) { wakeWorker("mcp-write"); return { ok: true, serial: input.serial, progress: input.progress }; }
   const note = normalizeNote({ by: input.by, text: input.note });
-  if (!note) return { ok: true, serial: input.serial, progress: input.progress, noteSkipped: "笔记为空或超过 2000 字" };
+  if (!note) { wakeWorker("mcp-write"); return { ok: true, serial: input.serial, progress: input.progress, noteSkipped: "笔记为空或超过 2000 字" }; }
   const n = await appendBuildNote(deps.pool, { id: card.id, expectedUpdatedAt: r.updatedAt, note });
+  wakeWorker("mcp-write");
   return n.ok
     ? { ok: true, serial: input.serial, progress: input.progress, noteCount: 1 }
     : { ok: false, error: n.message };
@@ -190,5 +193,6 @@ export async function appendNote(deps: ToolDeps, input: AppendNoteInput): Promis
   const note = normalizeNote({ by: input.by, text: input.note });
   if (!note) return { ok: false, error: "笔记为空或超过 2000 字" };
   const n = await appendBuildNote(deps.pool, { id: card.id, expectedUpdatedAt: card.updatedAt, note });
+  if (n.ok) wakeWorker("mcp-write");
   return n.ok ? { ok: true, serial: input.serial, noteCount: 1 } : { ok: false, error: n.message };
 }

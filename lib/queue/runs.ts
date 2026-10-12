@@ -147,6 +147,17 @@ export class RunQueue {
     return r.rowCount === 1;
   }
 
+  /**
+   * Whether any run of the given kinds is still queued or running. The worker checks this before it
+   * goes to sleep (lib/worker/idle.ts): a run it couldn't claim yet — queued behind another
+   * instance's still-live lease, say, during a deploy — must keep it polling, not sleeping.
+   */
+  async hasOpenRuns(kinds: RunKind[]): Promise<boolean> {
+    const r = await this.pool.query<{ open: boolean }>(
+      "SELECT EXISTS (SELECT 1 FROM caphub_v2.analysis_runs WHERE state IN ('queued', 'running') AND kind = ANY($1)) AS open", [kinds]);
+    return r.rows[0]?.open === true;
+  }
+
   async summary(): Promise<Array<{ state: string; count: number }>> {
     const r = await this.pool.query<{ state: string; count: string }>("SELECT state, count(*)::text AS count FROM caphub_v2.analysis_runs GROUP BY state ORDER BY state");
     return r.rows.map((x) => ({ state: x.state, count: Number(x.count) }));
