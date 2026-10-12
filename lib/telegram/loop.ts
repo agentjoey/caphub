@@ -169,6 +169,9 @@ export async function runTelegramTick(deps: TelegramLoopDeps, signal: AbortSigna
   try {
     updates = await deps.api.getUpdates({ offset, timeout: POLL_TIMEOUT_SECONDS, signal });
   } catch (error) {
+    // Another instance may be polling too (a deploy overlap shows up as 409s) and persisting
+    // offsets of its own: re-read the stored offset next time rather than trust the cache.
+    if (deps.offsetCache) deps.offsetCache.loaded = false;
     deps.log?.({ telegram: "get-updates-failed", error: errorMessage(error) });
     return { kind: "error", reason: "get-updates-failed", retryAfterMs: retryAfterMs(error) };
   }

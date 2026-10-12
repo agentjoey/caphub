@@ -102,7 +102,7 @@ export class Waker {
  * bound for Railway's private network only (the worker has no public domain), and a wake is
  * harmless — at worst one extra empty poll.
  */
-export function startWakeServer(opts: { port: number; host?: string; onWake: () => void }): Promise<Server> {
+export function startWakeServer(opts: { port: number; host?: string; onWake: () => void; onError?: (error: Error) => void }): Promise<Server> {
   const server = createServer((request, response) => {
     if (request.method === "POST" && request.url === "/wake") {
       opts.onWake();
@@ -116,6 +116,9 @@ export function startWakeServer(opts: { port: number; host?: string; onWake: () 
     // "::" accepts IPv6 (Railway private networking) and, on dual-stack hosts, IPv4 as well.
     server.listen(opts.port, opts.host ?? "::", () => {
       server.off("error", reject);
+      // A later server-level error (e.g. EMFILE on accept) must not become an uncaught exception
+      // that kills the worker; a lost wake only costs latency.
+      server.on("error", (error) => opts.onError?.(error));
       resolve(server);
     });
   });

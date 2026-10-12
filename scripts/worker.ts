@@ -103,6 +103,11 @@ async function runTelegramLoop(wiring: TelegramWiring, demand: NotifyDemand, log
       if (result.kind === "error") {
         log({ telegramTick: result });
         pollBackoff.onError(result.retryAfterMs);
+        // A failed offset write comes after its update was already handled (maybe queuing a run).
+        if (result.reason === "save-offset-failed") {
+          demand.due += 1;
+          wakeWorker("telegram");
+        }
       } else {
         if (result.kind === "processed") {
           log({ telegramTick: result });
@@ -243,7 +248,11 @@ async function main() {
       setLocalWakeHook(() => waker.wake());
       const port = Number(process.env.WORKER_WAKE_PORT) || DEFAULT_WAKE_PORT;
       try {
-        wakeServer = await startWakeServer({ port, onWake: () => waker.wake() });
+        wakeServer = await startWakeServer({
+          port,
+          onWake: () => waker.wake(),
+          onError: (error) => log({ wakeServer: "error", error: error.message })
+        });
         canSleep = true;
         log({ wakeServer: "listening", port, idlePollMs: idlePolicy.idlePollMs });
       } catch (e) {
@@ -251,6 +260,10 @@ async function main() {
       }
     }
 
+    // Set while the embed tick is failing or backed off: stale embeddings aren't runs, so
+    // hasOpenRuns can't see them — the sleep is then cut to the backoff's remaining wait instead
+    // of the full idle poll, so the retry happens on the backoff's own schedule.
+    let embedRetryPending = false;
     let nextRetention = 0;
     do {
       // Whether this cycle did anything; drives the idle sleep below.
@@ -339,11 +352,13 @@ async function main() {
             if (reviewState === "idle" && embedCall) {
               if (embedBackoff.shouldSkip()) {
                 log({ embedTick: "skipped-backoff" });
+                embedRetryPending = true;
               } else {
                 try {
                   const embedState = await runEmbedTick({ pool, embed: embedCall, log }, controller.signal);
                   if (embedState !== "idle") log({ embedTick: embedState });
                   if (embedState === "embedded") busy = true;
+                  embedRetryPending = embedState === "error";
                   if (embedState === "error") embedBackoff.onError();
                   else embedBackoff.reset();
                 } catch (e) {
@@ -362,8 +377,11 @@ async function main() {
       if (busy) notifyDemand.due += 1;
       idle.record(busy);
       if (canSleep && idle.maySleep() && !(config.analysisEnabled && await hasOpenRuns(queue, openKinds, log))) {
-        log({ worker: "sleeping", maxMs: idlePolicy.idlePollMs });
-        const woke = await waker.wait(idlePolicy.idlePollMs, controller.signal);
+        const sleepMs = embedRetryPending
+          ? Math.min(idlePolicy.idlePollMs, Math.max(embedBackoff.remainingMs(), idlePolicy.busyIntervalMs))
+          : idlePolicy.idlePollMs;
+        log({ worker: "sleeping", maxMs: sleepMs });
+        const woke = await waker.wait(sleepMs, controller.signal);
         if (woke !== "aborted") log({ worker: woke === "woken" ? "woken" : "self-wake" });
         idle.reset();
       } else {

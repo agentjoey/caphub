@@ -71,6 +71,8 @@ The worker no longer polls the database while idle. Polling every 2 s kept the N
 - **Failures:**
   - If the wake endpoint can't start (the port is taken), the worker logs `{"wakeServer":"failed"}` and falls back to polling every 2 s.
   - A failed wake is logged on `web` as `{"event":"worker_wake_failed"}` and costs latency only: the run is picked up at the next self-wake.
+  - If the embedding provider is failing, the worker sleeps only until its embed backoff expires, not for the full idle poll.
+- **Scripts run from a laptop** (`backfill-*`, `import-v1`, `spike`) write to the database without waking the worker. After running one, redeploy or restart `worker`, or wait for its self-wake.
 
 Local scripts (role `script`: `npm run migrate`, `npm run import:v1`, `npm run spike`):
 

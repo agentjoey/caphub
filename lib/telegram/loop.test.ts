@@ -258,6 +258,14 @@ describe("runTelegramTick", () => {
     expect(api.calls.map((c) => c.offset)).toEqual([10, 11]);
   });
 
+  it("drops the cache when getUpdates fails (e.g. a 409 from an overlapping instance)", async () => {
+    const offsetCache: OffsetCache = { loaded: true, value: 7 };
+    const api = { getUpdates: async () => { throw new TelegramError(409, "Conflict"); } };
+    const deps = baseDeps({ api, offsetCache, minIdleIntervalMs: 0 });
+    await runTelegramTick(deps, new AbortController().signal);
+    expect(offsetCache.loaded).toBe(false);
+  });
+
   it("drops the cache when an offset write fails, so the next tick re-reads what was really persisted", async () => {
     const calls: string[] = [];
     const pool = { query: async (text: string) => {
