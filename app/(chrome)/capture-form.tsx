@@ -11,10 +11,10 @@ function formatBytes(bytes: number) {
   return bytes < 1024 * 1024 ? `${Math.max(1, Math.ceil(bytes / 1024))} KiB` : `${Number((bytes / 1024 / 1024).toFixed(2))} MiB`;
 }
 
-export function CaptureForm({ locale = "zh" }: { locale?: Locale }) {
+export function CaptureForm({ locale = "zh", onSubmitted, initialFile }: { locale?: Locale; onSubmitted?: () => void; initialFile?: File | null }) {
   const dict = getDict(locale).captureForm;
   const router = useRouter();
-  const [file, setFile] = useState<File | null>(null);
+  const [file, setFile] = useState<File | null>(() => initialFile && ACCEPTED_MIME.has(initialFile.type) ? initialFile : null);
   const [sourceUrl, setSourceUrl] = useState("");
   const [text, setText] = useState("");
   const [pending, setPending] = useState(false);
@@ -101,6 +101,7 @@ export function CaptureForm({ locale = "zh" }: { locale?: Locale }) {
         setDuplicateNotice(true);
         setDuplicateCapabilityId(payload.capabilityId ?? null);
       }
+      if (!payload.duplicate) onSubmitted?.();
       router.refresh();
     } catch {
       setError(dict.submitFailed);

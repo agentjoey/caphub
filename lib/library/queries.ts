@@ -433,3 +433,18 @@ export async function getCapabilityDetail(pool: Q, id: string): Promise<Capabili
     video
   };
 }
+
+/** Unpaged home queue: unlike Review's fixed PAGE_SIZE, the desk needs up to 24. */
+export async function listPendingForDesk(pool: Q, limit: number): Promise<CapabilityRow[]> {
+  return (await pool.query<CapabilityRow>(`SELECT ${CARD_COLUMNS}
+    FROM caphub_v2.capabilities cb JOIN caphub_v2.captures c ON c.id = cb.capture_id
+    WHERE cb.verdict = 'pending' AND cb.deleted_at IS NULL
+    ORDER BY cb.created_at DESC, cb.id LIMIT $1`, [limit])).rows.map(toIso);
+}
+
+export async function listLatestKept(pool: Q, limit = 5): Promise<CapabilityRow[]> {
+  return (await pool.query<CapabilityRow>(`SELECT ${CARD_COLUMNS}
+    FROM caphub_v2.capabilities cb JOIN caphub_v2.captures c ON c.id = cb.capture_id
+    WHERE cb.verdict = 'keep' AND cb.status = 'active' AND cb.deleted_at IS NULL
+    ORDER BY cb.updated_at DESC, cb.id LIMIT $1`, [limit])).rows.map(toIso);
+}

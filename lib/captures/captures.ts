@@ -116,3 +116,20 @@ export async function listRecentCaptures(pool: Pool, limit = 20): Promise<Recent
      ORDER BY c.created_at DESC LIMIT $1`, [limit]);
   return rows;
 }
+
+/** Latest analysis runs across all captures, including old queued work. */
+export async function listDeskRunning(pool: Pick<Pool, "query">): Promise<RecentCapture[]> {
+  const { rows } = await pool.query<RecentCapture>(
+    `SELECT c.id, c.kind, c.created_at AS "createdAt", r.state AS "runState", cb.id AS "capabilityId", r.error_code AS "errorCode",
+            c.object_key AS "objectKey", c.thumb_key AS "thumbKey", left(c.text, 140) AS text, c.url, cb.title, cb.verdict, (cb.deleted_at IS NOT NULL) AS deleted,
+            st.ok_steps AS "okSteps"
+     FROM caphub_v2.captures c
+     LEFT JOIN LATERAL (SELECT id, state, error_code FROM caphub_v2.analysis_runs WHERE capture_id = c.id AND kind = 'analysis' ORDER BY created_at DESC LIMIT 1) r ON true
+     LEFT JOIN LATERAL (SELECT coalesce(array_agg(DISTINCT s.step) FILTER (WHERE s.ok), '{}') AS ok_steps
+                        FROM caphub_v2.analysis_steps s WHERE s.run_id = r.id AND r.state = 'running') st ON true
+     LEFT JOIN caphub_v2.capabilities cb ON cb.capture_id = c.id
+     WHERE r.state IN ('queued', 'running')
+       AND (cb.id IS NULL OR (cb.verdict = 'pending' AND cb.deleted_at IS NULL))
+     ORDER BY c.created_at DESC, c.id`);
+  return rows.map(row => ({ ...row, createdAt: new Date(row.createdAt).toISOString() }));
+}

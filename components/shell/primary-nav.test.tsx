@@ -11,7 +11,7 @@ afterEach(cleanup);
 describe("PrimaryNav", () => {
   it("falls back to the zh NAV_ITEMS labels when no labels prop is given", () => {
     render(<PrimaryNav />);
-    expect(screen.getByRole("link", { name: "投递" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "桌面" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Review" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "能力库" })).toBeTruthy();
   });
