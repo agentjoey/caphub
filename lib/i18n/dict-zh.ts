@@ -12,7 +12,7 @@ export const dictZh = {
     homeAria: "Caphub 首页",
     brandSub: "能力库",
     navAria: "主导航",
-    navCapture: "投递",
+    navCapture: "桌面",
     navReview: "Review",
     navLibrary: "能力库",
     langSwitchAria: "切换界面语言",
@@ -42,6 +42,29 @@ export const dictZh = {
       fallback: "分析失败（{code}）"
     }
   },
+  desk: {
+    "search": "搜能力、标签，或输入编号 SKL-0157",
+    "capture": "投一张",
+    "items": "桌上的卡片",
+    "running": "分析中的投递",
+    "failed": "分析失败的投递",
+    "empty": "桌上没有要看的。投一张，或者搜一搜库里已有的。",
+    "count": "桌上 {count} 张要看",
+    "overflow": "还有 {count} 张在 Review",
+    "hint": "点纸团展开；按住可以拖开，甩一下扔出去",
+    "library": "库里 {count} 张",
+    "openLibrary": "打开能力库",
+    "list": "换成列表",
+    "scene": "换成桌面",
+    "back": "放回桌上",
+    "detail": "打开详情",
+    "close": "关闭",
+    "kept": "已保留：{title}",
+    "discarded": "已丢弃：{title}",
+    "queued": "已排队重跑",
+    "toolbar": "卡片动作",
+    "searchButton": "搜索"
+},
   home: {
     title: "投递一个能力。",
     subtitle: "上传截图、文字或链接，跟进分析并决定是否建档。",

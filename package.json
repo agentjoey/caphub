@@ -19,6 +19,7 @@
     "@aws-sdk/client-s3": "^3.1134.0",
     "@tesseract.js-data/chi_sim": "^1.0.0",
     "@tesseract.js-data/eng": "^1.0.0",
+    "cannon-es": "0.20.0",
     "jose": "^6.0.0",
     "next": "16.3.3",
     "pg": "^8.23.0",
@@ -27,6 +28,7 @@
     "server-only": "^0.0.1",
     "sharp": "^0.35.4",
     "tesseract.js": "^7.0.0",
+    "three": "0.181.2",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -36,6 +38,7 @@
     "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/three": "0.181.0",
     "eslint": "^9",
     "eslint-config-next": "16.3.3",
     "jsdom": "^29.1.1",

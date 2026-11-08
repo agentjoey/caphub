@@ -1,5 +1,5 @@
 export const NAV_ITEMS = [
-  { href: "/", label: "投递" },
+  { href: "/", label: "桌面" },
   { href: "/review", label: "Review" },
   { href: "/library", label: "能力库" }
 ] as const;

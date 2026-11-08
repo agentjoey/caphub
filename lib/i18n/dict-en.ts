@@ -7,7 +7,7 @@ export const dictEn: Dict = {
     homeAria: "Caphub home",
     brandSub: "Library",
     navAria: "Primary navigation",
-    navCapture: "Capture",
+    navCapture: "Desk",
     navReview: "Review",
     navLibrary: "Library",
     langSwitchAria: "Switch interface language",
@@ -37,6 +37,29 @@ export const dictEn: Dict = {
       fallback: "Analysis failed ({code})"
     }
   },
+  desk: {
+    "search": "Search capabilities, tags, or a serial like SKL-0157",
+    "capture": "Add a paper",
+    "items": "Cards on the desk",
+    "running": "Capture being analyzed",
+    "failed": "Failed capture",
+    "empty": "Nothing to review. Add a paper, or search your library.",
+    "count": "{count} papers to review",
+    "overflow": "{count} more in Review",
+    "hint": "Click to unfold; hold to drag, release to throw",
+    "library": "{count} in the library",
+    "openLibrary": "Open library",
+    "list": "Switch to list",
+    "scene": "Switch to desk",
+    "back": "Put back",
+    "detail": "Open detail",
+    "close": "Close",
+    "kept": "Kept: {title}",
+    "discarded": "Discarded: {title}",
+    "queued": "Queued for analysis",
+    "toolbar": "Card actions",
+    "searchButton": "Search"
+},
   home: {
     title: "Capture a capability.",
     subtitle: "Upload a screenshot, text, or a link, then follow up on the analysis and decide whether to file it.",
